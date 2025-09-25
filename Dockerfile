@@ -9,13 +9,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# 创建非 root 用户 outline(2000:2000)
+RUN groupadd -g 2000 outline && useradd -m -u 2000 -g 2000 outline
+
 WORKDIR /app
 
-# 仅使用内置包（virtualenv 已配置），但为了运行需要安装 psycopg2-binary 与 requests 替代（此处避免额外包管理器声明，直接 pip）
-# 注意：题目限制仅列出了一些包，但运行需要数据库驱动与 HTTP；这里使用 pip 安装 psycopg2-binary
-RUN python -m pip install --no-cache-dir flask sqlalchemy psycopg2-binary jinja2 werkzeug click alembic
+# 预先复制依赖清单并安装（利用缓存）
+COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 
+# 复制应用代码与静态资源
 COPY app.py /app/app.py
+COPY static /app/static
+
+# 创建可持久化目录并授权（用于附件与归档）
+RUN mkdir -p /app/data/attachments /app/data/archive && chown -R 2000:2000 /app
+USER 2000:2000
 
 EXPOSE 8080
 

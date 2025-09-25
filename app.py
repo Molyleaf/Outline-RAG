@@ -8,6 +8,7 @@ import secrets
 import urllib.parse
 from datetime import datetime, timezone
 
+import requests
 from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, abort
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -42,6 +43,7 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
 GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
 GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
+OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")  # 新增：显式配置回调 URL
 
 SECRET_KEY = os.getenv("SECRET_KEY", None) or base64.urlsafe_b64encode(os.urandom(32)).decode()
 
@@ -91,10 +93,14 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
   id BIGSERIAL PRIMARY KEY,
   conv_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL, -- 'user' or 'assistant' or 'system'
+  role TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 新增索引以支撑查询与归档
+CREATE INDEX IF NOT EXISTS idx_messages_conv_id_created_at ON messages(conv_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id BIGSERIAL PRIMARY KEY,
@@ -109,9 +115,17 @@ def db_init():
     with engine.begin() as conn:
         conn.exec_driver_sql(INIT_SQL)
 
-@app.before_first_request
-def _init():
-    db_init()
+# 应用导入即初始化数据库（替代 before_first_request）
+db_init()
+
+# Flask
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+app.secret_key = SECRET_KEY
+
+# 移除首次请求初始化
+# @app.before_first_request
+# def _init():
+#     db_init()
 
 def require_login():
     if "user" not in session:
@@ -129,10 +143,11 @@ def oidc_discovery():
 
 def oidc_build_auth_url(state, code_challenge):
     disc = oidc_discovery()
+    redirect_uri = OIDC_REDIRECT_URI or url_for("oidc_callback", _external=True)
     params = {
         "response_type": "code",
         "client_id": GITLAB_CLIENT_ID,
-        "redirect_uri": url_for("oidc_callback", _external=True),
+        "redirect_uri": redirect_uri,
         "scope": "openid profile email",
         "state": state,
         "code_challenge": code_challenge,
@@ -142,10 +157,11 @@ def oidc_build_auth_url(state, code_challenge):
 
 def oidc_exchange_token(code, code_verifier, urllib=None):
     disc = oidc_discovery()
+    redirect_uri = OIDC_REDIRECT_URI or url_for("oidc_callback", _external=True)
     data = urllib.parse.urlencode({
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": url_for("oidc_callback", _external=True),
+        "redirect_uri": redirect_uri,
         "client_id": GITLAB_CLIENT_ID,
         "client_secret": GITLAB_CLIENT_SECRET,
         "code_verifier": code_verifier,
@@ -243,18 +259,15 @@ def api_messages():
 
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
-    import urllib.request
-    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
-        "Content-Type":"application/json",
-        "Authorization": f"Bearer {token}"
-    })
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
     if not stream:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode())
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
     else:
-        # 返回原始响应对象以供流式读取（使用标准库无法逐行迭代 chunk，这里改用生成器对 SSE 行处理）
-        resp = urllib.request.urlopen(req, timeout=300)
-        return resp  # 调用方负责关闭
+        resp = requests.post(url, json=payload, headers=headers, timeout=300, stream=True)
+        resp.raise_for_status()
+        return resp  # requests.Response
 
 def create_embeddings(texts):
     payload = {"model": EMBEDDING_MODEL, "input": texts}
@@ -277,13 +290,12 @@ def chat_completion(messages, temperature=0.2):
 def chat_completion_stream(messages, temperature=0.2):
     # 以 OpenAI SSE 格式透传
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
+    payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     try:
-        for raw in resp:
-            line = raw.decode("utf-8").strip()
+        for line in resp.iter_lines(decode_unicode=True):
             if not line:
                 continue
-            # SSE 以 "data: {...}" 行推送
             if line.startswith("data: "):
                 data = line[len("data: "):]
                 if data == "[DONE]":
@@ -297,10 +309,7 @@ def chat_completion_stream(messages, temperature=0.2):
                 if delta:
                     yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
     finally:
-        try:
-            resp.close()
-        except Exception:
-            pass
+        resp.close()
 
 # RAG：向量检索
 def search_similar(query, k=12):
@@ -455,14 +464,28 @@ def upload():
     if "file" not in request.files:
         return jsonify({"error":"missing file"}), 400
     f = request.files["file"]
-    name = f.filename or "untitled.txt"
-    content = f.read().decode("utf-8", errors="ignore")
+    name = secure_filename(f.filename or "untitled.txt")
+    if not allowed_file(name):
+        return jsonify({"error":"file type not allowed"}), 400
+    raw = f.read()
+    try:
+        content = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        content = ""
+
+    # 保存原始文件到持久化目录
+    ts = int(time.time()*1000)
+    disk_name = f"{uid}_{ts}_{name}"
+    with open(os.path.join(ATTACHMENTS_DIR, disk_name), "wb") as wf:
+        wf.write(raw)
+
     # 入库 attachments
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO attachments (user_id, filename, content) VALUES (:u,:n,:c)"),
                      {"u": uid, "n": name, "c": content})
-    # 将附件内容作为个人文档入向量库（按用户隔离：doc_id 前缀）
-    doc_id = f"att:{uid}:{int(time.time()*1000)}:{secrets.token_hex(4)}"
+
+    # 向量化
+    doc_id = f"att:{uid}:{ts}:{secrets.token_hex(4)}"
     title = f"[附件] {name}"
     chunks = chunk_text(content)
     if chunks:
@@ -541,9 +564,60 @@ def api_ask():
                              {"cid": conv_id, "c": full})
         return app.response_class(generate(), mimetype="text/event-stream")
 
+from werkzeug.utils import secure_filename
+
+MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "10485760"))  # 10MB
+ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FILE_EXTENSIONS", "txt,md,pdf").split(",") if e.strip()])
+ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "/app/data/attachments")
+
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+
+def allowed_file(filename):
+    if "." not in filename:
+        return False
+    ext = filename.rsplit(".", 1)[1].lower()
+    return ext in ALLOWED_FILE_EXTENSIONS
 # 健康检查
+ARCHIVE_DIR = os.getenv("ARCHIVE_DIR", "/app/data/archive")
+
+def archive_old_messages(days=90, batch_size=5000):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    while True:
+        with engine.begin() as conn:
+            rows = conn.execute(text("""
+                SELECT id, conv_id, role, content, created_at
+                FROM messages
+                WHERE created_at < :cutoff
+                ORDER BY id
+                LIMIT :limit
+            """), {"cutoff": cutoff, "limit": batch_size}).mappings().all()
+            if not rows:
+                break
+            # 写入归档文件
+            ts = int(time.time())
+            fname = os.path.join(ARCHIVE_DIR, f"messages_archive_{ts}_{rows[0]['id']}_{rows[-1]['id']}.jsonl")
+            with open(fname, "a", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(dict(r), ensure_ascii=False) + "\n")
+            # 删除已归档
+            ids = [r["id"] for r in rows]
+            conn.execute(text("DELETE FROM messages WHERE id = ANY(:ids)"), {"ids": ids})
+
+from datetime import timedelta
+_last_archive_ts = 0
+
 @app.route("/healthz")
 def healthz():
+    global _last_archive_ts
+    now = time.time()
+    if now - _last_archive_ts > 3600:  # 每小时尝试归档一次
+        try:
+            archive_old_messages(days=90, batch_size=2000)
+        except Exception:
+            pass
+        _last_archive_ts = now
     return "ok"
 
 if __name__ == "__main__":
