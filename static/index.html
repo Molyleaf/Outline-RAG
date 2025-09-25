@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Outline RAG Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="sidebar">
+    <div class="titlebar">
+      <strong>对话</strong>
+      <button class="btn" id="newConv">新建</button>
+    </div>
+    <div id="convs"></div>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div class="actions">
+        <label class="upload">
+          <input type="file" id="fileInput" style="display:none" />
+          <span class="btn secondary">上传附件</span>
+        </label>
+      </div>
+      <div class="menu" id="menu">
+        <a href="/logout">登出</a>
+        <a id="refreshAll" href="#">手动刷新 Outline</a>
+      </div>
+      <div class="avatar" id="avatar" title="菜单"></div>
+    </div>
+    <div class="chat" id="chat"></div>
+    <div class="input">
+      <textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
+      <button class="btn" id="send">发送</button>
+      <label class="switch">
+        <input type="checkbox" id="streamToggle" checked />
+        <span>流式</span>
+      </label>
+    </div>
+  </div>
+</div>
+<script src="/static/script.js"></script>
+</body>
+</html>
