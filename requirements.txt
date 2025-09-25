@@ -1,0 +1,4 @@
+alembic==1.16.5
+SQLAlchemy==2.0.43
+psycopg2-binary==2.9.10
+Jinja2==3.1.6
