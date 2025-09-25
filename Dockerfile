@@ -4,8 +4,21 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+RUN set -eux; \
+    # apt-get update; \
+    # apt-get install -y --no-install-recommends ca-certificates; \
+    # rm -rf /var/lib/apt/lists/*; \
+    codename="$(. /etc/os-release; echo "$VERSION_CODENAME")"; \
+    rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; \
+    : > /etc/apt/sources.list; \
+    printf "deb https://mirrors.nju.edu.cn/debian/ %s main contrib non-free non-free-firmware\n" "$codename" >> /etc/apt/sources.list; \
+    printf "deb https://mirrors.nju.edu.cn/debian/ %s-updates main contrib non-free non-free-firmware\n" "$codename" >> /etc/apt/sources.list; \
+    printf "deb https://mirrors.nju.edu.cn/debian-security %s-security main contrib non-free non-free-firmware\n" "$codename" >> /etc/apt/sources.list; \
+    printf "deb https://mirrors.nju.edu.cn/debian/ %s-backports main contrib non-free non-free-firmware\n" "$codename" >> /etc/apt/sources.list; \
+    apt-get update
+
 # 系统依赖：psycopg2 需要 libpq 和 build 组件
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
