@@ -352,13 +352,15 @@ def chat_completion_stream(messages, temperature=0.2):
 # RAG：向量检索
 def search_similar(query, k=12):
     q_emb = create_embeddings([query])[0]
+    # 以 JSON 文本传入，避免 ::vector 绑定语法问题
+    qv_text = json.dumps(q_emb)
     with engine.begin() as conn:
-        rs = conn.execute(text(f"""
-            SELECT id, doc_id, idx, content, 1 - (embedding <=> :qv) AS score
+        rs = conn.execute(text("""
+            SELECT id, doc_id, idx, content, 1 - (embedding <=> to_vector(:qv_text)) AS score
             FROM chunks
-            ORDER BY embedding <=> :qv
+            ORDER BY embedding <=> to_vector(:qv_text)
             LIMIT :k
-        """), {"qv": q_emb, "k": k}).mappings().all()
+        """), {"qv_text": qv_text, "k": k}).mappings().all()
     return [dict(r) for r in rs]
 
 # Chunk
