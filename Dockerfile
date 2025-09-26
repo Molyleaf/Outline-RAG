@@ -27,9 +27,13 @@ RUN groupadd -g 2000 outline && useradd -m -u 2000 -g 2000 outline
 
 WORKDIR /app
 
+# 使用南京大学 PyPI 镜像作为默认源，并设置合理的超时与重试
+RUN mkdir -p /etc/pip && \
+    printf "[global]\nindex-url = https://mirrors.nju.edu.cn/pypi/web/simple\nextra-index-url = https://pypi.org/simple\ntrusted-host = mirrors.nju.edu.cn\ntimeout = 30\nretries = 3\n" > /etc/pip/pip.conf
+
 # 预先复制依赖清单并安装（利用缓存）
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir -r /app/requirements.txt
+RUN python -m pip install -i https://mirrors.nju.edu.cn/pypi/web/simple --no-cache-dir -r /app/requirements.txt
 
 # 复制应用代码与静态资源
 COPY app.py /app/app.py

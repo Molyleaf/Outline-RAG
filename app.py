@@ -7,16 +7,25 @@ import base64
 import secrets
 import urllib.parse
 from datetime import datetime, timezone
+import logging
 
 import requests
 from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, abort
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
-
+import urllib.request
 # 环境变量
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# 基础日志配置
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+)
+logger = logging.getLogger("app")
 
 POSTGRES_DB = os.getenv("POSTGRES_DB", "outline_rag")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "outline")
@@ -39,6 +48,8 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
 CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
 CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
+SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
+MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
 
 GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
 GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
@@ -50,8 +61,6 @@ SECRET_KEY = os.getenv("SECRET_KEY", None) or base64.urlsafe_b64encode(os.urando
 # Flask
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.secret_key = SECRET_KEY
-
-# 数据库
 DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 engine: Engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
 
@@ -137,7 +146,6 @@ def current_user():
 # OIDC（GitLab）
 def oidc_discovery():
     conf_url = f"{GITLAB_URL}/.well-known/openid-configuration"
-    import urllib.request
     with urllib.request.urlopen(conf_url, timeout=10) as resp:
         return json.loads(resp.read().decode())
 
@@ -155,7 +163,7 @@ def oidc_build_auth_url(state, code_challenge):
     }
     return disc["authorization_endpoint"] + "?" + urllib.parse.urlencode(params)
 
-def oidc_exchange_token(code, code_verifier, urllib=None):
+def oidc_exchange_token(code, code_verifier):
     disc = oidc_discovery()
     redirect_uri = OIDC_REDIRECT_URI or url_for("oidc_callback", _external=True)
     data = urllib.parse.urlencode({
@@ -166,7 +174,6 @@ def oidc_exchange_token(code, code_verifier, urllib=None):
         "client_secret": GITLAB_CLIENT_SECRET,
         "code_verifier": code_verifier,
     }).encode()
-    import urllib.request
     req = urllib.request.Request(disc["token_endpoint"], data=data, headers={"Content-Type":"application/x-www-form-urlencoded"})
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())
@@ -180,7 +187,7 @@ def oidc_jwt_decode(id_token):
     payload_bytes = base64.urlsafe_b64decode(payload[: len(payload) - (len(payload) % 4)])
     return json.loads(payload_bytes.decode())
 
-@app.route("/login")
+@app.route("/chat/login")
 def login():
     state = secrets.token_urlsafe(16)
     code_verifier = secrets.token_urlsafe(64)
@@ -189,7 +196,7 @@ def login():
     code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().rstrip("=")
     return redirect(oidc_build_auth_url(state, code_challenge))
 
-@app.route("/oidc/callback")
+@app.route("/chat/oidc/callback")
 def oidc_callback():
     state = request.args.get("state")
     if not state or state != session.get("oidc_state"):
@@ -208,7 +215,7 @@ def oidc_callback():
                      {"id": user_id, "name": name, "avatar": avatar_url})
     return redirect("/chat")
 
-@app.route("/logout")
+@app.route("/chat/logout")
 def logout():
     session.clear()
     return redirect("/chat")
@@ -217,8 +224,17 @@ def logout():
 @app.route("/chat")
 def chat_page():
     if "user" not in session:
-        return redirect("/login")
+        return redirect("/chat/login")
     return send_from_directory(app.static_folder, "index.html")
+
+# 新增静态资源直达路由（用于反向代理固定路径）
+@app.route("/chat/static/style.css")
+def chat_static_style():
+    return send_from_directory(app.static_folder, "style.css")
+
+@app.route("/chat/static/script.js")
+def chat_static_script():
+    return send_from_directory(app.static_folder, "script.js")
 
 # API：用户信息
 @app.route("/chat/api/me")
@@ -282,12 +298,34 @@ def rerank(query, passages, top_k=5):
     ranked = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
     return ranked
 
+def _log_chat_messages_for_debug(messages, stream_flag):
+    try:
+        if not SAFE_LOG_CHAT_INPUT:
+            return
+        # 提取要发送给大模型的文本内容
+        parts = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if not isinstance(content, str):
+                # 若为复杂结构，尽量序列化
+                content = json.dumps(content, ensure_ascii=False)
+            parts.append(f"{role}: {content}")
+        joined = "\n---\n".join(parts)
+        if len(joined) > MAX_LOG_INPUT_CHARS:
+            joined = joined[:MAX_LOG_INPUT_CHARS] + f"...(truncated, total={len(joined)})"
+        logger.info("ChatCompletion request (stream=%s):\n%s", stream_flag, joined)
+    except Exception as e:
+        logger.warning("Failed to log chat messages: %s", e)
+
 def chat_completion(messages, temperature=0.2):
+    _log_chat_messages_for_debug(messages, stream_flag=False)
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": False}
     res = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN)
     return res["choices"][0]["message"]["content"]
 
 def chat_completion_stream(messages, temperature=0.2):
+    _log_chat_messages_for_debug(messages, stream_flag=True)
     # 以 OpenAI SSE 格式透传
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
@@ -344,13 +382,11 @@ def outline_headers():
     return {"Authorization": f"Bearer {OUTLINE_API_TOKEN}", "Content-Type":"application/json"}
 
 def http_get_json(url, headers=None):
-    import urllib.request
     req = urllib.request.Request(url, headers=headers or {"Content-Type":"application/json"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read().decode())
 
 def http_post_json_raw(url, payload, headers=None):
-    import urllib.request
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers or {"Content-Type":"application/json"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read().decode())
