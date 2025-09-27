@@ -52,6 +52,8 @@ CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
+
+GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
 GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
 GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")  # 新增：显式配置回调 URL
@@ -319,8 +321,21 @@ def rerank(query, passages, top_k=5):
 
 def _log_chat_messages_for_debug(messages, stream_flag):
     try:
-        # 禁止记录对话内容到日志，满足“移除日志输出对话内容功能”的要求
-        return
+        if not SAFE_LOG_CHAT_INPUT:
+            return
+        # 提取要发送给大模型的文本内容
+        parts = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if not isinstance(content, str):
+                # 若为复杂结构，尽量序列化
+                content = json.dumps(content, ensure_ascii=False)
+            parts.append(f"{role}: {content}")
+        joined = "\n---\n".join(parts)
+        if len(joined) > MAX_LOG_INPUT_CHARS:
+            joined = joined[:MAX_LOG_INPUT_CHARS] + f"...(truncated, total={len(joined)})"
+        logger.info("ChatCompletion request (stream=%s):\n%s", stream_flag, joined)
     except Exception as e:
         logger.warning("Failed to log chat messages: %s", e)
 
