@@ -22,3 +22,37 @@ body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Bl
 .actions { margin-right: auto; }
 .switch { display: flex; align-items: center; gap: 6px; color: #666; }
 .upload { cursor: pointer; }
+.sidebar .conv {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sidebar .conv .conv-menu {
+  visibility: hidden;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+}
+.sidebar .conv:hover .conv-menu {
+  visibility: visible;
+}
+.sidebar .conv .conv-menu-pop {
+  position: absolute;
+  right: 6px;
+  top: 22px;
+  background: #fff;
+  border: 1px solid #ddd;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+.sidebar .conv .conv-menu-pop > div {
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sidebar .conv .conv-menu-pop > div:hover {
+  background: #f5f5f5;
+}

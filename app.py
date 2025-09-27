@@ -471,6 +471,36 @@ def api_messages():
         ).mappings().all()
     return jsonify({"items": [dict(r) for r in rs], "total": int(total), "page": page, "page_size": page_size})
 
+# 新增：重命名会话
+@app.route("/chat/api/conversations/<int:conv_id>", methods=["PATCH"])
+def api_conversation_rename(conv_id: int):
+    require_login()
+    uid = current_user()["id"]
+    body = request.get_json(force=True, silent=True) or {}
+    title = (body.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title 不能为空"}), 400
+    if len(title) > 200:
+        return jsonify({"error": "title 过长"}), 400
+    with engine.begin() as conn:
+        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
+        if not own:
+            abort(403)
+        conn.execute(text("UPDATE conversations SET title=:t WHERE id=:cid"), {"t": title, "cid": conv_id})
+    return jsonify({"ok": True})
+
+# 新增：删除会话（级联删除消息）
+@app.route("/chat/api/conversations/<int:conv_id>", methods=["DELETE"])
+def api_conversation_delete(conv_id: int):
+    require_login()
+    uid = current_user()["id"]
+    with engine.begin() as conn:
+        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
+        if not own:
+            abort(403)
+        conn.execute(text("DELETE FROM conversations WHERE id=:cid"), {"cid": conv_id})
+    return jsonify({"ok": True})
+
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}

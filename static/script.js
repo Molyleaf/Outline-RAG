@@ -21,7 +21,7 @@ document.addEventListener('click', (e) => {
 refreshAll.addEventListener('click', async (e) => {
   e.preventDefault();
   await fetch('/chat/update/all', {method: 'POST', credentials: 'include'});
-  alert('已触发全量刷新');
+  alert('已完成全量刷新');
 });
 fileInput.addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -52,12 +52,69 @@ async function loadUser() {
 async function loadConvs() {
   const data = await api('/chat/api/conversations');
   convsEl.innerHTML = '';
-  (data || []).forEach(c => {
-    const div = document.createElement('div');
-    div.className = 'conv' + (c.id === currentConvId ? ' active' : '');
-    div.textContent = c.title || ('会话 #' + c.id);
-    div.onclick = () => { currentConvId = c.id; loadConvs(); loadMessages(); };
-    convsEl.appendChild(div);
+  (data?.items || data || []).forEach(c => {
+    const row = document.createElement('div');
+    row.className = 'conv' + (c.id === currentConvId ? ' active' : '');
+    const titleEl = document.createElement('span');
+    titleEl.className = 'conv-title';
+    titleEl.textContent = c.title || ('会话 #' + c.id);
+    titleEl.onclick = () => { currentConvId = c.id; loadConvs(); loadMessages(); };
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'conv-menu';
+    menuBtn.textContent = '⋯';
+
+    const menu = document.createElement('div');
+    menu.className = 'conv-menu-pop';
+    const rename = document.createElement('div');
+    rename.textContent = '重命名';
+    const del = document.createElement('div');
+    del.textContent = '删除';
+
+    rename.onclick = async (e) => {
+      e.stopPropagation();
+      const val = prompt('重命名会话', titleEl.textContent);
+      if (val == null) { menu.style.display = 'none'; return; }
+      const t = val.trim();
+      if (!t) { alert('标题不能为空'); return; }
+      const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
+      if (res?.ok || res?.status === 'ok') {
+        if (c.id === currentConvId) { /* 保持当前选中 */ }
+        await loadConvs();
+      } else {
+        alert('重命名失败');
+      }
+      menu.style.display = 'none';
+    };
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('确定删除该会话？此操作不可恢复。')) { menu.style.display = 'none'; return; }
+      const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
+      if (res?.ok) {
+        if (currentConvId === c.id) { currentConvId = null; chatEl.innerHTML = ''; }
+        await loadConvs();
+      } else {
+        alert('删除失败');
+      }
+      menu.style.display = 'none';
+    };
+
+    menu.appendChild(rename);
+    menu.appendChild(del);
+    menu.style.display = 'none';
+
+    menuBtn.onclick = (e) => {
+      e.stopPropagation();
+      menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+    };
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target) && e.target !== menuBtn) menu.style.display = 'none';
+    });
+
+    row.appendChild(titleEl);
+    row.appendChild(menuBtn);
+    row.appendChild(menu);
+    convsEl.appendChild(row);
   });
 }
 
