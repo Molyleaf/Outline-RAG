@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 import urllib.request
+from flask import make_response
 # 环境变量
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
@@ -245,7 +246,9 @@ def chat_static_script():
 def api_me():
     if "user" not in session:
         abort(401)
-    return jsonify(session["user"])
+    resp = make_response(jsonify(session["user"]))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    return resp
 
 # API：会话
 @app.route("/chat/api/conversations", methods=["GET", "POST"])
@@ -264,11 +267,15 @@ def api_conversations():
         with engine.begin() as conn:
             r = conn.execute(text("INSERT INTO conversations (user_id, title) VALUES (:u,:t) RETURNING id"), {"u": uid, "t": title})
             cid = r.scalar()
-        return jsonify({"id": cid, "title": title})
+        resp = make_response(jsonify({"id": cid, "title": title}))
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        return resp
     else:
         with engine.begin() as conn:
             rs = conn.execute(text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC"), {"u": uid}).mappings().all()
-        return jsonify([dict(r) for r in rs])
+        resp = make_response(jsonify([dict(r) for r in rs]))
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        return resp
 
 @app.route("/chat/api/messages")
 def api_messages():
@@ -282,7 +289,9 @@ def api_messages():
         if not own:
             abort(403)
         rs = conn.execute(text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC"), {"cid": conv_id}).mappings().all()
-    return jsonify([dict(r) for r in rs])
+    resp = make_response(jsonify([dict(r) for r in rs]))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    return resp
 
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
@@ -559,7 +568,9 @@ def upload():
             for idx, (ck, emb) in enumerate(zip(chunks, embs)):
                 conn.execute(text("INSERT INTO chunks (doc_id, idx, content, embedding) VALUES (:d,:i,:c,:e)"),
                              {"d": doc_id, "i": idx, "c": ck, "e": emb})
-    return jsonify({"ok": True, "filename": name})
+    resp = make_response(jsonify({"ok": True, "filename": name}))
+    resp.headers["Content-Type"] = "application/json; charset=utf-8"
+    return resp
 
 # RAG 问答（支持流式）
 @app.route("/chat/api/ask", methods=["POST"])
@@ -605,9 +616,13 @@ def api_ask():
         answer = chat_completion(messages)
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"), {"cid": conv_id, "c": answer})
-        return jsonify({"answer": answer})
+        resp = make_response(jsonify({"answer": answer}))
+        resp.headers["Content-Type"] = "application/json; charset=utf-8"
+        return resp
     else:
         def generate():
+            # 发送一个零宽不换行空格作为 UTF-8 提示
+            yield "\ufeff"
             buffer = []
             for chunk in chat_completion_stream(messages):
                 # chunk 已是 "data: {...}\n\n" 或 DONE
@@ -625,7 +640,6 @@ def api_ask():
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
                              {"cid": conv_id, "c": full})
-        # 明确 SSE 的编码
         return app.response_class(generate(), mimetype="text/event-stream; charset=utf-8")
 
 from werkzeug.utils import secure_filename
