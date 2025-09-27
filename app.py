@@ -131,18 +131,32 @@ CREATE TABLE IF NOT EXISTS attachments (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 生产环境建议：为 ivfflat 设置合适 lists，并在大量写入后 ANALYZE
+-- 可选：ALTER INDEX idx_chunks_embedding SET (lists = 100);
 """
 
 def db_init():
+    # 使用 advisory lock 保证在多进程并发下仅执行一次
     with engine.begin() as conn:
-        conn.exec_driver_sql(INIT_SQL)
+        conn.exec_driver_sql("SELECT pg_advisory_lock(9876543210)")
+        try:
+            conn.exec_driver_sql(INIT_SQL)
+            # 统计信息更新，利于查询计划
+            conn.exec_driver_sql("ANALYZE")
+        finally:
+            conn.exec_driver_sql("SELECT pg_advisory_unlock(9876543210)")
 
-# 应用导入即初始化数据库（替代 before_first_request）
-db_init()
+# 应用启动后单次初始化：避免在多进程下重复执行
+try:
+    db_init()
+except Exception as e:
+    logger.exception("数据库初始化失败：%s", e)
+    raise
 
-# Flask
-app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.secret_key = SECRET_KEY
+# 删除重复的 Flask 实例化，避免覆盖配置与路由
+# app = Flask(__name__, static_folder="static", static_url_path="/static")
+# app.secret_key = SECRET_KEY
 
 def require_login():
     if "user" not in session:
@@ -319,19 +333,24 @@ def chat_page():
     resp = send_from_directory(app.static_folder, "index.html")
     # 明确声明 HTML 编码
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    # 可选缓存控制
+    resp.headers.setdefault("Cache-Control", "public, max-age=300")
     return resp
 
 # 新增静态资源直达路由（用于反向代理固定路径）
 @app.route("/chat/static/style.css")
 def chat_static_style():
     resp = send_from_directory(app.static_folder, "style.css")
+    # 交由 Flask 自动推断 mimetype，也可保留如下行
     resp.headers["Content-Type"] = "text/css; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
     return resp
 
 @app.route("/chat/static/script.js")
 def chat_static_script():
     resp = send_from_directory(app.static_folder, "script.js")
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
     return resp
 
 # API：用户信息
@@ -339,9 +358,8 @@ def chat_static_script():
 def api_me():
     if "user" not in session:
         abort(401)
-    resp = make_response(jsonify(session["user"]))
-    resp.headers["Content-Type"] = "application/json; charset=utf-8"
-    return resp
+    # 统一使用 jsonify，避免重复设置 Content-Type
+    return jsonify(session["user"])
 
 # API：会话
 @app.route("/chat/api/conversations", methods=["GET", "POST"])
@@ -360,15 +378,11 @@ def api_conversations():
         with engine.begin() as conn:
             r = conn.execute(text("INSERT INTO conversations (user_id, title) VALUES (:u,:t) RETURNING id"), {"u": uid, "t": title})
             cid = r.scalar()
-        resp = make_response(jsonify({"id": cid, "title": title}))
-        resp.headers["Content-Type"] = "application/json; charset=utf-8"
-        return resp
+        return jsonify({"id": cid, "title": title})
     else:
         with engine.begin() as conn:
             rs = conn.execute(text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC"), {"u": uid}).mappings().all()
-        resp = make_response(jsonify([dict(r) for r in rs]))
-        resp.headers["Content-Type"] = "application/json; charset=utf-8"
-        return resp
+        return jsonify([dict(r) for r in rs])
 
 @app.route("/chat/api/messages")
 def api_messages():
@@ -382,18 +396,31 @@ def api_messages():
         if not own:
             abort(403)
         rs = conn.execute(text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC"), {"cid": conv_id}).mappings().all()
-    resp = make_response(jsonify([dict(r) for r in rs]))
-    resp.headers["Content-Type"] = "application/json; charset=utf-8"
-    return resp
+    return jsonify([dict(r) for r in rs])
 
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+    # 统一超时与重试
+    timeout = (5, 60) if not stream else (5, 300)
+    session_req = requests.Session()
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    retry = Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["POST"],
+        raise_on_status=False,
+    )
+    session_req.mount("http://", HTTPAdapter(max_retries=retry))
+    session_req.mount("https://", HTTPAdapter(max_retries=retry))
     try:
         if not stream:
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            resp = session_req.post(url, json=payload, headers=headers, timeout=timeout)
             if not (200 <= resp.status_code < 300):
-                logger.warning("http_post_json non-2xx: %s %s", resp.status_code, resp.text[:200])
+                # 避免泄露敏感 token/payload
+                logger.warning("http_post_json non-2xx: %s body_len=%s", resp.status_code, len(resp.text or ""))
                 return None
             try:
                 return resp.json()
@@ -401,11 +428,11 @@ def http_post_json(url, payload, token, stream=False):
                 logger.warning("http_post_json JSON decode error")
                 return None
         else:
-            resp = requests.post(url, json=payload, headers=headers, timeout=300, stream=True)
+            resp = session_req.post(url, json=payload, headers=headers, timeout=timeout, stream=True)
             if not (200 <= resp.status_code < 300):
                 logger.warning("http_post_json(stream) non-2xx: %s", resp.status_code)
                 return None
-            return resp  # requests.Response
+            return resp
     except requests.Timeout:
         logger.warning("http_post_json timeout: %s", url)
         return None
@@ -437,7 +464,15 @@ def rerank(query, passages, top_k=5):
 #         logger.warning("Failed to log chat messages: %s", e)
 
 def chat_completion(messages, temperature=0.2):
-    # _log_chat_messages_for_debug(messages, stream_flag=False)
+    # 安全日志（可选截断）
+    if SAFE_LOG_CHAT_INPUT:
+        try:
+            preview = json.dumps(messages, ensure_ascii=False)
+            if len(preview) > MAX_LOG_INPUT_CHARS:
+                preview = preview[:MAX_LOG_INPUT_CHARS] + "...(truncated)"
+            logger.info("chat_completion input preview(len=%s)", len(preview))
+        except Exception:
+            pass
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": False}
     res = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN)
     if not res:
@@ -448,16 +483,21 @@ def chat_completion(messages, temperature=0.2):
         return "对话服务返回格式异常。"
 
 def chat_completion_stream(messages, temperature=0.2):
-    # _log_chat_messages_for_debug(messages, stream_flag=True)
+    if SAFE_LOG_CHAT_INPUT:
+        try:
+            preview = json.dumps(messages, ensure_ascii=False)
+            if len(preview) > MAX_LOG_INPUT_CHARS:
+                preview = preview[:MAX_LOG_INPUT_CHARS] + "...(truncated)"
+            logger.info("chat_completion_stream input preview(len=%s)", len(preview))
+        except Exception:
+            pass
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     if resp is None:
-        # 以错误事件通知前端
         yield "data: " + json.dumps({"error": "上游流式接口不可用"}) + "\n\n"
         yield "data: [DONE]\n\n"
         return
     try:
-        # 不要让 requests 先用未知编码解码，改为读取字节并按 UTF-8 明确解码
         for line in resp.iter_lines(decode_unicode=False):
             if not line:
                 continue
@@ -477,6 +517,11 @@ def chat_completion_stream(messages, temperature=0.2):
                     delta = ""
                 if delta:
                     yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+    except requests.RequestException as e:
+        # 网络中断时优雅结束
+        logger.warning("stream interrupted: %s", e)
+        yield "data: " + json.dumps({"error": "与上游连接中断"}) + "\n\n"
+        yield "data: [DONE]\n\n"
     finally:
         try:
             resp.close()
@@ -502,15 +547,38 @@ def chunk_text(text, max_chars=1000, overlap=200):
     text = text.strip()
     if not text:
         return []
+    # 优先按段落与句子切分，尽量避免过短片段
+    import re
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    sentences = []
+    for p in paragraphs:
+        # 基于中文/英文标点切句
+        parts = re.split(r"(?<=[。！？!?；;])\s*|(?<=[!])\s+", p)
+        parts = [s.strip() for s in parts if s.strip()]
+        sentences.extend(parts if parts else [p])
+
     chunks = []
-    start = 0
-    n = len(text)
-    while start < n:
-        end = min(n, start + max_chars)
-        chunk = text[start:end]
-        chunks.append(chunk)
-        if end == n: break
-        start = max(0, end - overlap)
+    buf = ""
+    for s in sentences:
+        if not buf:
+            buf = s
+        elif len(buf) + 1 + len(s) <= max_chars:
+            buf = f"{buf}\n{s}"
+        else:
+            if len(buf) >= max(100, overlap):  # 避免极短片段
+                chunks.append(buf)
+            else:
+                # 与下一句合并，尽量不输出太短
+                buf = f"{buf} {s}" if len(buf) + 1 + len(s) <= max_chars else s
+                continue
+            # 滑窗重叠
+            if overlap > 0 and chunks[-1]:
+                tail = chunks[-1][-overlap:]
+            else:
+                tail = ""
+            buf = tail + s if len(tail) + len(s) <= max_chars else s
+    if buf and len(buf) >= 100:
+        chunks.append(buf)
     return chunks
 
 # Outline API
