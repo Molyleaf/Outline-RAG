@@ -380,6 +380,15 @@ def chat_page():
     resp.headers.setdefault("Cache-Control", "public, max-age=300")
     return resp
 
+@app.route("/chat/<path:conv_guid>")
+def chat_page_with_guid(conv_guid: str):
+    # 允许直接打开 /chat/<GUID>（类似 ChatGPT 带 GUID 的 URL）
+    if "user" not in session:
+        return redirect("/chat/login")
+    resp = send_from_directory(app.static_folder, "index.html")
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=300")
+    return resp
 # 新增静态资源直达路由（用于反向代理固定路径）
 @app.route("/chat/static/style.css")
 def chat_static_style():
@@ -422,7 +431,9 @@ def api_conversations():
         with engine.begin() as conn:
             r = conn.execute(text("INSERT INTO conversations (user_id, title) VALUES (:u,:t) RETURNING id"), {"u": uid, "t": title})
             cid = r.scalar()
-        return jsonify({"id": cid, "title": title})
+        # 生成 GUID 风格的 URL（与 ChatGPT 类似）
+        guid = str(cid)
+        return jsonify({"id": cid, "title": title, "url": f"/chat/{guid}"})
     else:
         # 分页参数：page（从1开始），page_size（默认20，最大100）
         try:
@@ -441,13 +452,29 @@ def api_conversations():
                 text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC LIMIT :lim OFFSET :off"),
                 {"u": uid, "lim": page_size, "off": offset}
             ).mappings().all()
-        return jsonify({"items": [dict(r) for r in rs], "total": int(total), "page": page, "page_size": page_size})
+        items = []
+        for r in rs:
+            d = dict(r)
+            d["url"] = f"/chat/{d['id']}"
+            items.append(d)
+        return jsonify({"items": items, "total": int(total), "page": page, "page_size": page_size})
 
 @app.route("/chat/api/messages")
 def api_messages():
     require_login()
     uid = current_user()["id"]
     conv_id = request.args.get("conv_id")
+    # 允许前端传入 GUID（此处以数值 id 作为 GUID），从路径读取时也可重用该参数
+    if not conv_id:
+        # 尝试从 Referer 的 /chat/<guid> 中解析
+        ref = request.headers.get("Referer") or ""
+        try:
+            # 简单解析末尾段为 guid
+            guid = ref.rstrip("/").rsplit("/", 1)[-1]
+            if guid.isdigit():
+                conv_id = guid
+        except Exception:
+            pass
     if not conv_id:
         return jsonify({"items": [], "total": 0, "page": 1, "page_size": 20})
     # 分页参数
@@ -560,12 +587,6 @@ def rerank(query, passages, top_k=5):
     items = res.get("results") or res.get("data") or []
     ranked = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
     return ranked
-
-# def _log_chat_messages_for_debug(messages, stream_flag):
-#     try:
-#         return
-#     except Exception as e:
-#         logger.warning("Failed to log chat messages: %s", e)
 
 def chat_completion(messages, temperature=0.2):
     # 安全日志（可选截断）
