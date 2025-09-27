@@ -131,11 +131,6 @@ db_init()
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.secret_key = SECRET_KEY
 
-# 移除首次请求初始化
-# @app.before_first_request
-# def _init():
-#     db_init()
-
 def require_login():
     if "user" not in session:
         abort(401)
