@@ -36,7 +36,8 @@ POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
 
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
-OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "")
+OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "").strip()
+OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "true").lower() == "true"
 
 EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "").rstrip("/")
 EMBEDDING_API_TOKEN = os.getenv("EMBEDDING_API_TOKEN", "")
@@ -51,8 +52,6 @@ CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
-
-GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
 GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
 GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")  # 新增：显式配置回调 URL
@@ -320,21 +319,8 @@ def rerank(query, passages, top_k=5):
 
 def _log_chat_messages_for_debug(messages, stream_flag):
     try:
-        if not SAFE_LOG_CHAT_INPUT:
-            return
-        # 提取要发送给大模型的文本内容
-        parts = []
-        for m in messages:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if not isinstance(content, str):
-                # 若为复杂结构，尽量序列化
-                content = json.dumps(content, ensure_ascii=False)
-            parts.append(f"{role}: {content}")
-        joined = "\n---\n".join(parts)
-        if len(joined) > MAX_LOG_INPUT_CHARS:
-            joined = joined[:MAX_LOG_INPUT_CHARS] + f"...(truncated, total={len(joined)})"
-        logger.info("ChatCompletion request (stream=%s):\n%s", stream_flag, joined)
+        # 禁止记录对话内容到日志，满足“移除日志输出对话内容功能”的要求
+        return
     except Exception as e:
         logger.warning("Failed to log chat messages: %s", e)
 
@@ -470,9 +456,23 @@ def refresh_all():
 
 # 增量：Webhook 处理（签名校验）
 def verify_outline_signature(raw_body, signature_hex: str) -> bool:
-    mac = hmac.new(OUTLINE_WEBHOOK_SECRET.encode("utf-8"), msg=raw_body, digestmod=hashlib.sha256)
-    expected = mac.hexdigest()
-    return hmac.compare_digest(expected, signature_hex or "")
+    # 若显式关闭签名校验，则直接通过
+    if not OUTLINE_WEBHOOK_SIGN:
+        return True
+    # 兼容常见前缀与空白
+    try:
+        sig = (signature_hex or "").strip()
+        # 支持 "sha256=<hex>" 或 "Bearer <hex>"
+        if sig.lower().startswith("sha256="):
+            sig = sig.split("=", 1)[1].strip()
+        if sig.lower().startswith("bearer "):
+            sig = sig.split(" ", 1)[1].strip()
+        mac = hmac.new(OUTLINE_WEBHOOK_SECRET.encode("utf-8"), msg=raw_body, digestmod=hashlib.sha256)
+        expected = mac.hexdigest()
+        return hmac.compare_digest(expected, sig)
+    except Exception as e:
+        logger.warning("verify_outline_signature error: %s", e)
+        return False
 
 def upsert_one_doc(doc_id):
     info = outline_get_doc(doc_id)
@@ -516,10 +516,29 @@ def update_all():
 # 端点：Webhook 增量
 @app.route("/chat/update/webhook", methods=["POST"])
 def update_webhook():
-    raw = request.get_data()
-    sig = request.headers.get("X-Outline-Signature") or request.headers.get("x-outline-signature")
-    if not OUTLINE_WEBHOOK_SECRET or not verify_outline_signature(raw, sig):
-        return "invalid signature", 401
+    raw = request.get_data()  # 原始字节，禁止任何预解析
+    # 兼容不同大小写与备选头名
+    sig = (
+        request.headers.get("X-Outline-Signature")
+        or request.headers.get("x-outline-signature")
+        or request.headers.get("X-Outline-Signature-256")
+        or request.headers.get("X-Signature")
+    )
+    # 当 OUTLINE_WEBHOOK_SIGN=false 时，跳过签名校验；否则要求密钥与签名正确
+    if OUTLINE_WEBHOOK_SIGN:
+        if not OUTLINE_WEBHOOK_SECRET or not verify_outline_signature(raw, sig):
+            # 仅记录安全信息，避免泄露签名/正文
+            logger.warning(
+                "Webhook signature invalid: has_secret=%s, has_sig=%s, sig_len=%s, ct=%s",
+                bool(OUTLINE_WEBHOOK_SECRET),
+                bool(sig),
+                (len(sig) if sig else 0),
+                request.headers.get("Content-Type"),
+            )
+            return "invalid signature", 401
+    else:
+        logger.info("Webhook signature verification disabled by OUTLINE_WEBHOOK_SIGN")
+
     data = request.get_json(force=True, silent=True) or {}
     event = data.get("event")
     doc_id = (data.get("document") or {}).get("id") or data.get("documentId")
