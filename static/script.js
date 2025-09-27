@@ -12,7 +12,7 @@ const streamToggle = document.getElementById('streamToggle');
 let currentConvId = null;
 // 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
 (function initConvIdFromUrl(){
-  const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/(\w[\w-]*)$/);
+  const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/);
   if (m) currentConvId = m[1];
 })();
 let userInfo = null;
@@ -63,15 +63,12 @@ async function loadConvs() {
     row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
     const titleEl = document.createElement('span');
     titleEl.className = 'conv-title';
-    titleEl.textContent = c.title || ('会话 #' + c.id);
+    titleEl.textContent = c.title || ('会话 ' + (c.id || '').slice(0,8));
     titleEl.onclick = () => {
-      // 点击历史会话时，和 ChatGPT 一样跳转到带 GUID 的 URL
       if (c.url) {
-        location.href = c.url;
-      } else {
-        currentConvId = c.id;
-        loadConvs();
-        loadMessages();
+        location.href = c.url; // 确保点击能打开
+      } else if (c.id) {
+        location.href = '/chat/' + c.id;
       }
     };
 
@@ -152,15 +149,8 @@ function appendMsg(role, text) {
 
 newConvBtn.addEventListener('click', async () => {
   const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: '新会话'})});
-  // 统一跳转到包含 GUID 的 URL，避免 400 与状态错乱
-  if (c?.url) {
-    location.href = c.url;
-    return;
-  }
-  // 兜底：仍旧使用 id
-  currentConvId = c?.id;
-  await loadConvs();
-  await loadMessages();
+  if (c?.url) { location.href = c.url; return; }
+  if (c?.id) { location.href = '/chat/' + c.id; return; }
 });
 
 sendBtn.addEventListener('click', sendQuestion);
@@ -178,15 +168,16 @@ async function sendQuestion() {
   if (!currentConvId) {
     const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30)})});
     if (c?.url) { location.href = c.url; return; }
-    currentConvId = c?.id;
-    await loadConvs();
+    if (c?.id) { location.href = '/chat/' + c.id; return; }
+    return;
   }
+  // 追加用户消息
   appendMsg('user', text);
   qEl.value = '';
 
   // 流式始终开启：不再依赖隐藏的开关节点
   const placeholder = appendMsg('assistant', '');
-  const res = await fetch('/chat/api/ask', {
+  const res = await fetch('/chat/api/ask', { // 始终开启 SSE
     method: 'POST',
     body: JSON.stringify({conv_id: currentConvId, query: text}),
     headers: {'Content-Type':'application/json'},

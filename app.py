@@ -110,28 +110,31 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url TEXT
 );
 
-CREATE TABLE IF NOT EXISTS conversations (
-  id BIGSERIAL PRIMARY KEY,
+-- 会话改为 GUID 主键（TEXT），不兼容旧数据
+DROP TABLE IF EXISTS conversations CASCADE;
+CREATE TABLE conversations (
+  id TEXT PRIMARY KEY,                      -- GUID，如 'ca4c613d-cad9-4307-b964-becd520a0052'
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- 新增：覆盖索引（user_id, created_at desc）并包含 title 以覆盖列表查询
 CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversations(user_id, created_at DESC) INCLUDE (title);
 
-CREATE TABLE IF NOT EXISTS messages (
+-- 消息表：引用 GUID conv_id
+DROP TABLE IF EXISTS messages;
+CREATE TABLE messages (
   id BIGSERIAL PRIMARY KEY,
-  conv_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 新增索引以支撑查询与归档
-CREATE INDEX IF NOT EXISTS idx_messages_conv_id_created_at ON messages(conv_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
-CREATE TABLE IF NOT EXISTS attachments (
+-- 附件保持不变
+DROP TABLE IF EXISTS attachments;
+CREATE TABLE attachments (
   id BIGSERIAL PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
@@ -385,10 +388,16 @@ def chat_page_with_guid(conv_guid: str):
     # 允许直接打开 /chat/<GUID>（类似 ChatGPT 带 GUID 的 URL）
     if "user" not in session:
         return redirect("/chat/login")
+    # 严格校验 GUID 形状，避免将非 GUID 当有效会话
+    import re
+    if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
+                        conv_guid):
+        abort(404)
     resp = send_from_directory(app.static_folder, "index.html")
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers.setdefault("Cache-Control", "public, max-age=300")
     return resp
+
 # 新增静态资源直达路由（用于反向代理固定路径）
 @app.route("/chat/static/style.css")
 def chat_static_style():
@@ -428,14 +437,14 @@ def api_conversations():
         )
     if request.method == "POST":
         title = (request.json or {}).get("title") or "新会话"
+        # 生成规范 GUID
+        import uuid
+        guid = str(uuid.uuid4())
         with engine.begin() as conn:
-            r = conn.execute(text("INSERT INTO conversations (user_id, title) VALUES (:u,:t) RETURNING id"), {"u": uid, "t": title})
-            cid = r.scalar()
-        # 生成 GUID 风格 URL；当前以数值 id 充当 GUID
-        guid = str(cid)
-        return jsonify({"id": cid, "title": title, "url": f"/chat/{guid}"})
+            conn.execute(text("INSERT INTO conversations (id, user_id, title) VALUES (:id, :u, :t)"),
+                         {"id": guid, "u": uid, "t": title})
+        return jsonify({"id": guid, "title": title, "url": f"/chat/{guid}"})
     else:
-        # 分页参数：page（从1开始），page_size（默认20，最大100）
         try:
             page = max(1, int(request.args.get("page", "1")))
         except Exception:
@@ -449,13 +458,14 @@ def api_conversations():
         with engine.begin() as conn:
             total = conn.execute(text("SELECT COUNT(1) FROM conversations WHERE user_id=:u"), {"u": uid}).scalar()
             rs = conn.execute(
-                text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC LIMIT :lim OFFSET :off"),
+                text(
+                    "SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC LIMIT :lim OFFSET :off"),
                 {"u": uid, "lim": page_size, "off": offset}
             ).mappings().all()
         items = []
         for r in rs:
             d = dict(r)
-            d["url"] = f"/chat/{d['id']}"
+            d["url"] = f"/chat/{d['id']}"  # id 即 GUID
             items.append(d)
         return jsonify({"items": items, "total": int(total), "page": page, "page_size": page_size})
 
@@ -463,19 +473,18 @@ def api_conversations():
 def api_messages():
     require_login()
     uid = current_user()["id"]
-    conv_id = request.args.get("conv_id")
-    # 允许从 Referer 的 /chat/<guid> 回落解析
+    conv_id = request.args.get("conv_id")  # 现在传入的是 GUID
+    # 从 Referer 的 /chat/<guid> 回落解析
     if not conv_id:
         ref = request.headers.get("Referer") or ""
         try:
             guid = ref.rstrip("/").rsplit("/", 1)[-1]
-            if guid.isdigit():
-                conv_id = guid
+            conv_id = guid
         except Exception:
             pass
     if not conv_id:
         return jsonify({"items": [], "total": 0, "page": 1, "page_size": 20})
-    # 分页参数
+    # 分页
     try:
         page = max(1, int(request.args.get("page", "1")))
     except Exception:
@@ -487,45 +496,17 @@ def api_messages():
     page_size = max(1, min(200, page_size))
     offset = (page - 1) * page_size
     with engine.begin() as conn:
-        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
+        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
+                           {"cid": conv_id, "u": uid}).scalar()
         if not own:
             abort(403)
         total = conn.execute(text("SELECT COUNT(1) FROM messages WHERE conv_id=:cid"), {"cid": conv_id}).scalar()
         rs = conn.execute(
-            text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC LIMIT :lim OFFSET :off"),
+            text(
+                "SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC LIMIT :lim OFFSET :off"),
             {"cid": conv_id, "lim": page_size, "off": offset}
         ).mappings().all()
     return jsonify({"items": [dict(r) for r in rs], "total": int(total), "page": page, "page_size": page_size})
-
-# 新增：重命名会话
-@app.route("/chat/api/conversations/<int:conv_id>", methods=["PATCH"])
-def api_conversation_rename(conv_id: int):
-    require_login()
-    uid = current_user()["id"]
-    body = request.get_json(force=True, silent=True) or {}
-    title = (body.get("title") or "").strip()
-    if not title:
-        return jsonify({"error": "title 不能为空"}), 400
-    if len(title) > 200:
-        return jsonify({"error": "title 过长"}), 400
-    with engine.begin() as conn:
-        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
-        if not own:
-            abort(403)
-        conn.execute(text("UPDATE conversations SET title=:t WHERE id=:cid"), {"t": title, "cid": conv_id})
-    return jsonify({"ok": True})
-
-# 新增：删除会话（级联删除消息）
-@app.route("/chat/api/conversations/<int:conv_id>", methods=["DELETE"])
-def api_conversation_delete(conv_id: int):
-    require_login()
-    uid = current_user()["id"]
-    with engine.begin() as conn:
-        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
-        if not own:
-            abort(403)
-        conn.execute(text("DELETE FROM conversations WHERE id=:cid"), {"cid": conv_id})
-    return jsonify({"ok": True})
 
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
