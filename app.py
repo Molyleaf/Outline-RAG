@@ -319,34 +319,20 @@ def rerank(query, passages, top_k=5):
     ranked = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
     return ranked
 
-def _log_chat_messages_for_debug(messages, stream_flag):
-    try:
-        if not SAFE_LOG_CHAT_INPUT:
-            return
-        # 提取要发送给大模型的文本内容
-        parts = []
-        for m in messages:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if not isinstance(content, str):
-                # 若为复杂结构，尽量序列化
-                content = json.dumps(content, ensure_ascii=False)
-            parts.append(f"{role}: {content}")
-        joined = "\n---\n".join(parts)
-        if len(joined) > MAX_LOG_INPUT_CHARS:
-            joined = joined[:MAX_LOG_INPUT_CHARS] + f"...(truncated, total={len(joined)})"
-        logger.info("ChatCompletion request (stream=%s):\n%s", stream_flag, joined)
-    except Exception as e:
-        logger.warning("Failed to log chat messages: %s", e)
+# def _log_chat_messages_for_debug(messages, stream_flag):
+#     try:
+#         return
+#     except Exception as e:
+#         logger.warning("Failed to log chat messages: %s", e)
 
 def chat_completion(messages, temperature=0.2):
-    _log_chat_messages_for_debug(messages, stream_flag=False)
+    # _log_chat_messages_for_debug(messages, stream_flag=False)
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": False}
     res = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN)
     return res["choices"][0]["message"]["content"]
 
 def chat_completion_stream(messages, temperature=0.2):
-    _log_chat_messages_for_debug(messages, stream_flag=True)
+    # _log_chat_messages_for_debug(messages, stream_flag=True)
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     try:
@@ -736,4 +722,6 @@ def healthz():
     return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    # 当直接运行时给出提示，推荐使用 gunicorn 启动
+    logger.info("This app is intended to be run with gunicorn, e.g.: gunicorn -w 2 -k gthread -b 0.0.0.0:%s app:app", PORT)
+    app.run(host="0.0.0.0", port=PORT, use_reloader=False)
