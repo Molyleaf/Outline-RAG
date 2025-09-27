@@ -61,6 +61,8 @@ SECRET_KEY = os.getenv("SECRET_KEY", None) or base64.urlsafe_b64encode(os.urando
 # Flask
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.secret_key = SECRET_KEY
+# 确保 Flask JSON 使用 UTF-8 且不转义中文
+app.config["JSON_AS_ASCII"] = False
 DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 engine: Engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
 
@@ -220,16 +222,23 @@ def logout():
 def chat_page():
     if "user" not in session:
         return redirect("/chat/login")
-    return send_from_directory(app.static_folder, "index.html")
+    resp = send_from_directory(app.static_folder, "index.html")
+    # 明确声明 HTML 编码
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return resp
 
 # 新增静态资源直达路由（用于反向代理固定路径）
 @app.route("/chat/static/style.css")
 def chat_static_style():
-    return send_from_directory(app.static_folder, "style.css")
+    resp = send_from_directory(app.static_folder, "style.css")
+    resp.headers["Content-Type"] = "text/css; charset=utf-8"
+    return resp
 
 @app.route("/chat/static/script.js")
 def chat_static_script():
-    return send_from_directory(app.static_folder, "script.js")
+    resp = send_from_directory(app.static_folder, "script.js")
+    resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    return resp
 
 # API：用户信息
 @app.route("/chat/api/me")
@@ -358,9 +367,9 @@ def search_similar(query, k=12):
     qv_text = json.dumps(q_emb)
     with engine.begin() as conn:
         rs = conn.execute(text("""
-            SELECT id, doc_id, idx, content, 1 - (embedding <=> to_vector(:qv_text)) AS score
+            SELECT id, doc_id, idx, content, 1 - (embedding <=> (:qv_text)::vector) AS score
             FROM chunks
-            ORDER BY embedding <=> to_vector(:qv_text)
+            ORDER BY embedding <=> (:qv_text)::vector
             LIMIT :k
         """), {"qv_text": qv_text, "k": k}).mappings().all()
     return [dict(r) for r in rs]
@@ -616,7 +625,8 @@ def api_ask():
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
                              {"cid": conv_id, "c": full})
-        return app.response_class(generate(), mimetype="text/event-stream")
+        # 明确 SSE 的编码
+        return app.response_class(generate(), mimetype="text/event-stream; charset=utf-8")
 
 from werkzeug.utils import secure_filename
 
