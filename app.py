@@ -415,23 +415,32 @@ def outline_get_doc(doc_id):
 # 同步：全量刷新
 def refresh_all():
     docs = outline_list_docs()
+    # 一次性清空相关表，避免外键限制与锁顺序问题
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE chunks RESTART IDENTITY CASCADE"))
-        conn.execute(text("TRUNCATE documents CASCADE"))
+        conn.execute(text("TRUNCATE TABLE chunks, documents RESTART IDENTITY CASCADE"))
+    # 逐文档 upsert，避免主键冲突导致整个过程失败
     for d in docs:
         doc_id = d["id"]
         info = outline_get_doc(doc_id)
-        if not info: continue
+        if not info:
+            continue
         title = info.get("title") or ""
         content = info.get("text") or ""
         updated_at = info.get("updatedAt") or info.get("updated_at") or datetime.now(timezone.utc).isoformat()
         chunks = chunk_text(content)
         if not chunks:
+            # 没有内容则跳过
             continue
         embs = create_embeddings(chunks)
         with engine.begin() as conn:
-            conn.execute(text("INSERT INTO documents (id, title, content, updated_at) VALUES (:id,:t,:c,:u)"),
-                         {"id": doc_id, "t": title, "c": content, "u": updated_at})
+            # documents 使用 upsert，避免重复
+            conn.execute(text("""
+                INSERT INTO documents (id, title, content, updated_at)
+                VALUES (:id, :t, :c, :u)
+                ON CONFLICT (id) DO UPDATE
+                SET title=EXCLUDED.title, content=EXCLUDED.content, updated_at=EXCLUDED.updated_at
+            """), {"id": doc_id, "t": title, "c": content, "u": updated_at})
+            # 重建该文档的 chunks
             for idx, (ck, emb) in enumerate(zip(chunks, embs)):
                 conn.execute(text("INSERT INTO chunks (doc_id, idx, content, embedding) VALUES (:d,:i,:c,:e)"),
                              {"d": doc_id, "i": idx, "c": ck, "e": emb})
@@ -473,7 +482,12 @@ def delete_doc(doc_id):
 @app.route("/chat/update/all", methods=["POST"])
 def update_all():
     require_login()
-    refresh_all()
+    # 可选：避免并发刷新（简单互斥）
+    try:
+      refresh_all()
+    except Exception as e:
+      logger.exception("refresh_all failed: %s", e)
+      return jsonify({"ok": False, "error": "refresh_all failed"}), 500
     return jsonify({"ok": True})
 
 # 端点：Webhook 增量
