@@ -544,7 +544,6 @@ def http_post_json(url, payload, token, stream=False):
         allowed_methods=["POST"],
         raise_on_status=False,
     )
-    session_req.mount("http://", HTTPAdapter(max_retries=retry))
     session_req.mount("https://", HTTPAdapter(max_retries=retry))
     try:
         if not stream:
