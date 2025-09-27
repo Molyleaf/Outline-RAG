@@ -1,103 +1,103 @@
 <!doctype html>
 <html lang="zh">
 <head>
-  <meta charset="utf-8" />
-  <title>Outline RAG Chat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/static/style.css" />
-  <script>
-    // 主题初始化：localStorage 优先，其次系统偏好
-    (function () {
-      try {
-        const saved = localStorage.getItem('theme'); // 'light' | 'dark' | 'system' | null
-        const root = document.documentElement;
-        if (saved === 'light' || saved === 'dark') {
-          root.setAttribute('data-theme', saved);
-        } else {
-          root.setAttribute('data-theme', 'system');
-        }
-      } catch (e) {}
-    })();
-  </script>
+	<meta charset="utf-8" />
+	<title>Outline RAG Chat</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link rel="stylesheet" href="/chat/static/style.css" />
+	<script>
+        // 主题初始化：localStorage 优先，其次系统偏好
+        (function () {
+            try {
+                const saved = localStorage.getItem('theme'); // 'light' | 'dark' | 'system' | null
+                const root = document.documentElement;
+                if (saved === 'light' || saved === 'dark') {
+                    root.setAttribute('data-theme', saved);
+                } else {
+                    root.setAttribute('data-theme', 'system');
+                }
+            } catch (e) {}
+        })();
+	</script>
 </head>
 <body>
 <div class="app">
-  <div class="sidebar">
-    <div class="titlebar">
-      <strong>对话</strong>
-      <button class="btn" id="newConv">新建</button>
-    </div>
-    <div id="convs"></div>
-  </div>
-  <div class="main">
-    <div class="topbar">
-      <div class="actions">
-        <label class="upload">
-          <input type="file" id="fileInput" style="display:none" />
-          <span class="btn tonal">上传附件</span>
-        </label>
-      </div>
-      <div class="menu" id="menu">
-        <div class="menu-section">
-          <div class="menu-label">主题</div>
-          <div class="menu-radio" data-theme="system">系统</div>
-          <div class="menu-radio" data-theme="light">浅色</div>
-          <div class="menu-radio" data-theme="dark">深色</div>
-        </div>
-        <div class="menu-divider"></div>
-        <a href="/logout">登出</a>
-        <a id="refreshAll" href="#">手动刷新 Outline</a>
-      </div>
-      <div class="avatar" id="avatar" title="菜单"></div>
-    </div>
-    <div class="chat" id="chat"></div>
-    <div class="input">
-      <textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
-      <button class="btn" id="send">发送</button>
-      <label class="switch">
-        <input type="checkbox" id="streamToggle" checked />
-        <span>流式</span>
-      </label>
-    </div>
-  </div>
+	<div class="sidebar">
+		<div class="titlebar">
+			<strong>对话</strong>
+			<button class="btn" id="newConv">新建</button>
+		</div>
+		<div id="convs"></div>
+	</div>
+	<div class="main">
+		<div class="topbar">
+			<div class="actions">
+				<label class="upload">
+					<input type="file" id="fileInput" style="display:none" />
+					<span class="btn tonal">上传附件</span>
+				</label>
+			</div>
+			<div class="menu" id="menu">
+				<div class="menu-section">
+					<div class="menu-label">主题</div>
+					<div class="menu-radio" data-theme="system">系统</div>
+					<div class="menu-radio" data-theme="light">浅色</div>
+					<div class="menu-radio" data-theme="dark">深色</div>
+				</div>
+				<div class="menu-divider"></div>
+				<a href="/logout">登出</a>
+				<a id="refreshAll" href="#">手动刷新 Outline</a>
+			</div>
+			<div class="avatar" id="avatar" title="菜单"></div>
+		</div>
+		<div class="chat" id="chat"></div>
+		<div class="input">
+			<textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
+			<button class="btn" id="send">发送</button>
+			<label class="switch">
+				<input type="checkbox" id="streamToggle" checked />
+				<span>流式</span>
+			</label>
+		</div>
+	</div>
 </div>
-<script src="/static/script.js"></script>
+<script src="/chat/static/script.js"></script>
 <script>
-  // 菜单主题切换逻辑
-  (function () {
-    const root = document.documentElement;
-    const radios = document.querySelectorAll('#menu .menu-radio');
-    function renderActive() {
-      const mode = root.getAttribute('data-theme') || 'system';
-      radios.forEach(el => {
-        if (el.getAttribute('data-theme') === mode) el.classList.add('active');
-        else el.classList.remove('active');
-      });
-    }
-    radios.forEach(el => {
-      el.addEventListener('click', () => {
-        const mode = el.getAttribute('data-theme');
-        if (mode === 'light' || mode === 'dark') {
-          root.setAttribute('data-theme', mode);
-          localStorage.setItem('theme', mode);
-        } else {
-          root.setAttribute('data-theme', 'system');
-          localStorage.setItem('theme', 'system');
+    // 菜单主题切换逻辑
+    (function () {
+        const root = document.documentElement;
+        const radios = document.querySelectorAll('#menu .menu-radio');
+        function renderActive() {
+            const mode = root.getAttribute('data-theme') || 'system';
+            radios.forEach(el => {
+                if (el.getAttribute('data-theme') === mode) el.classList.add('active');
+                else el.classList.remove('active');
+            });
         }
+        radios.forEach(el => {
+            el.addEventListener('click', () => {
+                const mode = el.getAttribute('data-theme');
+                if (mode === 'light' || mode === 'dark') {
+                    root.setAttribute('data-theme', mode);
+                    localStorage.setItem('theme', mode);
+                } else {
+                    root.setAttribute('data-theme', 'system');
+                    localStorage.setItem('theme', 'system');
+                }
+                renderActive();
+            });
+        });
         renderActive();
-      });
-    });
-    renderActive();
 
-    // 系统主题变化时，若为 system 模式则自动更新
-    const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    mql.addEventListener?.('change', () => {
-      const saved = localStorage.getItem('theme') || 'system';
-      if (saved === 'system') {
-        root.setAttribute('data-theme', 'system'); // 触发基于媒体查询的变量
-      }
-    });
-  })();
+        // 系统主题变化时，若为 system 模式则自动更新
+        const mql = window.matchMedia('(prefers-color-scheme: dark)');
+        mql.addEventListener?.('change', () => {
+            const saved = localStorage.getItem('theme') || 'system';
+            if (saved === 'system') {
+                root.setAttribute('data-theme', 'system'); // 触发基于媒体查询的变量
+            }
+        });
+    })();
 </script>
 </body>
 </html>
