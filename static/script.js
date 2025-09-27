@@ -10,6 +10,11 @@ const fileInput = document.getElementById('fileInput');
 const streamToggle = document.getElementById('streamToggle');
 
 let currentConvId = null;
+// 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
+(function initConvIdFromUrl(){
+  const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/(\w[\w-]*)$/);
+  if (m) currentConvId = m[1];
+})();
 let userInfo = null;
 
 avatar.addEventListener('click', () => {
@@ -52,13 +57,23 @@ async function loadUser() {
 async function loadConvs() {
   const data = await api('/chat/api/conversations');
   convsEl.innerHTML = '';
-  (data?.items || data || []).forEach(c => {
+  const list = data?.items || []; // 保证为数组
+  list.forEach(c => {
     const row = document.createElement('div');
-    row.className = 'conv' + (c.id === currentConvId ? ' active' : '');
+    row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
     const titleEl = document.createElement('span');
     titleEl.className = 'conv-title';
     titleEl.textContent = c.title || ('会话 #' + c.id);
-    titleEl.onclick = () => { currentConvId = c.id; loadConvs(); loadMessages(); };
+    titleEl.onclick = () => {
+      // 点击历史会话时，和 ChatGPT 一样跳转到带 GUID 的 URL
+      if (c.url) {
+        location.href = c.url;
+      } else {
+        currentConvId = c.id;
+        loadConvs();
+        loadMessages();
+      }
+    };
 
     const menuBtn = document.createElement('button');
     menuBtn.className = 'conv-menu';
@@ -79,7 +94,6 @@ async function loadConvs() {
       if (!t) { alert('标题不能为空'); return; }
       const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
       if (res?.ok || res?.status === 'ok') {
-        if (c.id === currentConvId) { /* 保持当前选中 */ }
         await loadConvs();
       } else {
         alert('重命名失败');
@@ -91,7 +105,7 @@ async function loadConvs() {
       if (!confirm('确定删除该会话？此操作不可恢复。')) { menu.style.display = 'none'; return; }
       const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
       if (res?.ok) {
-        if (currentConvId === c.id) { currentConvId = null; chatEl.innerHTML = ''; }
+        if (String(currentConvId) === String(c.id)) { currentConvId = null; chatEl.innerHTML = ''; }
         await loadConvs();
       } else {
         alert('删除失败');
@@ -121,8 +135,9 @@ async function loadConvs() {
 async function loadMessages() {
   chatEl.innerHTML = '';
   if (!currentConvId) return;
-  const msgs = await api('/chat/api/messages?conv_id=' + currentConvId);
-  (msgs || []).forEach(m => appendMsg(m.role, m.content));
+  const res = await api('/chat/api/messages?conv_id=' + currentConvId);
+  const msgs = res?.items || []; // 服务端返回对象，取 items
+  msgs.forEach(m => appendMsg(m.role, m.content));
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
@@ -137,7 +152,13 @@ function appendMsg(role, text) {
 
 newConvBtn.addEventListener('click', async () => {
   const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: '新会话'})});
-  currentConvId = c.id;
+  // 统一跳转到包含 GUID 的 URL，避免 400 与状态错乱
+  if (c?.url) {
+    location.href = c.url;
+    return;
+  }
+  // 兜底：仍旧使用 id
+  currentConvId = c?.id;
   await loadConvs();
   await loadMessages();
 });
@@ -153,24 +174,21 @@ qEl.addEventListener('keydown', (e) => {
 async function sendQuestion() {
   const text = qEl.value.trim();
   if (!text) return;
+
   if (!currentConvId) {
     const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30)})});
-    currentConvId = c.id;
+    if (c?.url) { location.href = c.url; return; }
+    currentConvId = c?.id;
     await loadConvs();
   }
   appendMsg('user', text);
   qEl.value = '';
 
-  if (!streamToggle.checked) {
-    const res = await api('/chat/api/ask', {method:'POST', body: JSON.stringify({conv_id: currentConvId, query: text, stream: false})});
-    appendMsg('assistant', res.answer || '');
-    return;
-  }
-
+  // 流式始终开启：不再依赖隐藏的开关节点
   const placeholder = appendMsg('assistant', '');
   const res = await fetch('/chat/api/ask', {
     method: 'POST',
-    body: JSON.stringify({conv_id: currentConvId, query: text, stream: true}),
+    body: JSON.stringify({conv_id: currentConvId, query: text}),
     headers: {'Content-Type':'application/json'},
     credentials: 'include'
   });
@@ -207,4 +225,8 @@ async function sendQuestion() {
 (async function init(){
   await loadUser();
   await loadConvs();
+  // 初次进入带 GUID 的地址时加载消息
+  if (currentConvId) {
+    await loadMessages();
+  }
 })();

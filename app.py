@@ -431,7 +431,7 @@ def api_conversations():
         with engine.begin() as conn:
             r = conn.execute(text("INSERT INTO conversations (user_id, title) VALUES (:u,:t) RETURNING id"), {"u": uid, "t": title})
             cid = r.scalar()
-        # 生成 GUID 风格的 URL（与 ChatGPT 类似）
+        # 生成 GUID 风格 URL；当前以数值 id 充当 GUID
         guid = str(cid)
         return jsonify({"id": cid, "title": title, "url": f"/chat/{guid}"})
     else:
@@ -464,12 +464,10 @@ def api_messages():
     require_login()
     uid = current_user()["id"]
     conv_id = request.args.get("conv_id")
-    # 允许前端传入 GUID（此处以数值 id 作为 GUID），从路径读取时也可重用该参数
+    # 允许从 Referer 的 /chat/<guid> 回落解析
     if not conv_id:
-        # 尝试从 Referer 的 /chat/<guid> 中解析
         ref = request.headers.get("Referer") or ""
         try:
-            # 简单解析末尾段为 guid
             guid = ref.rstrip("/").rsplit("/", 1)[-1]
             if guid.isdigit():
                 conv_id = guid
