@@ -27,6 +27,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
+# 新增：可调优的检索/重排参数（env）
+TOP_K = int(os.getenv("TOP_K", "12"))  # 向量检索召回数（search_similar）
+K = int(os.getenv("K", "6"))           # reranker 选取 top_n
+
 POSTGRES_DB = os.getenv("POSTGRES_DB", "outline_rag")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "outline")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "outlinepass")
@@ -49,6 +53,7 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
 CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
 CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
+
 SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
 
@@ -111,6 +116,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   title TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- 新增：覆盖索引（user_id, created_at desc）并包含 title 以覆盖列表查询
+CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversations(user_id, created_at DESC) INCLUDE (title);
 
 CREATE TABLE IF NOT EXISTS messages (
   id BIGSERIAL PRIMARY KEY,
@@ -153,6 +160,42 @@ try:
 except Exception as e:
     logger.exception("数据库初始化失败：%s", e)
     raise
+
+# 启动时对外部依赖进行自检（embedding/reranker/chat 三个 URL/TOKEN）
+def _startup_self_check():
+    def _req_ok(url, token, payload):
+        if not url or not token:
+            return False
+        try:
+            r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=10)
+            return 200 <= r.status_code < 500  # 4xx 也认为连通性正常（如参数错误）
+        except Exception:
+            return False
+
+    errs = []
+    # embedding
+    if not EMBEDDING_API_URL or not EMBEDDING_API_TOKEN:
+        errs.append("缺少 EMBEDDING_API_URL 或 EMBEDDING_API_TOKEN")
+    elif not _req_ok(f"{EMBEDDING_API_URL}/v1/embeddings", {"Authorization": f"Bearer {EMBEDDING_API_TOKEN}"}, {"model": EMBEDDING_MODEL, "input": ["ping"]}):
+        errs.append("无法连通 Embedding 服务，请检查 EMBEDDING_API_URL/TOKEN/MODEL")
+    # reranker
+    if not RERANKER_API_URL or not RERANKER_API_TOKEN:
+        errs.append("缺少 RERANKER_API_URL 或 RERANKER_API_TOKEN")
+    elif not _req_ok(f"{RERANKER_API_URL}/v1/rerank", {"Authorization": f"Bearer {RERANKER_API_TOKEN}"}, {"model": RERANKER_MODEL, "query": "ping", "documents": ["a", "b"], "top_n": 1}):
+        errs.append("无法连通 Reranker 服务，请检查 RERANKER_API_URL/TOKEN/MODEL")
+    # chat
+    if not CHAT_API_URL or not CHAT_API_TOKEN:
+        errs.append("缺少 CHAT_API_URL 或 CHAT_API_TOKEN")
+    elif not _req_ok(f"{CHAT_API_URL}/v1/chat/completions", {"Authorization": f"Bearer {CHAT_API_TOKEN}"}, {"model": CHAT_MODEL, "messages": [{"role":"user","content":"ping"}]}):
+        errs.append("无法连通 Chat 服务，请检查 CHAT_API_URL/TOKEN/MODEL")
+
+    if errs:
+        for e in errs:
+            logger.critical("[启动自检] %s", e)
+        raise SystemExit("外部依赖自检失败，拒绝启动")
+
+# 在数据库初始化后执行外部依赖自检
+_startup_self_check()
 
 # 删除重复的 Flask 实例化，避免覆盖配置与路由
 # app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -380,9 +423,24 @@ def api_conversations():
             cid = r.scalar()
         return jsonify({"id": cid, "title": title})
     else:
+        # 分页参数：page（从1开始），page_size（默认20，最大100）
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+        except Exception:
+            page = 1
+        try:
+            page_size = int(request.args.get("page_size", "20"))
+        except Exception:
+            page_size = 20
+        page_size = max(1, min(100, page_size))
+        offset = (page - 1) * page_size
         with engine.begin() as conn:
-            rs = conn.execute(text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC"), {"u": uid}).mappings().all()
-        return jsonify([dict(r) for r in rs])
+            total = conn.execute(text("SELECT COUNT(1) FROM conversations WHERE user_id=:u"), {"u": uid}).scalar()
+            rs = conn.execute(
+                text("SELECT id, title, created_at FROM conversations WHERE user_id=:u ORDER BY created_at DESC LIMIT :lim OFFSET :off"),
+                {"u": uid, "lim": page_size, "off": offset}
+            ).mappings().all()
+        return jsonify({"items": [dict(r) for r in rs], "total": int(total), "page": page, "page_size": page_size})
 
 @app.route("/chat/api/messages")
 def api_messages():
@@ -390,13 +448,28 @@ def api_messages():
     uid = current_user()["id"]
     conv_id = request.args.get("conv_id")
     if not conv_id:
-        return jsonify([])
+        return jsonify({"items": [], "total": 0, "page": 1, "page_size": 20})
+    # 分页参数
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except Exception:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", "50"))
+    except Exception:
+        page_size = 50
+    page_size = max(1, min(200, page_size))
+    offset = (page - 1) * page_size
     with engine.begin() as conn:
         own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": uid}).scalar()
         if not own:
             abort(403)
-        rs = conn.execute(text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC"), {"cid": conv_id}).mappings().all()
-    return jsonify([dict(r) for r in rs])
+        total = conn.execute(text("SELECT COUNT(1) FROM messages WHERE conv_id=:cid"), {"cid": conv_id}).scalar()
+        rs = conn.execute(
+            text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC LIMIT :lim OFFSET :off"),
+            {"cid": conv_id, "lim": page_size, "off": offset}
+        ).mappings().all()
+    return jsonify({"items": [dict(r) for r in rs], "total": int(total), "page": page, "page_size": page_size})
 
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
