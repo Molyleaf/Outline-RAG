@@ -346,15 +346,14 @@ def chat_completion(messages, temperature=0.2):
 
 def chat_completion_stream(messages, temperature=0.2):
     _log_chat_messages_for_debug(messages, stream_flag=True)
+    # 以 OpenAI SSE 格式透传
+    payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     try:
-        # 明确使用 utf-8 解码行数据，避免平台默认编码
-        for line in resp.iter_lines(decode_unicode=True, delimiter=b"\n"):
+        for line in resp.iter_lines(decode_unicode=True):
             if not line:
                 continue
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="replace")
             if line.startswith("data: "):
                 data = line[len("data: "):]
                 if data == "[DONE]":
@@ -366,9 +365,6 @@ def chat_completion_stream(messages, temperature=0.2):
                 except Exception:
                     delta = ""
                 if delta:
-                    # 确保 delta 是标准 str（Unicode）
-                    if isinstance(delta, bytes):
-                        delta = delta.decode("utf-8", errors="replace")
                     yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
     finally:
         resp.close()
@@ -577,24 +573,6 @@ def upload():
     return resp
 
 # RAG 问答（支持流式）
-def _maybe_fix_mojibake(s: str) -> str:
-    """
-    尝试修复典型 UTF-8->Latin-1 再显示导致的乱码（如 'æ ¹æ®...'）
-    仅在检测到高概率 mojibake 时才矫正；否则原样返回。
-    """
-    if not s:
-        return s
-    # 经验判定：出现大量 'Ã', 'Â', 'æ', 'å', 'ç' 等并且中文比例极低
-    suspicious = sum(ch in "ÃÂæåçéèöøñþýÆÅÇÉÈÖØÑÞÝ" for ch in s)
-    has_cjk = any('\u4e00' <= ch <= '\u9fff' for ch in s)
-    if suspicious >= max(3, len(s)//20) and not has_cjk:
-        try:
-            # 把错误地按 Latin-1 读出的“字符”还原为原始字节，再按 UTF-8 解码
-            return s.encode("latin-1", errors="strict").decode("utf-8", errors="strict")
-        except Exception:
-            return s
-    return s
-
 @app.route("/chat/api/ask", methods=["POST"])
 def api_ask():
     require_login()
@@ -636,8 +614,6 @@ def api_ask():
 
     if not stream:
         answer = chat_completion(messages)
-        # 防止错误字符串落库：仅在确认为 mojibake 时尝试修复
-        answer = _maybe_fix_mojibake(answer)
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"), {"cid": conv_id, "c": answer})
         resp = make_response(jsonify({"answer": answer}))
@@ -645,8 +621,11 @@ def api_ask():
         return resp
     else:
         def generate():
+            # 发送一个零宽不换行空格作为 UTF-8 提示
+            yield "\ufeff"
             buffer = []
             for chunk in chat_completion_stream(messages):
+                # chunk 已是 "data: {...}\n\n" 或 DONE
                 if chunk.startswith("data: ") and "[DONE]" not in chunk:
                     try:
                         payload = json.loads(chunk[len("data: "):].strip())
@@ -656,10 +635,68 @@ def api_ask():
                     if delta:
                         buffer.append(delta)
                 yield chunk
-            # 流结束后落库（同样做一次防乱码矫正）
+            # 流结束后落库
             full = "".join(buffer)
-            full = _maybe_fix_mojibake(full)
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
                              {"cid": conv_id, "c": full})
-        return app.response
+        return app.response_class(generate(), mimetype="text/event-stream; charset=utf-8")
+
+from werkzeug.utils import secure_filename
+
+MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "10485760"))  # 10MB
+ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FILE_EXTENSIONS", "txt,md,pdf").split(",") if e.strip()])
+ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "/app/data/attachments")
+
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+
+def allowed_file(filename):
+    if "." not in filename:
+        return False
+    ext = filename.rsplit(".", 1)[1].lower()
+    return ext in ALLOWED_FILE_EXTENSIONS
+# 健康检查
+ARCHIVE_DIR = os.getenv("ARCHIVE_DIR", "/app/data/archive")
+
+def archive_old_messages(days=90, batch_size=5000):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    while True:
+        with engine.begin() as conn:
+            rows = conn.execute(text("""
+                SELECT id, conv_id, role, content, created_at
+                FROM messages
+                WHERE created_at < :cutoff
+                ORDER BY id
+                LIMIT :limit
+            """), {"cutoff": cutoff, "limit": batch_size}).mappings().all()
+            if not rows:
+                break
+            # 写入归档文件
+            ts = int(time.time())
+            fname = os.path.join(ARCHIVE_DIR, f"messages_archive_{ts}_{rows[0]['id']}_{rows[-1]['id']}.jsonl")
+            with open(fname, "a", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(dict(r), ensure_ascii=False) + "\n")
+            # 删除已归档
+            ids = [r["id"] for r in rows]
+            conn.execute(text("DELETE FROM messages WHERE id = ANY(:ids)"), {"ids": ids})
+
+from datetime import timedelta
+_last_archive_ts = 0
+
+@app.route("/healthz")
+def healthz():
+    global _last_archive_ts
+    now = time.time()
+    if now - _last_archive_ts > 3600:  # 每小时尝试归档一次
+        try:
+            archive_old_messages(days=90, batch_size=2000)
+        except Exception:
+            pass
+        _last_archive_ts = now
+    return "ok"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
