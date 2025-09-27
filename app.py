@@ -351,8 +351,13 @@ def chat_completion_stream(messages, temperature=0.2):
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     try:
-        for line in resp.iter_lines(decode_unicode=True):
+        # 关键：不要让 requests 先用未知编码解码，改为读取字节并按 UTF-8 明确解码
+        for line in resp.iter_lines(decode_unicode=False):
             if not line:
+                continue
+            try:
+                line = line.decode("utf-8", errors="ignore")
+            except Exception:
                 continue
             if line.startswith("data: "):
                 data = line[len("data: "):]
