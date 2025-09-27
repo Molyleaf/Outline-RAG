@@ -386,7 +386,8 @@ def chat_static_style():
     resp = send_from_directory(app.static_folder, "style.css")
     # 交由 Flask 自动推断 mimetype，也可保留如下行
     resp.headers["Content-Type"] = "text/css; charset=utf-8"
-    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    # 为主题切换允许较短缓存，便于快速生效（从 86400 降到 3600）
+    resp.headers.setdefault("Cache-Control", "public, max-age=3600")
     return resp
 
 @app.route("/chat/static/script.js")
