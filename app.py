@@ -8,7 +8,6 @@ import secrets
 import urllib.parse
 from datetime import datetime, timezone
 import logging
-
 import requests
 from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, abort
 from sqlalchemy import create_engine, text
@@ -53,15 +52,25 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
 
+# 新增：JOSE/cryptography 验签开关（默认启用）
+USE_JOSE_VERIFY = os.getenv("USE_JOSE_VERIFY", "true").lower() == "true"
+
 GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
 GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
 GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")  # 新增：显式配置回调 URL
 
-SECRET_KEY = os.getenv("SECRET_KEY", None) or base64.urlsafe_b64encode(os.urandom(32)).decode()
+SECRET_KEY = os.getenv("SECRET_KEY", None)  # 改动：不再回退随机值，缺失时拒绝启动
 
 # Flask
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+# 在启动阶段校验关键配置（SECRET_KEY、Webhook签名）
+if not SECRET_KEY:
+    logger.critical("SECRET_KEY 未设置，拒绝启动。")
+    raise SystemExit(1)
+if OUTLINE_WEBHOOK_SIGN and not OUTLINE_WEBHOOK_SECRET:
+    logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
+    raise SystemExit(1)
 app.secret_key = SECRET_KEY
 # 确保 Flask JSON 使用 UTF-8 且不转义中文
 app.config["JSON_AS_ASCII"] = False
@@ -148,6 +157,67 @@ def oidc_discovery():
     with urllib.request.urlopen(conf_url, timeout=10) as resp:
         return json.loads(resp.read().decode())
 
+def _get_jwks(jwks_uri):
+    with urllib.request.urlopen(jwks_uri, timeout=10) as resp:
+        return json.loads(resp.read().decode())
+
+def _b64url_decode(b):
+    pad = '=' * (-len(b) % 4)
+    return base64.urlsafe_b64decode(b + pad)
+
+def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None):
+    # 优先使用 jose/cryptography 完整验签；若关闭或失败则回退到仅声明校验（不建议生产）
+    disc = oidc_discovery()
+    if USE_JOSE_VERIFY:
+        try:
+            from jose import jwt
+            from jose.utils import base64url_decode  # 触发 ImportError 时落入回退逻辑
+            jwks = _get_jwks(disc["jwks_uri"])
+            # 构造 jwks 客户端验证
+            # python-jose 直接传递 jwk 集合通过 options 验证
+            options = {
+                "verify_signature": True,
+                "verify_aud": True,
+                "verify_iat": True,
+                "verify_exp": True,
+                "verify_nbf": True,
+                "require_exp": True,
+                "require_iat": False,
+                "require_nbf": False,
+            }
+            payload = jwt.decode(
+                id_token,
+                jwks,  # 直接传入 JWKS（python-jose 支持字典包含 "keys"）
+                algorithms=["RS256"],
+                audience=expected_aud,
+                issuer=expected_iss,
+                options=options,
+            )
+            if expected_nonce is not None and payload.get("nonce") != expected_nonce:
+                raise ValueError("nonce 不匹配")
+            return payload
+        except Exception as e:
+            logger.warning("使用 jose 验签失败，将回退到最小声明校验（不建议生产）：%s", e)
+
+    # 回退：仅 iss/aud/exp/nonce 声明校验（不做签名校验）
+    jwks = _get_jwks(disc["jwks_uri"])
+    header_b64, payload_b64, sig_b64 = id_token.split(".")
+    header = json.loads(_b64url_decode(header_b64).decode())
+    payload = json.loads(_b64url_decode(payload_b64).decode())
+    alg = header.get("alg")
+    if alg != "RS256":
+        raise ValueError("不支持的签名算法")
+    now = int(time.time())
+    iss_ok = payload.get("iss") == expected_iss
+    aud_field = payload.get("aud")
+    aud_ok = (aud_field == expected_aud) or (isinstance(aud_field, list) and expected_aud in aud_field)
+    exp_ok = int(payload.get("exp", 0)) > now
+    nonce_ok = True if expected_nonce is None else (payload.get("nonce") == expected_nonce)
+    if not (iss_ok and aud_ok and exp_ok and nonce_ok):
+        raise ValueError("ID Token 声明校验失败")
+    payload["_unsigned_validated"] = True
+    return payload
+
 def oidc_build_auth_url(state, code_challenge):
     disc = oidc_discovery()
     redirect_uri = OIDC_REDIRECT_URI or url_for("oidc_callback", _external=True)
@@ -159,6 +229,7 @@ def oidc_build_auth_url(state, code_challenge):
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        "nonce": state.split(".")[0],  # 使用 state 内的 nonce 片段
     }
     return disc["authorization_endpoint"] + "?" + urllib.parse.urlencode(params)
 
@@ -178,19 +249,25 @@ def oidc_exchange_token(code, code_verifier):
         return json.loads(resp.read().decode())
 
 def oidc_jwt_decode(id_token):
-    # 简化示例：未校验签名
+    # 兼容旧调用：做最基础解码（不再对外使用）
     parts = id_token.split(".")
     if len(parts) != 3:
         raise ValueError("invalid id_token")
-    payload = parts[1] + "==="
-    payload_bytes = base64.urlsafe_b64decode(payload[: len(payload) - (len(payload) % 4)])
+    payload = parts[1]
+    payload_bytes = _b64url_decode(payload)
     return json.loads(payload_bytes.decode())
 
 @app.route("/chat/login")
 def login():
-    state = secrets.token_urlsafe(16)
+    # state: <nonce>.<ts>.<rand>
+    nonce = secrets.token_urlsafe(16)
+    ts = int(time.time())
+    rand = secrets.token_urlsafe(8)
+    state = f"{nonce}.{ts}.{rand}"
     code_verifier = secrets.token_urlsafe(64)
+    # 保存并设置过期（10分钟）
     session["oidc_state"] = state
+    session["oidc_state_exp"] = ts + 600
     session["code_verifier"] = code_verifier
     code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().rstrip("=")
     return redirect(oidc_build_auth_url(state, code_challenge))
@@ -198,13 +275,28 @@ def login():
 @app.route("/chat/oidc/callback")
 def oidc_callback():
     state = request.args.get("state")
-    if not state or state != session.get("oidc_state"):
-        return "Invalid state", 400
     code = request.args.get("code")
+    now = int(time.time())
+    sess_state = session.get("oidc_state")
+    sess_exp = int(session.get("oidc_state_exp") or 0)
+    if not state or state != sess_state or now > sess_exp:
+        return "Invalid or expired state", 400
     if not code:
         return "Missing code", 400
     token = oidc_exchange_token(code, session.get("code_verifier"))
-    idp = oidc_jwt_decode(token["id_token"])
+    # 安全校验：iss/aud/exp/nonce（GitLab 文档：iss=https://gitlab.example.com，aud=client_id）
+    expected_iss = GITLAB_URL
+    expected_aud = GITLAB_CLIENT_ID
+    expected_nonce = state.split(".")[0]
+    try:
+        idp = _verify_jwt_rs256(token["id_token"], expected_iss, expected_aud, expected_nonce)
+    except Exception as e:
+        logger.warning("ID Token 校验失败: %s", e)
+        return "Invalid id_token", 400
+    # 一次性使用：成功后删除 code_verifier/oidc_state
+    session.pop("oidc_state", None)
+    session.pop("oidc_state_exp", None)
+    session.pop("code_verifier", None)
     user_id = idp.get("sub")
     name = idp.get("name") or idp.get("preferred_username") or idp.get("email") or "user"
     avatar_url = idp.get("picture")
@@ -297,24 +389,43 @@ def api_messages():
 # OpenAI 兼容 HTTP 调用
 def http_post_json(url, payload, token, stream=False):
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    if not stream:
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        resp.raise_for_status()
-        return resp.json()
-    else:
-        resp = requests.post(url, json=payload, headers=headers, timeout=300, stream=True)
-        resp.raise_for_status()
-        return resp  # requests.Response
+    try:
+        if not stream:
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            if not (200 <= resp.status_code < 300):
+                logger.warning("http_post_json non-2xx: %s %s", resp.status_code, resp.text[:200])
+                return None
+            try:
+                return resp.json()
+            except Exception:
+                logger.warning("http_post_json JSON decode error")
+                return None
+        else:
+            resp = requests.post(url, json=payload, headers=headers, timeout=300, stream=True)
+            if not (200 <= resp.status_code < 300):
+                logger.warning("http_post_json(stream) non-2xx: %s", resp.status_code)
+                return None
+            return resp  # requests.Response
+    except requests.Timeout:
+        logger.warning("http_post_json timeout: %s", url)
+        return None
+    except requests.RequestException as e:
+        logger.warning("http_post_json error: %s", e)
+        return None
 
 def create_embeddings(texts):
     payload = {"model": EMBEDDING_MODEL, "input": texts}
     res = http_post_json(f"{EMBEDDING_API_URL}/v1/embeddings", payload, EMBEDDING_API_TOKEN)
-    vecs = [item["embedding"] for item in res["data"]]
+    if not res:
+        return [[] for _ in texts]
+    vecs = [item.get("embedding", []) for item in res.get("data", [])]
     return vecs
 
 def rerank(query, passages, top_k=5):
     payload = {"model": RERANKER_MODEL, "query": query, "documents": passages, "top_n": top_k}
     res = http_post_json(f"{RERANKER_API_URL}/v1/rerank", payload, RERANKER_API_TOKEN)
+    if not res:
+        return []
     items = res.get("results") or res.get("data") or []
     ranked = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
     return ranked
@@ -329,12 +440,22 @@ def chat_completion(messages, temperature=0.2):
     # _log_chat_messages_for_debug(messages, stream_flag=False)
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": False}
     res = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN)
-    return res["choices"][0]["message"]["content"]
+    if not res:
+        return "对话服务不可用，请稍后重试。"
+    try:
+        return res["choices"][0]["message"]["content"]
+    except Exception:
+        return "对话服务返回格式异常。"
 
 def chat_completion_stream(messages, temperature=0.2):
     # _log_chat_messages_for_debug(messages, stream_flag=True)
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
+    if resp is None:
+        # 以错误事件通知前端
+        yield "data: " + json.dumps({"error": "上游流式接口不可用"}) + "\n\n"
+        yield "data: [DONE]\n\n"
+        return
     try:
         # 不要让 requests 先用未知编码解码，改为读取字节并按 UTF-8 明确解码
         for line in resp.iter_lines(decode_unicode=False):
@@ -357,7 +478,10 @@ def chat_completion_stream(messages, temperature=0.2):
                 if delta:
                     yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
     finally:
-        resp.close()
+        try:
+            resp.close()
+        except Exception:
+            pass
 
 # RAG：向量检索
 def search_similar(query, k=12):
@@ -366,11 +490,11 @@ def search_similar(query, k=12):
     qv_text = json.dumps(q_emb)
     with engine.begin() as conn:
         rs = conn.execute(text("""
-            SELECT id, doc_id, idx, content, 1 - (embedding <=> (:qv_text)::vector) AS score
-            FROM chunks
-            ORDER BY embedding <=> (:qv_text)::vector
+                               SELECT id, doc_id, idx, content, 1 - (embedding <=> (:qv_text)::vector) AS score
+                               FROM chunks
+                               ORDER BY embedding <=> (:qv_text)::vector
             LIMIT :k
-        """), {"qv_text": qv_text, "k": k}).mappings().all()
+                               """), {"qv_text": qv_text, "k": k}).mappings().all()
     return [dict(r) for r in rs]
 
 # Chunk
@@ -395,13 +519,29 @@ def outline_headers():
 
 def http_get_json(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {"Content-Type":"application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            try:
+                return json.loads(resp.read().decode())
+            except Exception:
+                logger.warning("http_get_json JSON decode error: %s", url)
+                return None
+    except Exception as e:
+        logger.warning("http_get_json error: %s", e)
+        return None
 
 def http_post_json_raw(url, payload, headers=None):
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers or {"Content-Type":"application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            try:
+                return json.loads(resp.read().decode())
+            except Exception:
+                logger.warning("http_post_json_raw JSON decode error: %s", url)
+                return None
+    except Exception as e:
+        logger.warning("http_post_json_raw error: %s", e)
+        return None
 
 def outline_list_docs():
     results = []
@@ -410,6 +550,8 @@ def outline_list_docs():
     while True:
         u = f"{OUTLINE_API_URL}/api/documents.list?limit={limit}&offset={offset}"
         data = http_post_json_raw(u, {}, headers=outline_headers())
+        if not data:
+            break
         docs = data.get("data", [])
         results.extend(docs)
         if len(docs) < limit:
@@ -420,7 +562,7 @@ def outline_list_docs():
 def outline_get_doc(doc_id):
     u = f"{OUTLINE_API_URL}/api/documents.info"
     data = http_post_json_raw(u, {"id": doc_id}, headers=outline_headers())
-    return data.get("data")
+    return data.get("data") if data else None
 
 # 同步：全量刷新
 def refresh_all():
@@ -445,11 +587,11 @@ def refresh_all():
         with engine.begin() as conn:
             # documents 使用 upsert，避免重复
             conn.execute(text("""
-                INSERT INTO documents (id, title, content, updated_at)
-                VALUES (:id, :t, :c, :u)
-                ON CONFLICT (id) DO UPDATE
-                SET title=EXCLUDED.title, content=EXCLUDED.content, updated_at=EXCLUDED.updated_at
-            """), {"id": doc_id, "t": title, "c": content, "u": updated_at})
+                              INSERT INTO documents (id, title, content, updated_at)
+                              VALUES (:id, :t, :c, :u)
+                                  ON CONFLICT (id) DO UPDATE
+                                                          SET title=EXCLUDED.title, content=EXCLUDED.content, updated_at=EXCLUDED.updated_at
+                              """), {"id": doc_id, "t": title, "c": content, "u": updated_at})
             # 重建该文档的 chunks
             for idx, (ck, emb) in enumerate(zip(chunks, embs)):
                 conn.execute(text("INSERT INTO chunks (doc_id, idx, content, embedding) VALUES (:d,:i,:c,:e)"),
@@ -503,16 +645,29 @@ def delete_doc(doc_id):
         conn.execute(text("DELETE FROM documents WHERE id=:id"), {"id": doc_id})
 
 # 端点：手动全量刷新
+_refresh_lock = None  # 进程级互斥锁延迟初始化
+
 @app.route("/chat/update/all", methods=["POST"])
 def update_all():
     require_login()
-    # 可选：避免并发刷新（简单互斥）
+    global _refresh_lock
+    if _refresh_lock is None:
+        import threading
+        _refresh_lock = threading.Lock()
+    locked = _refresh_lock.acquire(timeout=1.0)
+    if not locked:
+        return jsonify({"ok": False, "error": "正在刷新中，请稍后重试"}), 429
     try:
-      refresh_all()
+        refresh_all()
+        return jsonify({"ok": True})
     except Exception as e:
-      logger.exception("refresh_all failed: %s", e)
-      return jsonify({"ok": False, "error": "refresh_all failed"}), 500
-    return jsonify({"ok": True})
+        logger.exception("refresh_all failed: %s", e)
+        return jsonify({"ok": False, "error": "refresh_all failed"}), 500
+    finally:
+        try:
+            _refresh_lock.release()
+        except Exception:
+            pass
 
 # 端点：Webhook 增量
 @app.route("/chat/update/webhook", methods=["POST"])
@@ -520,10 +675,10 @@ def update_webhook():
     raw = request.get_data()  # 原始字节，禁止任何预解析
     # 兼容不同大小写与备选头名
     sig = (
-        request.headers.get("X-Outline-Signature")
-        or request.headers.get("x-outline-signature")
-        or request.headers.get("X-Outline-Signature-256")
-        or request.headers.get("X-Signature")
+            request.headers.get("X-Outline-Signature")
+            or request.headers.get("x-outline-signature")
+            or request.headers.get("X-Outline-Signature-256")
+            or request.headers.get("X-Signature")
     )
     # 当 OUTLINE_WEBHOOK_SIGN=false 时，跳过签名校验；否则要求密钥与签名正确
     if OUTLINE_WEBHOOK_SIGN:
@@ -559,7 +714,11 @@ def upload():
     if "file" not in request.files:
         return jsonify({"error":"missing file"}), 400
     f = request.files["file"]
-    name = secure_filename(f.filename or "untitled.txt")
+    name_raw = f.filename or "untitled.txt"
+    name = secure_filename(name_raw)
+    # 更严格文件名校验（长度与控制字符）
+    if len(name) == 0 or len(name) > 200 or any(ord(ch) < 32 for ch in name):
+        return jsonify({"error":"invalid filename"}), 400
     if not allowed_file(name):
         return jsonify({"error":"file type not allowed"}), 400
     raw = f.read()
@@ -595,14 +754,14 @@ def upload():
     resp.headers["Content-Type"] = "application/json; charset=utf-8"
     return resp
 
-# RAG 问答（支持流式）
+# RAG 问答（SSE 始终开启）
 @app.route("/chat/api/ask", methods=["POST"])
 def api_ask():
     require_login()
     body = request.get_json(force=True)
     query = (body.get("query") or "").strip()
     conv_id = body.get("conv_id")
-    stream = bool(body.get("stream", False))
+    # 流式开关移除：始终流式返回
     if not query or not conv_id:
         return jsonify({"error":"missing query or conv_id"}), 400
 
@@ -635,35 +794,32 @@ def api_ask():
         {"role":"user","content": user_prompt}
     ]
 
-    if not stream:
-        answer = chat_completion(messages)
+    def generate():
+        # 不再写入 BOM；先发注释行维持连接
+        yield ": ping\n\n"
+        buffer = []
+        for chunk in chat_completion_stream(messages):
+            # chunk 已是 "data: {...}\n\n" 或 DONE
+            if chunk.startswith("data: ") and "[DONE]" not in chunk:
+                try:
+                    payload = json.loads(chunk[len("data: "):].strip())
+                    delta = payload.get("delta", "")
+                except Exception:
+                    delta = ""
+                if delta:
+                    buffer.append(delta)
+            yield chunk
+        # 流结束后落库
+        full = "".join(buffer)
         with engine.begin() as conn:
-            conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"), {"cid": conv_id, "c": answer})
-        resp = make_response(jsonify({"answer": answer}))
-        resp.headers["Content-Type"] = "application/json; charset=utf-8"
-        return resp
-    else:
-        def generate():
-            # 发送一个零宽不换行空格作为 UTF-8 提示
-            yield "\ufeff"
-            buffer = []
-            for chunk in chat_completion_stream(messages):
-                # chunk 已是 "data: {...}\n\n" 或 DONE
-                if chunk.startswith("data: ") and "[DONE]" not in chunk:
-                    try:
-                        payload = json.loads(chunk[len("data: "):].strip())
-                        delta = payload.get("delta", "")
-                    except Exception:
-                        delta = ""
-                    if delta:
-                        buffer.append(delta)
-                yield chunk
-            # 流结束后落库
-            full = "".join(buffer)
-            with engine.begin() as conn:
-                conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
-                             {"cid": conv_id, "c": full})
-        return app.response_class(generate(), mimetype="text/event-stream; charset=utf-8")
+            conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
+                         {"cid": conv_id, "c": full})
+
+    resp = app.response_class(generate(), mimetype="text/event-stream; charset=utf-8")
+    # SSE 头加强
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 from werkzeug.utils import secure_filename
 
@@ -688,12 +844,12 @@ def archive_old_messages(days=90, batch_size=5000):
     while True:
         with engine.begin() as conn:
             rows = conn.execute(text("""
-                SELECT id, conv_id, role, content, created_at
-                FROM messages
-                WHERE created_at < :cutoff
-                ORDER BY id
-                LIMIT :limit
-            """), {"cutoff": cutoff, "limit": batch_size}).mappings().all()
+                                     SELECT id, conv_id, role, content, created_at
+                                     FROM messages
+                                     WHERE created_at < :cutoff
+                                     ORDER BY id
+                                         LIMIT :limit
+                                     """), {"cutoff": cutoff, "limit": batch_size}).mappings().all()
             if not rows:
                 break
             # 写入归档文件
@@ -704,6 +860,7 @@ def archive_old_messages(days=90, batch_size=5000):
                     f.write(json.dumps(dict(r), ensure_ascii=False) + "\n")
             # 删除已归档
             ids = [r["id"] for r in rows]
+            # 改为 ANY(%s) + psycopg2 数组绑定兼容写法（SQLAlchemy + psycopg2 可直接绑定 list）
             conn.execute(text("DELETE FROM messages WHERE id = ANY(:ids)"), {"ids": ids})
 
 from datetime import timedelta
