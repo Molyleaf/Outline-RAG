@@ -35,7 +35,7 @@ fileInput.addEventListener('change', async (e) => {
 
 async function api(path, opts) {
   const res = await fetch(path, {credentials: 'include', headers: {'Content-Type':'application/json', ...(opts && opts.headers || {})}, ...opts});
-  if (res.status === 401) { window.location = '/login'; return null; }
+  if (res.status === 401) { window.location = '/chat/login'; return null; }
   if ((opts && opts.stream) || res.headers.get('content-type')?.includes('text/event-stream')) {
     return res; // 流式
   }

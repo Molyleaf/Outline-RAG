@@ -248,6 +248,13 @@ def api_me():
 def api_conversations():
     require_login()
     uid = current_user()["id"]
+    # 保障性：确保用户记录存在，避免外键错误（例如旧会话中 session 有 user，但 users 表被清空过）
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO users (id, name, avatar_url) VALUES (:id,:name,:avatar) "
+                 "ON CONFLICT (id) DO NOTHING"),
+            {"id": uid, "name": current_user().get("name"), "avatar": current_user().get("avatar_url")}
+        )
     if request.method == "POST":
         title = (request.json or {}).get("title") or "新会话"
         with engine.begin() as conn:
