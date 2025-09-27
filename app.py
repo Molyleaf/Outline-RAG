@@ -346,8 +346,6 @@ def chat_completion(messages, temperature=0.2):
 
 def chat_completion_stream(messages, temperature=0.2):
     _log_chat_messages_for_debug(messages, stream_flag=True)
-    # 以 OpenAI SSE 格式透传
-    payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     payload = {"model": CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
     resp = http_post_json(f"{CHAT_API_URL}/v1/chat/completions", payload, CHAT_API_TOKEN, stream=True)
     try:
