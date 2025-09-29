@@ -4,7 +4,16 @@
 	<meta charset="utf-8" />
 	<title>Outline RAG Chat</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<!-- Material 风格样式 -->
 	<link rel="stylesheet" href="/chat/static/style.css" />
+	<!-- Shoelace（Material-like 组件：弹窗/按钮/alert） -->
+	<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js"></script>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css" />
+	<!-- Markdown & 代码高亮 -->
+	<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+	<!-- 替换为浏览器用的完整 UMD 版 -->
+	<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
 	<script>
         // 主题初始化：localStorage 优先，其次系统偏好
         (function () {
@@ -54,7 +63,7 @@
 		<div class="input">
 			<textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
 			<button class="btn" id="send">发送</button>
-			<!-- 移除/隐藏流式开关：始终开启流式 -->
+			<!-- 流式开关隐藏，始终流式 -->
 			<label class="switch" style="display:none">
 				<input type="checkbox" id="streamToggle" checked />
 				<span>流式</span>
@@ -62,44 +71,29 @@
 		</div>
 	</div>
 </div>
+
 <script src="/chat/static/script.js"></script>
 <script>
-    // 新建对话行为：与 ChatGPT 一致
+    // 新建会话
     (function () {
         const btn = document.getElementById('newConv');
         if (!btn) return;
         let creating = false;
         btn.addEventListener('click', async () => {
-            // 若当前就在 /chat 页面且没有具体会话 GUID，则首次点击创建；创建后跳转到 /chat/<GUID>
-            if (creating) return; // 防止重复点击
-            // 若当前路径是 /chat/<guid>，继续点击“新建”也要创建并跳转到新的 /chat/<GUID>
+            if (creating) return;
             creating = true;
             try {
                 const r = await fetch('/chat/api/conversations', {method:'POST', headers:{'Content-Type':'application/json'}});
                 if (!r.ok) return;
                 const data = await r.json();
-                if (data && data.url) {
-                    // 和 ChatGPT 一样：跳转到包含 GUID 的 URL
-                    location.href = data.url;
-                }
+                if (data && data.url) location.href = data.url;
             } finally {
-                // 创建完成后，进一步点击“新建”应再次创建新会话（非禁用），
-                // 但在尚未返回之前的重复点击应无效
                 creating = false;
             }
         });
     })();
 
-    // 根据 URL 中的 GUID 作为当前会话
-    (function () {
-        const path = location.pathname.replace(/\/+$/,'');
-        const m = path.match(/^\/chat\/(\w[\w-]*)$/);
-        const currentGuid = m ? m[1] : null;
-        // 页面可根据 currentGuid 拉取消息列表
-        window.__CURRENT_CONV_ID__ = currentGuid; // 供 script.js 使用
-    })();
-
-    // 主题切换逻辑保持不变
+    // 主题切换
     (function () {
         const root = document.documentElement;
         const radios = document.querySelectorAll('#menu .menu-radio');
@@ -124,13 +118,10 @@
             });
         });
         renderActive();
-
         const mql = window.matchMedia('(prefers-color-scheme: dark)');
         mql.addEventListener?.('change', () => {
             const saved = localStorage.getItem('theme') || 'system';
-            if (saved === 'system') {
-                root.setAttribute('data-theme', 'system');
-            }
+            if (saved === 'system') root.setAttribute('data-theme', 'system');
         });
     })();
 </script>

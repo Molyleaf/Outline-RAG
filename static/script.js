@@ -17,6 +17,99 @@ let currentConvId = null;
 })();
 let userInfo = null;
 
+/** Material 风格弹窗与通知（替换 alert/confirm/prompt） */
+// 依赖：Shoelace Web Components（Material-like）与 snackbar 动画
+// 在 index.html 中通过 CDN 引入：
+// <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js"></script>
+// <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css" />
+function toast(message, variant = 'primary', timeout = 3000) {
+    // 友好提示替换 alert
+    const el = document.createElement('sl-alert');
+    el.variant = variant; // 'primary' | 'success' | 'neutral' | 'warning' | 'danger'
+    el.closable = true;
+    el.innerHTML = `<sl-icon name="${variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle'}" slot="icon"></sl-icon>${message}`;
+    document.body.appendChild(el);
+    el.toast();
+    if (timeout) {
+        setTimeout(() => el.hide(), timeout);
+    }
+    return el;
+}
+
+function confirmDialog(message, { okText = '确定', cancelText = '取消' } = {}) {
+    return new Promise(resolve => {
+        const dlg = document.createElement('sl-dialog');
+        dlg.label = '请确认';
+        dlg.innerHTML = `<div style="line-height:1.6">${message}</div>
+        <div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">
+            <sl-button class="cancel" variant="neutral">${cancelText}</sl-button>
+            <sl-button class="ok" variant="primary">${okText}</sl-button>
+        </div>`;
+        document.body.appendChild(dlg);
+        dlg.addEventListener('sl-after-hide', () => dlg.remove());
+        dlg.querySelector('.cancel').addEventListener('click', () => { dlg.hide(); resolve(false); });
+        dlg.querySelector('.ok').addEventListener('click', () => { dlg.hide(); resolve(true); });
+        dlg.show();
+    });
+}
+
+function promptDialog(title, defaultValue = '', { okText = '确定', cancelText = '取消', placeholder = '' } = {}) {
+    return new Promise(resolve => {
+        const dlg = document.createElement('sl-dialog');
+        dlg.label = title || '输入';
+        dlg.innerHTML = `
+          <sl-input value="${defaultValue.replace(/"/g, '&quot;')}" placeholder="${placeholder.replace(/"/g, '&quot;')}"></sl-input>
+          <div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">
+            <sl-button class="cancel" variant="neutral">${cancelText}</sl-button>
+            <sl-button class="ok" variant="primary">${okText}</sl-button>
+          </div>`;
+        document.body.appendChild(dlg);
+        const input = dlg.querySelector('sl-input');
+        function done(val) { dlg.hide(); resolve(val); }
+        dlg.addEventListener('sl-after-hide', () => dlg.remove());
+        dlg.querySelector('.cancel').addEventListener('click', () => done(null));
+        dlg.querySelector('.ok').addEventListener('click', () => done(input.value.trim()));
+        dlg.addEventListener('sl-initial-focus', () => input.focus());
+        dlg.show();
+    });
+}
+
+/** Markdown 渲染与代码高亮 */
+// 依赖：marked + highlight.js（或 prism），通过 CDN 引入：
+// <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+// 注意：浏览器环境请使用 UMD 版 highlight.min.js（非 common.min.js/common.js）
+// <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+// <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
+function renderMarkdown(md) {
+    if (!window.marked) {
+        // 回退：纯文本
+        const pre = document.createElement('pre');
+        pre.textContent = md || '';
+        return pre;
+    }
+    const html = marked.parse(md || '', {
+        breaks: true,
+        gfm: true
+    });
+    const wrapper = document.createElement('div');
+    wrapper.className = 'md-body';
+    wrapper.innerHTML = html;
+    if (window.hljs) {
+        wrapper.querySelectorAll('pre code').forEach(block => {
+            window.hljs.highlightElement(block);
+        });
+    }
+    return wrapper;
+}
+
+/** 打字机/进入过渡动画 */
+function animateIn(el) {
+    el.animate([{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'translateY(0)', opacity: 1 }], {
+        duration: 160,
+        easing: 'cubic-bezier(.2,.8,.2,1)'
+    });
+}
+
 avatar.addEventListener('click', () => {
     menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
 });
@@ -26,7 +119,7 @@ document.addEventListener('click', (e) => {
 refreshAll.addEventListener('click', async (e) => {
     e.preventDefault();
     await fetch('/chat/update/all', {method: 'POST', credentials: 'include'});
-    alert('已完成全量刷新');
+    toast('已完成全量刷新', 'success');
 });
 fileInput.addEventListener('change', async (e) => {
     const f = e.target.files[0];
@@ -34,7 +127,7 @@ fileInput.addEventListener('change', async (e) => {
     const form = new FormData();
     form.append('file', f);
     const res = await fetch('/chat/api/upload', { method: 'POST', body: form, credentials: 'include' });
-    if (res.ok) alert('上传成功，已加入索引'); else alert('上传失败');
+    if (res.ok) toast('上传成功，已加入索引', 'success'); else toast('上传失败', 'danger');
     e.target.value = '';
 });
 
@@ -121,27 +214,30 @@ async function loadConvs() {
 
         rename.onclick = async (e) => {
             e.stopPropagation();
-            const val = prompt('重命名会话', titleEl.textContent);
+            const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
             if (val == null) { rowMenu.style.display = 'none'; return; }
             const t = val.trim();
-            if (!t) { alert('标题不能为空'); return; }
+            if (!t) { toast('标题不能为空', 'warning'); return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
             if (res?.ok || res?.status === 'ok') {
                 await loadConvs();
+                toast('已重命名', 'success');
             } else {
-                alert('重命名失败');
+                toast('重命名失败', 'danger');
             }
             rowMenu.style.display = 'none';
         };
         del.onclick = async (e) => {
             e.stopPropagation();
-            if (!confirm('确定删除该会话？此操作不可恢复。')) { rowMenu.style.display = 'none'; return; }
+            const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
+            if (!ok) { rowMenu.style.display = 'none'; return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
             if (res?.ok) {
                 if (String(currentConvId) === String(c.id)) { currentConvId = null; chatEl.innerHTML = ''; }
                 await loadConvs();
+                toast('已删除', 'success');
             } else {
-                alert('删除失败');
+                toast('删除失败', 'danger');
             }
             rowMenu.style.display = 'none';
         };
@@ -154,10 +250,6 @@ async function loadConvs() {
         // 注：此监听只注册一次
         if (!document.__convMenuCloserBound__) {
             document.addEventListener('click', (e) => {
-                // 点击任意非菜单、非按钮区域时收起所有行内菜单
-                document.querySelectorAll('.conv-menu-pop').forEach(pop => {
-                    const btn = pop.previousSibling; // 我们的结构：titleEl, menuBtn, rowMenu => previousSibling 不是按钮，改为更稳妥查找
-                });
                 // 更稳妥：逐个判断
                 const pops = document.querySelectorAll('.conv-menu-pop');
                 pops.forEach(pop => {
@@ -175,6 +267,7 @@ async function loadConvs() {
         row.appendChild(menuBtn);
         row.appendChild(rowMenu);
         convsEl.appendChild(row);
+        animateIn(row);
     });
 }
 
@@ -190,8 +283,13 @@ async function loadMessages() {
 function appendMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
-    div.textContent = text;
+
+    // Markdown 渲染（assistant 为默认 markdown，user 也支持）
+    const node = renderMarkdown(String(text ?? ''));
+    div.appendChild(node);
+
     chatEl.appendChild(div);
+    animateIn(div);
     chatEl.scrollTop = chatEl.scrollHeight;
     return div;
 }
@@ -225,7 +323,16 @@ async function sendQuestion() {
     qEl.value = '';
 
     // 流式始终开启：不再依赖隐藏的开关节点
-    const placeholder = appendMsg('assistant', '');
+    const placeholderDiv = document.createElement('div');
+    placeholderDiv.className = 'msg assistant';
+    let placeholderContent = document.createElement('div');
+    placeholderContent.className = 'md-body';
+    placeholderContent.innerHTML = ''; // 将持续增量写入
+    placeholderDiv.appendChild(placeholderContent);
+    chatEl.appendChild(placeholderDiv);
+    animateIn(placeholderDiv);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
     const res = await fetch('/chat/api/ask', { // 始终开启 SSE
         method: 'POST',
         body: JSON.stringify({conv_id: currentConvId, query: text}),
@@ -234,35 +341,85 @@ async function sendQuestion() {
     });
 
     if (!res.ok) {
-        placeholder.textContent = '请求失败';
+        placeholderContent.textContent = '请求失败';
+        toast('请求失败', 'danger');
         return;
     }
+
+    // 流式解析 + 增量 markdown 渲染（简单策略：累积文本后按块渲染）
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, {stream: true});
-        let idx;
-        while ((idx = buffer.indexOf('\n\n')) >= 0) {
-            const chunk = buffer.slice(0, idx).trim();
-            buffer = buffer.slice(idx + 2);
-            if (chunk.startsWith('data:')) {
-                const data = chunk.slice(5).trim();
-                if (data === '[DONE]') {
-                    return;
+    let acc = '';
+    let placeholderContentRef = placeholderContent;
+
+    const rerender = () => {
+        const tmp = renderMarkdown(acc);
+        placeholderDiv.replaceChild(tmp, placeholderContentRef);
+        placeholderContentRef = tmp;
+        chatEl.scrollTop = chatEl.scrollHeight;
+    };
+
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            let idx;
+            while ((idx = buffer.indexOf('\n\n')) >= 0) {
+                const chunk = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 2);
+                if (chunk.startsWith('data:')) {
+                    const data = chunk.slice(5).trim();
+                    if (data === '[DONE]') {
+                        rerender();
+                        return;
+                    }
+                    try {
+                        const j = JSON.parse(data);
+                        if (j.delta) {
+                            acc += j.delta;
+                            // 到标点或换行时重渲染
+                            if (/[。\.\n\r]$/.test(j.delta)) rerender();
+                        }
+                    } catch {}
                 }
-                try {
-                    const j = JSON.parse(data);
-                    if (j.delta) placeholder.textContent += j.delta;
-                } catch {}
             }
         }
+        rerender();
+    } catch (_) {
+        toast('连接中断', 'warning');
     }
 }
 
 (async function init(){
+    // 动态加载前端库（若页面未引入时）
+    function ensureScript(src, type = 'text/javascript') {
+        return new Promise((resolve) => {
+            if ([...document.scripts].some(s => (s.src || '').includes(src))) return resolve();
+            const s = document.createElement('script');
+            if (type === 'module') s.type = 'module';
+            s.src = src;
+            s.onload = () => resolve();
+            document.head.appendChild(s);
+        });
+    }
+    function ensureStyle(href) {
+        if ([...document.styleSheets].some(ss => (ss.href || '').includes(href))) return;
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = href;
+        document.head.appendChild(l);
+    }
+
+    // Shoelace（弹窗/按钮/alert）
+    await ensureScript('https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js', 'module');
+    ensureStyle('https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css');
+    // marked + highlight
+    await ensureScript('https://cdn.jsdelivr.net/npm/marked/marked.min.js');
+    await ensureScript('https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js');
+    ensureStyle('https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css');
+
     await loadUser();
     await loadConvs();
     // 初次进入带 GUID 的地址时加载消息
