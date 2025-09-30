@@ -384,7 +384,18 @@ def chat_page_with_guid(conv_guid: str):
     import re
     if not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
                         conv_guid):
-        abort(404)
+        # 不存在或非法时，重定向并提示
+        resp = redirect("/chat")
+        resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
+        return resp
+    # 检查该会话是否存在且归属当前用户
+    with engine.begin() as conn:
+        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
+                           {"id": conv_guid, "u": session["user"]["id"]}).scalar()
+    if not own:
+        resp = redirect("/chat")
+        resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
+        return resp
     resp = send_from_directory(app.static_folder, "index.html")
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers.setdefault("Cache-Control", "public, max-age=300")
@@ -821,8 +832,12 @@ def update_all():
     if not locked:
         return jsonify({"ok": False, "error": "正在刷新中，请稍后重试"}), 429
     try:
-        refresh_all()
-        return jsonify({"ok": True})
+        # 立即告知前端刷新已开始
+        started = make_response(jsonify({"ok": True, "started": True, "message": "已开始全量刷新"}), 202)
+        # 异步后台执行，避免阻塞请求
+        import threading
+        threading.Thread(target=lambda: (refresh_all()), daemon=True).start()
+        return started
     except Exception as e:
         logger.exception("refresh_all failed: %s", e)
         return jsonify({"ok": False, "error": "refresh_all failed"}), 500

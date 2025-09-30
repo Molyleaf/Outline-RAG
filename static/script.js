@@ -118,8 +118,23 @@ document.addEventListener('click', (e) => {
 });
 refreshAll.addEventListener('click', async (e) => {
     e.preventDefault();
-    await fetch('/chat/update/all', {method: 'POST', credentials: 'include'});
-    toast('已完成全量刷新', 'success');
+    // 先提示“已开始全量刷新”
+    toast('已开始全量刷新', 'primary', 2500);
+    const r = await fetch('/chat/update/all', {method: 'POST', credentials: 'include'});
+    if (r.status === 202) {
+        // 后台异步刷新，前端不阻塞
+        return;
+    }
+    if (r.ok) {
+        toast('已完成全量刷新', 'success');
+    } else {
+        try {
+            const j = await r.json();
+            toast(j?.error || '刷新失败', 'danger');
+        } catch {
+            toast('刷新失败', 'danger');
+        }
+    }
 });
 fileInput.addEventListener('change', async (e) => {
     const f = e.target.files[0];
@@ -275,7 +290,12 @@ async function loadMessages() {
     chatEl.innerHTML = '';
     if (!currentConvId) return;
     const res = await api('/chat/api/messages?conv_id=' + currentConvId);
-    const msgs = res?.items || []; // 服务端返回对象，取 items
+    const msgs = res?.items || [];
+    // 有历史消息则隐藏问候语
+    const greet = document.getElementById('greeting');
+    if (greet) {
+        greet.style.display = msgs.length ? 'none' : 'block';
+    }
     msgs.forEach(m => appendMsg(m.role, m.content));
     chatEl.scrollTop = chatEl.scrollHeight;
 }
@@ -311,6 +331,10 @@ qEl.addEventListener('keydown', (e) => {
 async function sendQuestion() {
     const text = qEl.value.trim();
     if (!text) return;
+
+    // 一旦用户开始对话，隐藏问候语
+    const greet = document.getElementById('greeting');
+    if (greet) greet.style.display = 'none';
 
     if (!currentConvId) {
         const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30)})});

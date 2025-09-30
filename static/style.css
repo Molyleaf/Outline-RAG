@@ -181,7 +181,53 @@ a { color: inherit; text-decoration: none; }
 .avatar {
     width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
     background-size: cover; background-position: center;
+    image-rendering: -webkit-optimize-contrast; /* 提升头像清晰度（WebKit） */
+    image-rendering: crisp-edges;               /* 非标准，部分浏览器有帮助 */
     box-shadow: var(--md-sys-elevation-1);
+}
+/* Gemini 风格：更紧凑的灰度与装饰 */
+.chat { flex: 1; padding: calc(var(--gap) + 4px) 12%; }
+/* 问候语块（仿 Gemini） */
+.greeting {
+    max-width: 680px;
+    margin: 8vh auto 2vh;
+    text-align: left;
+    color: var(--md-sys-color-on-surface);
+}
+.greet-title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: .2px;
+    margin-bottom: 8px;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 92%, #888);
+}
+.greet-sub {
+    font-size: 14px;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 70%, #666);
+    margin-bottom: 16px;
+}
+.greet-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+    border: 1px solid var(--md-sys-color-surface-variant);
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 18%, transparent);
+    color: var(--md-sys-color-on-surface);
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.chip:hover {
+    background: color-mix(in srgb, var(--md-sys-color-surface-variant) 28%, transparent);
+}
+/* 更接近 Gemini 的灰度与字间距（总体更紧凑） */
+body, html { letter-spacing: 0; }
+.md-body { line-height: 1.6; letter-spacing: .1px; color: color-mix(in srgb, var(--md-sys-color-on-surface) 92%, #777); }
+.msg.assistant { background: color-mix(in srgb, var(--md-sys-color-surface-variant) 45%, transparent); }
+.input-inner { background: color-mix(in srgb, var(--md-sys-color-surface-variant) 30%, transparent); }
+/* 移动端边栏与按钮可见性（确保显示） */
+@media (max-width: 960px) {
+    .topbar .hamburger { display: inline-flex; }
+    .app .sidebar-veil { display: block; } /* 显示遮罩，支持点击关闭 */
 }
 .menu {
     position: absolute; right: 12px; top: 64px;
@@ -200,7 +246,6 @@ a { color: inherit; text-decoration: none; }
 .menu .menu-radio.active { font-weight: 700; }
 
 /* 聊天区与消息气泡（Material Shape） */
-.chat { flex: 1; padding: calc(var(--gap) + 4px) 15%; overflow-y: auto; background: transparent; }
 .msg { margin: 10px 0; padding: 14px 16px; border-radius: 16px; max-width: 90%; white-space: pre-wrap; box-shadow: var(--md-sys-elevation-1); }
 .msg.user { background: var(--chat-bubble-user); margin-left: auto; border-radius: 16px 16px 4px 16px; }
 .msg.assistant { background: var(--chat-bubble-assistant); margin-right: auto; border-radius: 4px 16px 16px 16px;}
@@ -210,9 +255,6 @@ a { color: inherit; text-decoration: none; }
 .msg.assistant + .msg.user { margin-top: 16px; }
 
 /* Markdown 内容样式适配 */
-.md-body {
-    line-height: 1.6;
-}
 .md-body pre {
     background: color-mix(in srgb, var(--md-sys-color-surface-variant) 35%, transparent);
     padding: 10px 12px; border-radius: 12px; overflow: auto;
