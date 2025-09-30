@@ -138,6 +138,8 @@ a { color: inherit; text-decoration: none; }
 /* 主区域 */
 .main { flex: 1; display: flex; flex-direction: column; }
 
+.topbar .hamburger { display: none; }
+
 /* 顶栏 */
 .topbar {
     height: 64px;

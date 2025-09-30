@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- 会话改为 GUID 主键（TEXT），不兼容旧数据
-DROP TABLE IF EXISTS conversations CASCADE;
+-- DROP TABLE IF EXISTS conversations CASCADE;
 CREATE TABLE conversations (
   id TEXT PRIMARY KEY,                      -- GUID，如 'ca4c613d-cad9-4307-b964-becd520a0052'
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -121,7 +121,7 @@ CREATE TABLE conversations (
 CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversations(user_id, created_at DESC) INCLUDE (title);
 
 -- 消息表：引用 GUID conv_id
-DROP TABLE IF EXISTS messages;
+-- DROP TABLE IF EXISTS messages;
 CREATE TABLE messages (
   id BIGSERIAL PRIMARY KEY,
   conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -133,7 +133,7 @@ CREATE TABLE messages (
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
 -- 附件保持不变
-DROP TABLE IF EXISTS attachments;
+-- DROP TABLE IF EXISTS attachments;
 CREATE TABLE attachments (
   id BIGSERIAL PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -199,10 +199,6 @@ def _startup_self_check():
 
 # 在数据库初始化后执行外部依赖自检
 _startup_self_check()
-
-# 删除重复的 Flask 实例化，避免覆盖配置与路由
-# app = Flask(__name__, static_folder="static", static_url_path="/static")
-# app.secret_key = SECRET_KEY
 
 def require_login():
     if "user" not in session:
@@ -738,10 +734,10 @@ def outline_get_doc(doc_id):
 # 同步：全量刷新
 def refresh_all():
     docs = outline_list_docs()
-    # 一次性清空相关表，避免外键限制与锁顺序问题
+    # 仅清空文档与向量数据，保留其他业务数据与自增序列
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE TABLE chunks, documents RESTART IDENTITY CASCADE"))
-    # 逐文档 upsert，避免主键冲突导致整个过程失败
+        conn.execute(text("TRUNCATE TABLE chunks, documents"))
+    # 逐文档 upsert
     for d in docs:
         doc_id = d["id"]
         info = outline_get_doc(doc_id)
@@ -752,18 +748,18 @@ def refresh_all():
         updated_at = info.get("updatedAt") or info.get("updated_at") or datetime.now(timezone.utc).isoformat()
         chunks = chunk_text(content)
         if not chunks:
-            # 没有内容则跳过
+            # 无内容则跳过
             continue
         embs = create_embeddings(chunks)
         with engine.begin() as conn:
-            # documents 使用 upsert，避免重复
             conn.execute(text("""
                               INSERT INTO documents (id, title, content, updated_at)
                               VALUES (:id, :t, :c, :u)
-                                  ON CONFLICT (id) DO UPDATE
-                                                          SET title=EXCLUDED.title, content=EXCLUDED.content, updated_at=EXCLUDED.updated_at
+                              ON CONFLICT (id) DO UPDATE
+                                SET title=EXCLUDED.title,
+                                    content=EXCLUDED.content,
+                                    updated_at=EXCLUDED.updated_at
                               """), {"id": doc_id, "t": title, "c": content, "u": updated_at})
-            # 重建该文档的 chunks
             for idx, (ck, emb) in enumerate(zip(chunks, embs)):
                 conn.execute(text("INSERT INTO chunks (doc_id, idx, content, embedding) VALUES (:d,:i,:c,:e)"),
                              {"d": doc_id, "i": idx, "c": ck, "e": emb})
