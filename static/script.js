@@ -413,12 +413,12 @@ async function sendQuestion() {
     }
 
     // Shoelace（弹窗/按钮/alert）
-    await ensureScript('https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js', 'module');
-    ensureStyle('https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css');
+    await ensureScript('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js', 'module');
+    ensureStyle('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css');
     // marked + highlight
-    await ensureScript('https://cdn.jsdelivr.net/npm/marked/marked.min.js');
-    await ensureScript('https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js');
-    ensureStyle('https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css');
+    await ensureScript('https://jsd.onmicrosoft.cn/npm/marked/marked.min.js');
+    await ensureScript('https://jsd.onmicrosoft.cn/npm/highlight.js/highlight.min.js');
+    ensureStyle('https://jsd.onmicrosoft.cn/npm/highlight.js/styles/github.min.css');
 
     await loadUser();
     await loadConvs();

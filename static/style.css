@@ -76,15 +76,60 @@ html, body { height: 100%; }
 body, html { margin: 0; padding: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 a { color: inherit; text-decoration: none; }
 
-.app { display: flex; height: 100%; }
-
-/* 侧边栏（Material Surface + Elevation） */
+.app { display: flex; height: 100%; position: relative; }
 .sidebar {
     width: 300px;
     border-right: 1px solid var(--md-sys-color-surface-variant);
     padding: var(--gap);
     overflow-y: auto;
     background: var(--md-sys-color-surface);
+    transition: transform .25s ease, box-shadow .25s ease;
+    will-change: transform;
+}
+.app .sidebar-veil {
+    display: none;
+}
+@media (max-width: 960px) {
+    .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        height: 100%;
+        transform: translateX(-102%);
+        z-index: 20;
+        box-shadow: none;
+    }
+    .app.sidebar-open .sidebar {
+        transform: translateX(0);
+        box-shadow: var(--md-sys-elevation-2);
+    }
+    /* 主区占满宽度，顶部加入汉堡按钮区域 */
+    .main { flex: 1; display: flex; flex-direction: column; }
+    .topbar { justify-content: space-between; }
+    .topbar .hamburger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px; height: 40px;
+        border-radius: 50%;
+        border: 1px solid var(--md-sys-color-surface-variant);
+        background: var(--md-sys-color-surface);
+        cursor: pointer;
+    }
+    /* 遮罩 */
+    .app .sidebar-veil {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.32);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .2s ease;
+        z-index: 15;
+    }
+    .app.sidebar-open .sidebar-veil {
+        opacity: 1;
+        pointer-events: auto;
+    }
 }
 .titlebar {
     display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
@@ -143,10 +188,14 @@ a { color: inherit; text-decoration: none; }
 .menu .menu-radio.active { font-weight: 700; }
 
 /* 聊天区与消息气泡（Material Shape） */
-.chat { flex: 1; padding: var(--gap); overflow-y: auto; background: var(--md-sys-color-surface); }
-.msg { margin: 8px 0; padding: 10px 12px; border-radius: 18px; max-width: 70%; white-space: pre-wrap; box-shadow: var(--md-sys-elevation-1); }
+.chat { flex: 1; padding: calc(var(--gap) + 4px); overflow-y: auto; background: var(--md-sys-color-surface); }
+.msg { margin: 10px 0; padding: 12px 14px; border-radius: 18px; max-width: 72%; white-space: pre-wrap; box-shadow: var(--md-sys-elevation-1); }
 .msg.user { background: var(--chat-bubble-user); margin-left: auto; }
 .msg.assistant { background: var(--chat-bubble-assistant); margin-right: auto; }
+/* 分组间距：不同说话方之间增加更大间距，增强分段感 */
+.msg + .msg { margin-top: 8px; }
+.msg.user + .msg.assistant,
+.msg.assistant + .msg.user { margin-top: 16px; }
 
 /* Markdown 内容样式适配 */
 .md-body {
@@ -165,7 +214,8 @@ a { color: inherit; text-decoration: none; }
 .md-body ul, .md-body ol { padding-left: 1.2em; }
 
 /* 会话项（List + states） */
-.conv { padding: 8px 10px; border-radius: var(--radius-s); cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.conv { padding: 10px 12px; border-radius: var(--radius-s); cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.conv + .conv { margin-top: 6px; }
 .conv.active { background: color-mix(in srgb, var(--md-sys-color-primary-container) 60%, transparent); }
 .conv:hover { background: color-mix(in srgb, var(--md-sys-color-primary-container) 40%, transparent); }
 
