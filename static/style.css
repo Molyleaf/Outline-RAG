@@ -45,8 +45,10 @@
         --md-sys-color-surface-variant: #49454F;
         --md-sys-color-outline: #938F99;
 
+        --gemini-bg: radial-gradient(circle at 100% 100%, #3a325a 0%, #1a1629 30%, #0c0c11 70%);
+
         --chat-bubble-user: color-mix(in srgb, var(--md-sys-color-primary-container) 70%, black);
-        --chat-bubble-assistant: color-mix(in srgb, var(--md-sys-color-surface-variant) 50%, black);
+        --chat-bubble-assistant: #111322;
     }
 }
 
@@ -135,8 +137,16 @@ a { color: inherit; text-decoration: none; }
     display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
 }
 
+#newConv {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 24px !important;
+    padding: 8px 16px !important;
+}
+
 /* 主区域 */
-.main { flex: 1; display: flex; flex-direction: column; }
+.main { flex: 1; display: flex; flex-direction: column; background: var(--gemini-bg, var(--md-sys-color-surface)); }
 
 .topbar .hamburger { display: none; }
 
@@ -190,10 +200,10 @@ a { color: inherit; text-decoration: none; }
 .menu .menu-radio.active { font-weight: 700; }
 
 /* 聊天区与消息气泡（Material Shape） */
-.chat { flex: 1; padding: calc(var(--gap) + 4px); overflow-y: auto; background: var(--md-sys-color-surface); }
-.msg { margin: 10px 0; padding: 12px 14px; border-radius: 18px; max-width: 72%; white-space: pre-wrap; box-shadow: var(--md-sys-elevation-1); }
-.msg.user { background: var(--chat-bubble-user); margin-left: auto; }
-.msg.assistant { background: var(--chat-bubble-assistant); margin-right: auto; }
+.chat { flex: 1; padding: calc(var(--gap) + 4px) 15%; overflow-y: auto; background: transparent; }
+.msg { margin: 10px 0; padding: 14px 16px; border-radius: 16px; max-width: 90%; white-space: pre-wrap; box-shadow: var(--md-sys-elevation-1); }
+.msg.user { background: var(--chat-bubble-user); margin-left: auto; border-radius: 16px 16px 4px 16px; }
+.msg.assistant { background: var(--chat-bubble-assistant); margin-right: auto; border-radius: 4px 16px 16px 16px;}
 /* 分组间距：不同说话方之间增加更大间距，增强分段感 */
 .msg + .msg { margin-top: 8px; }
 .msg.user + .msg.assistant,
@@ -235,23 +245,62 @@ a { color: inherit; text-decoration: none; }
 
 /* 输入区 */
 .input {
-    border-top: 1px solid var(--md-sys-color-surface-variant);
-    padding: var(--gap);
-    display: flex; gap: 8px; align-items: center;
-    background: var(--md-sys-color-surface);
+    border-top: none;
+    padding: var(--gap) 15%;
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    background: transparent;
+    position: sticky;
+    bottom: 0;
 }
-.input textarea {
-    flex: 1; height: 96px; resize: vertical;
-    padding: 10px 12px; border-radius: var(--radius-m);
-    border: 1px solid var(--md-sys-color-surface-variant);
-    background: var(--md-sys-color-surface);
-    color: var(--md-sys-color-on-surface);
-    outline: none;
+.input-inner {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px 8px 8px 20px;
+    border-radius: 28px;
+    background: var(--chat-bubble-assistant);
+    border: 1px solid var(--md-sys-color-outline);
+    gap: 8px;
+    transition: border-color .2s ease, box-shadow .2s ease;
 }
-.input textarea:focus {
+.input-inner:focus-within {
     border-color: var(--md-sys-color-primary);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent);
 }
+.input textarea {
+    flex: 1;
+    height: 26px; /* initial height */
+    max-height: 250px;
+    resize: none;
+    padding: 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
+    color: var(--md-sys-color-on-surface);
+    outline: none;
+    line-height: 26px;
+    font-size: 16px;
+    font-family: inherit;
+}
+#send {
+    width: 40px;
+    height: 40px;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    background: var(--md-sys-color-primary) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+#send:hover {
+    transform: none;
+    box-shadow: none !important;
+}
+
 
 /* 开关 */
 .switch { display: flex; align-items: center; gap: 6px; color: var(--md-sys-color-outline); }

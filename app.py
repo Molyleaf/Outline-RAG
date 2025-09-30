@@ -110,19 +110,17 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url TEXT
 );
 
--- 会话改为 GUID 主键（TEXT），不兼容旧数据
--- DROP TABLE IF EXISTS conversations CASCADE;
-CREATE TABLE conversations (
-  id TEXT PRIMARY KEY,                      -- GUID，如 'ca4c613d-cad9-4307-b964-becd520a0052'
+-- 会话改为 GUID 主键（TEXT），兼容旧数据：仅在不存在时创建
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversations(user_id, created_at DESC) INCLUDE (title);
 
--- 消息表：引用 GUID conv_id
--- DROP TABLE IF EXISTS messages;
-CREATE TABLE messages (
+-- 消息表：引用 GUID conv_id，兼容旧数据：仅在不存在时创建
+CREATE TABLE IF NOT EXISTS messages (
   id BIGSERIAL PRIMARY KEY,
   conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL,
@@ -132,9 +130,8 @@ CREATE TABLE messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 
--- 附件保持不变
--- DROP TABLE IF EXISTS attachments;
-CREATE TABLE attachments (
+-- 附件保持不变，兼容旧数据：仅在不存在时创建
+CREATE TABLE IF NOT EXISTS attachments (
   id BIGSERIAL PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
@@ -195,9 +192,8 @@ def _startup_self_check():
     if errs:
         for e in errs:
             logger.critical("[启动自检] %s", e)
-        raise SystemExit("外部依赖自检失败，拒绝启动")
-
-# 在数据库初始化后执行外部依赖自检
+        # 启动不中断，保留服务可用性
+        return
 _startup_self_check()
 
 def require_login():
@@ -860,7 +856,7 @@ def update_webhook():
             )
             return "invalid signature", 401
     else:
-        logger.info("Webhook signature verification disabled by OUTLINE_WEBHOOK_SIGN")
+        logger.info("Webhook 签名已由OUTLINE_WEBHOOK_SIGN禁用")
 
     data = request.get_json(force=True, silent=True) or {}
     event = data.get("event")
