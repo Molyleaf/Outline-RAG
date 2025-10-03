@@ -266,7 +266,11 @@ async function loadConvs() {
             if (val == null) { rowMenu.style.display = 'none'; return; }
             const t = val.trim();
             if (!t) { toast('标题不能为空', 'warning'); return; }
-            const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
+            // 改为使用 POST /chat/api/conversations/<id>/rename
+            const res = await api(`/chat/api/conversations/${c.id}/rename`, {
+                method: 'POST',
+                body: JSON.stringify({ title: t })
+            });
             const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
             if (success) {
                 await loadConvs();
@@ -280,7 +284,8 @@ async function loadConvs() {
             e.stopPropagation();
             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
             if (!ok) { rowMenu.style.display = 'none'; return; }
-            const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
+            // 改为使用 POST /chat/api/conversations/<id>/delete
+            const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
             const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
             if (success) {
                 if (String(currentConvId) === String(c.id)) {

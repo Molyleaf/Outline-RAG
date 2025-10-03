@@ -472,6 +472,39 @@ def api_conversations():
             items.append(d)
         return jsonify({"items": items, "total": int(total), "page": page, "page_size": page_size})
 
+# 新增：会话重命名（POST）
+@app.route("/chat/api/conversations/<string:conv_id>/rename", methods=["POST"])
+def api_conversation_rename(conv_id):
+    require_login()
+    uid = current_user()["id"]
+    title = (request.get_json(silent=True) or {}).get("title", "").strip()
+    if not title:
+        return jsonify({"ok": False, "error": "标题不能为空"}), 400
+    with engine.begin() as conn:
+        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
+                           {"id": conv_id, "u": uid}).scalar()
+        if not own:
+            return jsonify({"ok": False, "error": "无权限"}), 403
+        conn.execute(text("UPDATE conversations SET title=:t WHERE id=:id"),
+                     {"t": title, "id": conv_id})
+    return jsonify({"ok": True})
+
+# 新增：会话删除（POST）
+@app.route("/chat/api/conversations/<string:conv_id>/delete", methods=["POST"])
+def api_conversation_delete(conv_id):
+    require_login()
+    uid = current_user()["id"]
+    with engine.begin() as conn:
+        own = conn.execute(
+            text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
+            {"id": conv_id, "u": uid}
+        ).scalar()
+        if not own:
+            return jsonify({"ok": False, "error": "无权限"}), 403
+        # 级联删除消息由外键 ON DELETE CASCADE 负责
+        conn.execute(text("DELETE FROM conversations WHERE id=:id"), {"id": conv_id})
+    return jsonify({"ok": True})
+
 @app.route("/chat/api/messages")
 def api_messages():
     require_login()
