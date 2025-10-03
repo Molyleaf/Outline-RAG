@@ -10,10 +10,14 @@
     --md-sys-color-secondary-container: #E8DEF8;
     --md-sys-color-on-secondary-container: #1D192B;
 
-    --md-sys-color-surface: #FFFBFE;
-    --md-sys-color-on-surface: #1C1B1F;
-    --md-sys-color-surface-variant: #E7E0EC;
-    --md-sys-color-outline: #79747E;
+    /* 基础主色保持不动或按需覆盖，这里主要替换表层配色 */
+    --md-sys-color-surface: #FFFFFF;            /* 浅色-层底 */
+    --md-sys-color-on-surface: #575B60;         /* 浅色-文字 */
+    --md-sys-color-surface-variant: #F0F4F9;    /* 浅色-分割/边框 */
+    --md-sys-color-outline: #F0F4F9;            /* 浅色-描边与容器 */
+    /* 适配聊天气泡对比 */
+    --chat-bubble-user: #F8FAFD;
+    --chat-bubble-assistant: #F0F4F9;
 
     --md-sys-color-inverse-surface: #313033;
     --md-sys-color-inverse-on-surface: #F4EFF4;
@@ -23,13 +27,17 @@
     --radius-m: 12px;
     --radius-s: 8px;
     --gap: 12px;
-
-    --chat-bubble-user: color-mix(in srgb, var(--md-sys-color-primary-container) 88%, white);
-    --chat-bubble-assistant: color-mix(in srgb, var(--md-sys-color-surface-variant) 60%, white);
 }
-
+/* 系统深色（跟随系统时） */
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] {
+        --md-sys-color-surface: #1B1C1D;            /* 深色-层底 */
+        --md-sys-color-on-surface: #A2A9B0;         /* 深色-文字 */
+        --md-sys-color-surface-variant: #282A2C;    /* 深色-分割/边框 */
+        --md-sys-color-outline: #282A2C;            /* 深色-描边与容器 */
+        --chat-bubble-user: #262627;
+        --chat-bubble-assistant: #282A2C;
+
         --md-sys-color-primary: #D0BCFF;
         --md-sys-color-on-primary: #381E72;
         --md-sys-color-primary-container: #4F378B;
@@ -40,19 +48,18 @@
         --md-sys-color-secondary-container: #4A4458;
         --md-sys-color-on-secondary-container: #E8DEF8;
 
-        --md-sys-color-surface: #1C1B1F;
-        --md-sys-color-on-surface: #E6E1E5;
-        --md-sys-color-surface-variant: #49454F;
-        --md-sys-color-outline: #938F99;
-
         --gemini-bg: radial-gradient(circle at 100% 100%, #3a325a 0%, #1a1629 30%, #0c0c11 70%);
-
-        --chat-bubble-user: color-mix(in srgb, var(--md-sys-color-primary-container) 70%, black);
-        --chat-bubble-assistant: #111322;
     }
 }
-
+/* 强制深色 */
 :root[data-theme="dark"] {
+    --md-sys-color-surface: #1B1C1D;
+    --md-sys-color-on-surface: #A2A9B0;
+    --md-sys-color-surface-variant: #282A2C;
+    --md-sys-color-outline: #282A2C;
+    --chat-bubble-user: #262627;
+    --chat-bubble-assistant: #282A2C;
+
     --md-sys-color-primary: #D0BCFF;
     --md-sys-color-on-primary: #381E72;
     --md-sys-color-primary-container: #4F378B;
@@ -62,15 +69,8 @@
     --md-sys-color-on-secondary: #332D41;
     --md-sys-color-secondary-container: #4A4458;
     --md-sys-color-on-secondary-container: #E8DEF8;
-
-    --md-sys-color-surface: #1C1B1F;
-    --md-sys-color-on-surface: #E6E1E5;
-    --md-sys-color-surface-variant: #49454F;
-    --md-sys-color-outline: #938F99;
-
-    --chat-bubble-user: color-mix(in srgb, var(--md-sys-color-primary-container) 70%, black);
-    --chat-bubble-assistant: color-mix(in srgb, var(--md-sys-color-surface-variant) 50%, black);
 }
+/* 保持按钮主色可读性（按需可改） */
 
 /* 全局排版与布局 */
 * { box-sizing: border-box; }
@@ -200,7 +200,17 @@ a { color: inherit; text-decoration: none; }
     font-weight: 800;
     letter-spacing: .2px;
     margin-bottom: 8px;
-    color: color-mix(in srgb, var(--md-sys-color-on-surface) 92%, #888);
+    /* 问候语标题滚动渐变文字 */
+    background: linear-gradient(90deg, #3183FD, #336EF2, #3183FD);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: gradient-scroll 6s linear infinite;
+}
+@keyframes gradient-scroll {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
 }
 .greet-sub {
     font-size: 14px;

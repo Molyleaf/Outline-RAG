@@ -186,6 +186,16 @@ async function loadUser() {
     if (!u) return;
     userInfo = u;
     avatar.style.backgroundImage = `url('${u.avatar_url || ''}')`;
+    // 动态更新问候语为“你好，{用户名}！”
+    const greetTitle = document.querySelector('#greeting .greet-title');
+    if (greetTitle) {
+        const name = (u.name || u.username || '').trim();
+        if (name) {
+            greetTitle.textContent = `你好，${name}！`;
+        } else {
+            greetTitle.textContent = '你好！';
+        }
+    }
 }
 
 function toSameOriginUrl(c) {
