@@ -9,9 +9,12 @@ const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
 const streamToggle = document.getElementById('streamToggle');
 
+// 主题菜单项（系统/浅色/深色）
+const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
+
 let currentConvId = null;
 // 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
-(function initConvIdFromUrl(){
+(function initConvIdFromUrl() {
     const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/);
     if (m) currentConvId = m[1];
 })();
@@ -113,6 +116,29 @@ function animateIn(el) {
 avatar.addEventListener('click', () => {
     menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
 });
+// 初始化主题菜单选中态 + 点击切换保存
+(function initThemeMenu(){
+    const saved = localStorage.getItem('theme') || 'system';
+    function applyActive() {
+        themeRadios.forEach(r => {
+            r.classList.toggle('active', r.dataset.theme === (localStorage.getItem('theme') || 'system'));
+        });
+    }
+    // 应用到根节点
+    document.documentElement.setAttribute('data-theme', (saved === 'light' || saved === 'dark') ? saved : 'system');
+    applyActive();
+    themeRadios.forEach(r => {
+        r.addEventListener('click', (e) => {
+            const t = r.dataset.theme;
+            localStorage.setItem('theme', t);
+            document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'system');
+            applyActive();
+            toast(`已切换为${t === 'system' ? '系统' : t === 'light' ? '浅色' : '深色'}主题`, 'success', 1800);
+            menu.style.display = 'none';
+        });
+    });
+})();
+
 document.addEventListener('click', (e) => {
     if (!avatar.contains(e.target) && !menu.contains(e.target)) menu.style.display = 'none';
 });
@@ -234,11 +260,12 @@ async function loadConvs() {
             const t = val.trim();
             if (!t) { toast('标题不能为空', 'warning'); return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
-            if (res?.ok || res?.status === 'ok') {
+            // 后端可能返回 {ok:true} 或 200 JSON，做兼容判断
+            if ((res && (res.ok === true || res.status === 'ok')) || (res && !('ok' in res) && !('status' in res))) {
                 await loadConvs();
                 toast('已重命名', 'success');
             } else {
-                toast('重命名失败', 'danger');
+                toast(res?.error || '重命名失败', 'danger');
             }
             rowMenu.style.display = 'none';
         };
@@ -247,12 +274,18 @@ async function loadConvs() {
             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
             if (!ok) { rowMenu.style.display = 'none'; return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
-            if (res?.ok) {
-                if (String(currentConvId) === String(c.id)) { currentConvId = null; chatEl.innerHTML = ''; }
+            // 兼容不同返回体
+            const success = (res && (res.ok === true || res.status === 'ok')) || (res && !('ok' in res) && !('status' in res));
+            if (success) {
+                if (String(currentConvId) === String(c.id)) {
+                    currentConvId = null; chatEl.innerHTML = '';
+                    // 删除当前会话时，跳到默认入口（避免留在无效页面）
+                    try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
+                }
                 await loadConvs();
                 toast('已删除', 'success');
             } else {
-                toast('删除失败', 'danger');
+                toast(res?.error || '删除失败', 'danger');
             }
             rowMenu.style.display = 'none';
         };

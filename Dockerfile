@@ -1,6 +1,8 @@
 # 基于 Python 3.13 轻量镜像
 FROM python:3.13-slim
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -15,7 +17,7 @@ RUN set -eux; \
     apt-get update
 
 # 系统依赖：psycopg2 需要 libpq 和 build 组件
-RUN apt-get install -y --no-install-recommends \
+RUN apt-get install -y \
     build-essential gcc libpq-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
