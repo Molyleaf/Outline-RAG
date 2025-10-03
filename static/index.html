@@ -64,9 +64,9 @@
 			<div class="avatar" id="avatar" title="菜单"></div>
 		</div>
 		<div class="chat" id="chat">
-            <!-- 初始问候语（仿 Gemini Web） -->
+            <!-- 初始问候语（保持在新建会话后也显示） -->
             <div class="greeting" id="greeting">
-                <div class="greet-title">你好，我是你的 AI 助理</div>
+                <div class="greet-title">你好！</div>
                 <div class="greet-sub">随时提问，或从以下示例开始</div>
                 <div class="greet-suggestions">
                     <button class="chip">总结最近的公告要点</button>
@@ -75,12 +75,12 @@
                 </div>
             </div>
         </div>
+        <!-- 参考 GPT：输入区独立悬浮，底部遮罩 -->
 		<div class="input">
 			<div class="input-inner">
 				<textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
 				<button class="btn" id="send"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>
 			</div>
-			<!-- 流式开关隐藏，始终流式 -->
 			<label class="switch" style="display:none">
 				<input type="checkbox" id="streamToggle" checked />
 				<span>流式</span>

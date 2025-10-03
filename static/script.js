@@ -196,15 +196,11 @@ async function loadUser() {
     if (!u) return;
     userInfo = u;
     avatar.style.backgroundImage = `url('${u.avatar_url || ''}')`;
-    // 动态更新问候语为“你好，{用户名}！”
+    // 1) 移除默认“我是你的AI助理”，仅显示“你好”或“你好，{用户名}！”
     const greetTitle = document.querySelector('#greeting .greet-title');
     if (greetTitle) {
         const name = (u.name || u.username || '').trim();
-        if (name) {
-            greetTitle.textContent = `你好，${name}！`;
-        } else {
-            greetTitle.textContent = '你好！';
-        }
+        greetTitle.textContent = name ? `你好，${name}！` : '你好！';
     }
 }
 

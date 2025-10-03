@@ -74,7 +74,18 @@ html, body { height: 100%; }
 body, html { margin: 0; padding: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); }
 a { color: inherit; text-decoration: none; }
 
-.app { display: flex; height: 100%; position: relative; }
+/* 独立滚动布局（参考 GPT）：左侧与对话区各自滚动，输入区悬浮 */
+.app { height: 100vh; overflow: hidden; }
+.sidebar { overflow: auto; }
+.main { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+.topbar { position: sticky; top: 0; z-index: 5; }
+.chat {
+    overflow: auto;
+    padding: 24px 12%;
+    /* 预留底部空间避免被输入区遮挡 */
+    padding-bottom: 140px;
+}
+
 .sidebar {
     width: 300px;
     border-right: 1px solid var(--md-sys-color-surface-variant);
@@ -183,7 +194,6 @@ a { color: inherit; text-decoration: none; }
     box-shadow: var(--md-sys-elevation-1);
 }
 /* 聊天区 */
-.chat { flex: 1; padding: calc(var(--gap) + 4px) 12%; }
 .greeting {
     max-width: 680px;
     margin: 8vh auto 2vh;
@@ -317,32 +327,36 @@ body, html { letter-spacing: 0; }
 .sidebar .conv .conv-menu-pop > div { padding: 8px 12px; cursor: pointer; white-space: nowrap; }
 .sidebar .conv .conv-menu-pop > div:hover { background: color-mix(in srgb, var(--md-sys-color-surface-variant) 35%, transparent); }
 
-/* 输入区 */
+/* 输入框：纵向居中、增加阴影、底部遮罩层（参考 GPT） */
 .input {
-    border-top: none;
-    padding: var(--gap) 15%;
-    display: flex;
-    gap: 8px;
-    align-items: flex-end;
-    background: transparent;
-    position: sticky;
-    bottom: 0;
+    position: fixed;
+    left: 300px; right: 0; bottom: 0;
+    padding: 16px 12%;
+    background: linear-gradient(to top, color-mix(in srgb, var(--md-sys-color-surface) 96%, transparent) 30%, transparent 100%);
+    z-index: 10;
+}
+@media (max-width: 960px) {
+    .input { left: 0; padding: 12px 16px; }
 }
 .input-inner {
-    flex: 1;
-    display: flex;
-    align-items: flex-end;
-    padding: 8px 8px 8px 20px;
+    align-items: center;            /* 纵向居中关键 */
+    min-height: 56px;
     border-radius: 28px;
-    background: var(--chat-bubble-assistant);
+    background: var(--md-sys-color-surface);
     border: 1px solid var(--md-sys-color-outline);
-    gap: 8px;
-    transition: border-color .2s ease, box-shadow .2s ease;
+    box-shadow: 0 6px 24px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.08); /* 增强阴影 */
+    padding: 10px 10px 10px 16px;
 }
-.input-inner:focus-within {
-    border-color: var(--md-sys-color-primary);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-sys-color-primary) 25%, transparent);
+/* 文本域垂直居中显示行 */
+.input textarea {
+    line-height: 22px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    align-self: center;     /* 配合 align-items:center */
 }
+/* 发送按钮保持圆形 */
+#send { width: 40px; height: 40px; }
+
 .input textarea {
     flex: 1;
     height: 26px; /* initial height */
@@ -359,8 +373,6 @@ body, html { letter-spacing: 0; }
     font-family: inherit;
 }
 #send {
-    width: 40px;
-    height: 40px;
     border-radius: 50% !important;
     padding: 0 !important;
     box-shadow: none !important;
@@ -380,3 +392,28 @@ body, html { letter-spacing: 0; }
 
 /* 上传 */
 .upload { cursor: pointer; }
+
+/* 顶部到输入区的底部遮罩（在 chat 内顶部添加反向渐变，已在 .input 上实现底部遮罩，此处补充更柔和过渡） */
+.chat::after {
+    content: "";
+    position: sticky;
+    display: block;
+    bottom: 0;
+    height: 96px;
+    margin-top: -96px;
+    background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--md-sys-color-surface) 92%, transparent));
+    pointer-events: none;
+}
+
+/* 对话泡泡布局微调（兼容现有头像与圆角） */
+.msg { margin: 12px 0; }
+.msg .bubble-inner { padding: 12px 14px; }
+
+/* 适配窄屏时的左右留白（参考 GPT） */
+@media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
+@media (max-width: 960px)  { .chat { padding-left: 16px; padding-right: 16px; } }
+
+/* 去除显眼的品牌色，偏中性（已在变量层调整） */
+
+/* 列表项上下间距更紧凑（已保留） */
+.md-body li { margin: 2px 0 !important; }
