@@ -378,18 +378,6 @@ button { font: inherit; }
 }
 #send:hover { filter: brightness(1.05); }
 
-/* 顶到底部遮罩，使滚动末端过渡自然 */
-.chat::after {
-    content: "";
-    position: sticky;
-    display: block;
-    bottom: 0;
-    height: 100px;
-    margin-top: -100px;
-    background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bg) 92%, transparent));
-    pointer-events: none;
-}
-
 /* 上传/开关小组件 */
 .switch { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .upload { cursor: pointer; }
