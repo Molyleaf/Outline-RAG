@@ -12,9 +12,7 @@ const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
-// Deepseek 助手头像（可替换为实际静态路径）
-// const ASSISTANT_AVATAR_URL = '/static/img/deepseek-avatar.png';
-let ASSISTANT_AVATAR_URL = '/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
+let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
 
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
@@ -38,18 +36,15 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
     }
 
     // 路径要求：
-    // Deepseek -> /static/DeepSeek.svg
-    // Qwen/QWQ -> /static/Tongyi.svg
-    // Kimi -> /static/moonshotai_new.png
     let applyGlow = false;
     if (/^deepseek/i.test(m)) {
-        ASSISTANT_AVATAR_URL = '/static/DeepSeek.svg';
+        ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg';
         applyGlow = true;
     } else if (/^(qwen|qwq)/i.test(m)) {
-        ASSISTANT_AVATAR_URL = '/static/Tongyi.svg';
+        ASSISTANT_AVATAR_URL = '/chat/static/Tongyi.svg';
         applyGlow = true;
     } else if (/^kimi/i.test(m)) {
-        ASSISTANT_AVATAR_URL = '/static/moonshotai_new.png';
+        ASSISTANT_AVATAR_URL = '/chat/static/moonshotai_new.png';
         applyGlow = true;
     }
 
