@@ -405,9 +405,7 @@ def chat_page_with_guid(conv_guid: str):
 @app.route("/chat/static/style.css")
 def chat_static_style():
     resp = send_from_directory(app.static_folder, "style.css")
-    # 交由 Flask 自动推断 mimetype，也可保留如下行
     resp.headers["Content-Type"] = "text/css; charset=utf-8"
-    # 为主题切换允许较短缓存，便于快速生效（从 86400 降到 3600）
     resp.headers.setdefault("Cache-Control", "public, max-age=3600")
     return resp
 
@@ -415,6 +413,27 @@ def chat_static_style():
 def chat_static_script():
     resp = send_from_directory(app.static_folder, "script.js")
     resp.headers["Content-Type"] = "application/javascript; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return resp
+
+@app.route("/chat/static/DeepSeek.svg")
+def chat_static_deepseek_svg():
+    resp = send_from_directory(app.static_folder, "DeepSeek.svg")
+    resp.headers["Content-Type"] = "image/svg+xml; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return resp
+
+@app.route("/chat/static/Tongyi.svg")
+def chat_static_tongyi_svg():
+    resp = send_from_directory(app.static_folder, "Tongyi.svg")
+    resp.headers["Content-Type"] = "image/svg+xml; charset=utf-8"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return resp
+
+@app.route("/chat/static/moonshotai_new.png")
+def chat_static_kimi_png():
+    resp = send_from_directory(app.static_folder, "moonshotai_new.png")
+    resp.headers["Content-Type"] = "image/png"
     resp.headers.setdefault("Cache-Control", "public, max-age=86400")
     return resp
 
