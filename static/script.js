@@ -13,10 +13,51 @@ const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
 // Deepseek 助手头像（可替换为实际静态路径）
-const ASSISTANT_AVATAR_URL = '/static/img/deepseek-avatar.png';
+// const ASSISTANT_AVATAR_URL = '/static/img/deepseek-avatar.png';
+let ASSISTANT_AVATAR_URL = '/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
 
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
+
+// 按 CHAT_MODEL 选择 AI 头像与外发光
+(function initAssistantAvatar() {
+    const chatModel =
+        (window.CHAT_MODEL || '') ||
+        (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '');
+    const m = (chatModel || '').trim();
+
+    const styleEl = document.createElement('style');
+    styleEl.setAttribute('data-dynamic-style', 'assistant-avatar-glow');
+
+    function glowCss(selector) {
+        return `
+            ${selector} .avatar {
+                filter: drop-shadow(0 0 6px rgba(255,255,255,.9)) drop-shadow(0 0 16px rgba(255,255,255,.6));
+            }
+        `;
+    }
+
+    // 路径要求：
+    // Deepseek -> /static/DeepSeek.svg
+    // Qwen/QWQ -> /static/Tongyi.svg
+    // Kimi -> /static/moonshotai_new.png
+    let applyGlow = false;
+    if (/^deepseek/i.test(m)) {
+        ASSISTANT_AVATAR_URL = '/static/DeepSeek.svg';
+        applyGlow = true;
+    } else if (/^(qwen|qwq)/i.test(m)) {
+        ASSISTANT_AVATAR_URL = '/static/Tongyi.svg';
+        applyGlow = true;
+    } else if (/^kimi/i.test(m)) {
+        ASSISTANT_AVATAR_URL = '/static/moonshotai_new.png';
+        applyGlow = true;
+    }
+
+    if (applyGlow) {
+        styleEl.textContent = glowCss('.msg.assistant');
+        document.head.appendChild(styleEl);
+    }
+})();
 
 let currentConvId = null;
 // 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
@@ -195,8 +236,10 @@ async function loadUser() {
     const u = await api('/chat/api/me');
     if (!u) return;
     userInfo = u;
+    // 主界面右上角仍显示用户头像
     avatar.style.backgroundImage = `url('${u.avatar_url || ''}')`;
-    // 1) 移除默认“我是你的AI助理”，仅显示“你好”或“你好，{用户名}！”
+
+    // 仅显示“你好”或“你好，{用户名}！”
     const greetTitle = document.querySelector('#greeting .greet-title');
     if (greetTitle) {
         const name = (u.name || u.username || '').trim();
@@ -350,8 +393,8 @@ function appendMsg(role, text) {
     if (role === 'assistant') {
         avatarEl.style.backgroundImage = `url('${ASSISTANT_AVATAR_URL}')`;
     } else {
-        // 使用已加载的用户头像
-        avatarEl.style.backgroundImage = avatar.style.backgroundImage || '';
+        // 取消显示用户消息内的头像
+        avatarEl.style.display = 'none';
     }
 
     // 气泡容器
@@ -360,6 +403,13 @@ function appendMsg(role, text) {
     const bubbleInner = document.createElement('div');
     bubbleInner.className = 'bubble-inner';
 
+    // 三边圆角：用户右上角方形；AI 左上角方形
+    if (role === 'user') {
+        bubbleInner.classList.add('bubble-user-corners');
+    } else {
+        bubbleInner.classList.add('bubble-ai-corners');
+    }
+
     // Markdown 渲染
     const node = renderMarkdown(String(text ?? ''));
     bubbleInner.appendChild(node);
@@ -367,12 +417,9 @@ function appendMsg(role, text) {
 
     // 组装
     if (role === 'user') {
-        div.appendChild(document.createElement('div')); // 占位，使用户头像在右
+        // 用户消息在右侧（不显示用户头像）
+        div.appendChild(document.createElement('div')); // 占位，维持网格
         div.appendChild(bubble);
-        div.insertBefore(avatarEl, bubble); // grid: [avatar][bubble]
-        div.removeChild(div.firstChild); // 清理占位
-        // 将头像放在右列
-        div.appendChild(document.createTextNode('')); // 保持网格稳定
     } else {
         div.appendChild(avatarEl);
         div.appendChild(bubble);
