@@ -8,6 +8,12 @@ const qEl = document.getElementById('q');
 const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
 const streamToggle = document.getElementById('streamToggle');
+// 3. 移动端侧边栏开关元素
+const appRoot = document.querySelector('.app');
+const hamburger = document.querySelector('.topbar .hamburger');
+const sidebarVeil = document.querySelector('.sidebar-veil');
+// Deepseek 助手头像（可替换为实际静态路径）
+const ASSISTANT_AVATAR_URL = '/static/img/deepseek-avatar.png';
 
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
@@ -172,13 +178,17 @@ fileInput.addEventListener('change', async (e) => {
     e.target.value = '';
 });
 
+// 4. 修复重命名与删除（确保请求头与响应判定更稳健）
 async function api(path, opts) {
-    const res = await fetch(path, {credentials: 'include', headers: {'Content-Type':'application/json', ...(opts && opts.headers || {})}, ...opts});
+    const init = { credentials: 'include', ...(opts || {}) };
+    init.headers = { 'Content-Type': 'application/json', ...(opts && opts.headers || {}) };
+    const res = await fetch(path, init);
     if (res.status === 401) { window.location = '/chat/login'; return null; }
     if ((opts && opts.stream) || res.headers.get('content-type')?.includes('text/event-stream')) {
-        return res; // 流式
+        return res;
     }
-    return res.json();
+    // 尝试解析 json；失败返回空对象，便于后续判定
+    try { return await res.json(); } catch { return { httpOk: res.ok }; }
 }
 
 async function loadUser() {
@@ -214,11 +224,11 @@ function toSameOriginUrl(c) {
 async function loadConvs() {
     const data = await api('/chat/api/conversations');
     convsEl.innerHTML = '';
-    const list = data?.items || []; // 保证为数组
+    const list = data?.items || [];
     list.forEach(c => {
         const row = document.createElement('div');
         row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
-        row.tabIndex = 0; // 可键盘聚焦
+        row.tabIndex = 0;
         const titleEl = document.createElement('span');
         titleEl.className = 'conv-title';
         titleEl.textContent = c.title || ('会话 ' + (c.id || '').slice(0,8));
@@ -227,7 +237,6 @@ async function loadConvs() {
         menuBtn.className = 'conv-menu';
         menuBtn.textContent = '⋯';
 
-        // 避免与顶部 menu 变量名冲突
         const rowMenu = document.createElement('div');
         rowMenu.className = 'conv-menu-pop';
         const rename = document.createElement('div');
@@ -235,13 +244,11 @@ async function loadConvs() {
         const del = document.createElement('div');
         del.textContent = '删除';
 
-        // 行点击：任何非菜单区域点击都跳转
         function go() {
             const href = toSameOriginUrl(c);
             if (href) location.href = href;
         }
         row.addEventListener('click', (e) => {
-            // 点击菜单按钮或弹层时不跳转
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
             go();
         });
@@ -251,13 +258,7 @@ async function loadConvs() {
                 go();
             }
         });
-
-        // 标题点击也可跳转（与行点击一致）
-        titleEl.onclick = (e) => {
-            e.stopPropagation();
-            go();
-        };
-
+        titleEl.onclick = (e) => { e.stopPropagation(); go(); };
         menuBtn.onclick = (e) => {
             e.stopPropagation();
             rowMenu.style.display = (rowMenu.style.display === 'block') ? 'none' : 'block';
@@ -270,8 +271,8 @@ async function loadConvs() {
             const t = val.trim();
             if (!t) { toast('标题不能为空', 'warning'); return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) });
-            // 后端可能返回 {ok:true} 或 200 JSON，做兼容判断
-            if ((res && (res.ok === true || res.status === 'ok')) || (res && !('ok' in res) && !('status' in res))) {
+            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
+            if (success) {
                 await loadConvs();
                 toast('已重命名', 'success');
             } else {
@@ -284,12 +285,10 @@ async function loadConvs() {
             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
             if (!ok) { rowMenu.style.display = 'none'; return; }
             const res = await api(`/chat/api/conversations/${c.id}`, { method: 'DELETE' });
-            // 兼容不同返回体
-            const success = (res && (res.ok === true || res.status === 'ok')) || (res && !('ok' in res) && !('status' in res));
+            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
             if (success) {
                 if (String(currentConvId) === String(c.id)) {
                     currentConvId = null; chatEl.innerHTML = '';
-                    // 删除当前会话时，跳到默认入口（避免留在无效页面）
                     try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
                 }
                 await loadConvs();
@@ -304,11 +303,8 @@ async function loadConvs() {
         rowMenu.appendChild(del);
         rowMenu.style.display = 'none';
 
-        // 单一的全局委托，避免为每个行重复绑定
-        // 注：此监听只注册一次
         if (!document.__convMenuCloserBound__) {
             document.addEventListener('click', (e) => {
-                // 更稳妥：逐个判断
                 const pops = document.querySelectorAll('.conv-menu-pop');
                 pops.forEach(pop => {
                     const parent = pop.parentElement;
@@ -347,9 +343,39 @@ function appendMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
 
-    // Markdown 渲染（assistant 为默认 markdown，user 也支持）
+    // 左/右侧头像
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'avatar';
+    if (role === 'assistant') {
+        avatarEl.style.backgroundImage = `url('${ASSISTANT_AVATAR_URL}')`;
+    } else {
+        // 使用已加载的用户头像
+        avatarEl.style.backgroundImage = avatar.style.backgroundImage || '';
+    }
+
+    // 气泡容器
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const bubbleInner = document.createElement('div');
+    bubbleInner.className = 'bubble-inner';
+
+    // Markdown 渲染
     const node = renderMarkdown(String(text ?? ''));
-    div.appendChild(node);
+    bubbleInner.appendChild(node);
+    bubble.appendChild(bubbleInner);
+
+    // 组装
+    if (role === 'user') {
+        div.appendChild(document.createElement('div')); // 占位，使用户头像在右
+        div.appendChild(bubble);
+        div.insertBefore(avatarEl, bubble); // grid: [avatar][bubble]
+        div.removeChild(div.firstChild); // 清理占位
+        // 将头像放在右列
+        div.appendChild(document.createTextNode('')); // 保持网格稳定
+    } else {
+        div.appendChild(avatarEl);
+        div.appendChild(bubble);
+    }
 
     chatEl.appendChild(div);
     animateIn(div);
@@ -494,3 +520,23 @@ async function sendQuestion() {
         await loadMessages();
     }
 })();
+
+// 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
+if (hamburger) {
+    hamburger.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        appRoot?.classList.toggle('sidebar-open');
+    });
+}
+if (sidebarVeil) {
+    sidebarVeil.addEventListener('click', () => {
+        appRoot?.classList.remove('sidebar-open');
+    });
+}
+// 在窄屏导航到会话后自动关闭侧栏
+convsEl.addEventListener('click', () => {
+    if (window.innerWidth <= 960) {
+        appRoot?.classList.remove('sidebar-open');
+    }
+});
