@@ -363,9 +363,9 @@ async function loadConvs() {
     });
 
     // 关键：如果当前 URL 对应会话有效，加载其历史消息
-    if (currentConvId) {
-        try { await loadMessages(); } catch(_) {}
-    }
+    //if (currentConvId) {
+    //    try { await loadMessages(); } catch(_) {}
+    //}
 }
 
 async function loadMessages() {
