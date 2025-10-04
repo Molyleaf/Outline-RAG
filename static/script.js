@@ -461,6 +461,10 @@ newConvBtn.addEventListener('click', async (e) => {
     if (greet) greet.style.display = 'block';
     // 使用 History API 保持在 /chat
     try { history.pushState(null, '', '/chat'); } catch (_) { location.href = '/chat'; return; }
+    // 窄屏下新建完成后自动关闭侧边栏
+    if (window.innerWidth <= 960) {
+        appRoot?.classList.remove('sidebar-open');
+    }
 });
 
 // 监听浏览器前进后退，保持 currentConvId 与视图同步（pjax 式体验）
