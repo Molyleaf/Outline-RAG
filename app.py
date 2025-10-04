@@ -71,6 +71,9 @@ SECRET_KEY = os.getenv("SECRET_KEY", None)  # 改动：不再回退随机值，�
 
 # Flask
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+# 禁用 Werkzeug 的标准 HTTP 访问日志
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.setLevel(logging.ERROR)
 # 在启动阶段校验关键配置（SECRET_KEY、Webhook签名）
 if not SECRET_KEY:
     logger.critical("SECRET_KEY 未设置，拒绝启动。")
