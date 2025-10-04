@@ -19,10 +19,6 @@ api_bp = Blueprint('api', __name__)
 
 @api_bp.route("/api/me")
 def api_me():
-    # --- 问题修复 ---
-    # 旧的逻辑: if "user" not in (user_session := current_user() or {}): abort(401)
-    # 这是错误的，因为它在user对象内部查找"user"键。
-    # 正确的逻辑是检查用户会话是否存在。
     require_login()
     return jsonify(current_user())
 
@@ -113,16 +109,29 @@ def api_ask():
             yield "data: [DONE]\n\n"
             return
 
+        # --- 修复开始 ---
+        # 1. 保留原始代码可以正常工作的 iter_lines(decode_unicode=True) 结构。
+        # 2. 在迭代前，强制指定 requests 使用 UTF-8 编码进行解码。
+        #    这能从根本上解决乱码问题，同时不改变流式传输的机制。
+        resp_stream.encoding = 'utf-8'
+
         for line in resp_stream.iter_lines(decode_unicode=True):
-            if line.startswith("data:"):
+            # 过滤掉由双换行符产生的空行
+            if line:
+                # 3. 使用原始代码的 yield 逻辑，为每一行重建 SSE 事件格式。
                 yield f"{line}\n\n"
-                if "[DONE]" not in line:
-                    try:
-                        data = json.loads(line[len("data: "):])
-                        if delta := data.get("choices", [{}])[0].get("delta", {}).get("content"):
-                            buffer.append(delta)
-                    except (json.JSONDecodeError, IndexError):
-                        pass
+
+                # 4. 对解码后的正确字符串进行后续处理，用于存入数据库。
+                if line.startswith("data:"):
+                    if "[DONE]" not in line:
+                        try:
+                            data = json.loads(line[len("data: "):])
+                            if delta := data.get("choices", [{}])[0].get("delta", {}).get("content"):
+                                buffer.append(delta)
+                        except (json.JSONDecodeError, IndexError):
+                            pass
+        # --- 修复结束 ---
+
         full_response = "".join(buffer)
         if full_response:
             with engine.begin() as conn:

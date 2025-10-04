@@ -529,18 +529,14 @@ async function sendQuestion() {
     const text = qEl.value.trim();
     if (!text) return;
 
-    // 一旦用户开始对话，隐藏问候语
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = 'none';
 
-    // 发送后清空并重置高度
     qEl.value = '';
-    // 触发一次自适应（与上面的监听共享逻辑）
     const ev = new Event('input');
     qEl.dispatchEvent(ev);
 
     if (!currentConvId) {
-        // 首次发送：先创建会话，再以 pjax 方式替换 URL（不整页跳转），随后继续发送
         const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30) || '新会话'})});
         const newId = c?.id;
         const newUrl = (c?.url && c.url.startsWith('/')) ? c.url : (newId ? ('/chat/' + newId) : null);
@@ -549,28 +545,46 @@ async function sendQuestion() {
             return;
         }
         currentConvId = newId;
-        // pjax：仅替换地址，不刷新页面
         try { history.replaceState(null, '', newUrl); } catch(_) { location.href = newUrl; return; }
-        // 确保侧栏高亮更新
         try { await loadConvs(); } catch(_) {}
     }
-    // 追加用户消息（统一结构）
+
     appendMsg('user', text);
     qEl.value = '';
 
-    // 使用 appendMsg 生成 assistant 占位，保证结构一致与正确对齐
     const placeholderDiv = appendMsg('assistant', '');
     let placeholderContentRef = placeholderDiv.querySelector('.md-body');
+    // 如果 appendMsg 未能创建 .md-body (例如在无 marked.js 的情况下)，确保它存在
     if (!placeholderContentRef) {
-        // 若空内容未生成 md-body，补一个
-        placeholderContentRef = document.createElement('div');
-        placeholderContentRef.className = 'md-body';
-        const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv;
-        bubbleInner.appendChild(placeholderContentRef);
+        const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv.querySelector('.bubble') || placeholderDiv;
+        const newBody = document.createElement('div');
+        newBody.className = 'md-body';
+        bubbleInner.appendChild(newBody);
+        placeholderContentRef = newBody;
     }
+
     let acc = '';
 
-    const res = await fetch('/chat/api/ask', { // 始终开启 SSE
+    // --- 修复开始: 简化并修正 rerender 逻辑 ---
+    const rerender = (isFinal = false) => {
+        // 直接更新 innerHTML，而不是替换节点，更简单且健壮
+        placeholderContentRef.innerHTML = marked.parse(acc, { breaks: true, gfm: true });
+
+        // 仅在最后一次渲染时执行代码高亮，提高性能
+        if (isFinal && window.hljs) {
+            placeholderContentRef.querySelectorAll('pre code').forEach(block => {
+                try {
+                    window.hljs.highlightElement(block);
+                } catch (e) {
+                    console.error("Highlight.js error:", e);
+                }
+            });
+        }
+        chatEl.scrollTop = chatEl.scrollHeight;
+    };
+    // --- 修复结束 ---
+
+    const res = await fetch('/chat/api/ask', {
         method: 'POST',
         body: JSON.stringify({conv_id: currentConvId, query: text}),
         headers: {'Content-Type':'application/json'},
@@ -578,7 +592,6 @@ async function sendQuestion() {
     });
 
     if (!res.ok) {
-        // 修正引用：使用 placeholderContentRef
         placeholderContentRef.textContent = '请求失败';
         toast('请求失败', 'danger');
         return;
@@ -587,14 +600,6 @@ async function sendQuestion() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-
-    const rerender = () => {
-        const tmp = renderMarkdown(acc);
-        const parent = placeholderContentRef.parentElement || placeholderDiv;
-        parent.replaceChild(tmp, placeholderContentRef);
-        placeholderContentRef = tmp;
-        chatEl.scrollTop = chatEl.scrollHeight;
-    };
 
     try {
         while (true) {
@@ -607,19 +612,24 @@ async function sendQuestion() {
                 buffer = buffer.slice(idx + 2);
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
-                    if (data === '[DONE]') { rerender(); return; }
+                    if (data === '[DONE]') {
+                        rerender(true); // 传入 true 表示这是最后一次渲染
+                        return;
+                    }
                     try {
                         const j = JSON.parse(data);
-                        if (j.delta) {
-                            acc += j.delta;
-                            if (/[。\.\n\r]$/.test(j.delta)) rerender();
+                        const delta = j.choices?.[0]?.delta?.content;
+                        if (typeof delta === 'string' && delta.length > 0) {
+                            acc += delta;
+                            rerender(false); // 实时渲染，不执行高亮
                         }
                     } catch {}
                 }
             }
         }
-        rerender();
-    } catch (_) {
+        rerender(true); // 所有数据显示完后，执行最终渲染
+    } catch (e) {
+        console.error("Stream processing error:", e);
         toast('连接中断', 'warning');
     }
 }
