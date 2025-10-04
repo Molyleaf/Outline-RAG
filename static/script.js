@@ -19,10 +19,10 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
 // 按 CHAT_MODEL 选择 AI 头像与外发光
 (function initAssistantAvatar() {
-    const chatModel =
-        (window.CHAT_MODEL || '') ||
-        (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '');
-    const m = (chatModel || '').trim();
+    // 优先读取 window.CHAT_MODEL，并先 trim 再判断是否为空，若为空再尝试 meta 标签
+    const chatModelFromWindow = (window.CHAT_MODEL || '').trim();
+    const chatModelFromMeta = (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '').trim();
+    const m = chatModelFromWindow || chatModelFromMeta;
 
     const styleEl = document.createElement('style');
     styleEl.setAttribute('data-dynamic-style', 'assistant-avatar-glow');

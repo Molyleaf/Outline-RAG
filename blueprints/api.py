@@ -1,4 +1,4 @@
-# 包含所有数据交互的 API 接口，例如消息、会话管理、RAG 问答、文件上传和 Webhook
+# blueprints/api.py
 import json
 import logging
 import os
@@ -21,9 +21,12 @@ _refresh_lock = threading.Lock()
 
 @api_bp.route("/api/me")
 def api_me():
-    if "user" not in (user_session := current_user() or {}):
-        abort(401)
-    return jsonify(user_session)
+    # --- 问题修复 ---
+    # 旧的逻辑: if "user" not in (user_session := current_user() or {}): abort(401)
+    # 这是错误的，因为它在user对象内部查找"user"键。
+    # 正确的逻辑是检查用户会话是否存在。
+    require_login()
+    return jsonify(current_user())
 
 @api_bp.route("/api/conversations", methods=["GET", "POST"])
 def api_conversations():
