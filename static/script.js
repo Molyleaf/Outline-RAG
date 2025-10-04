@@ -63,10 +63,6 @@ let currentConvId = null;
 let userInfo = null;
 
 /** Material 风格弹窗与通知（替换 alert/confirm/prompt） */
-// 依赖：Shoelace Web Components（Material-like）与 snackbar 动画
-// 在 index.html 中通过 CDN 引入：
-// <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js"></script>
-// <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css" />
 function toast(message, variant = 'primary', timeout = 3000) {
     // 友好提示替换 alert
     const el = document.createElement('sl-alert');
@@ -120,11 +116,6 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
 }
 
 /** Markdown 渲染与代码高亮 */
-// 依赖：marked + highlight.js（或 prism），通过 CDN 引入：
-// <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-// 注意：浏览器环境请使用 UMD 版 highlight.min.js（非 common.min.js/common.js）
-// <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-// <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
 function renderMarkdown(md) {
     if (!window.marked) {
         // 回退：纯文本
@@ -132,21 +123,14 @@ function renderMarkdown(md) {
         pre.textContent = md || '';
         return pre;
     }
-    const html = marked.parse(md || '', {
-        breaks: true,
-        gfm: true
-    });
+    const html = marked.parse(md || '', { breaks: true, gfm: true });
     const wrapper = document.createElement('div');
     wrapper.className = 'md-body';
-    // 保证逐字节增量渲染时的换行可见（SSE 场景）
-    // 通过 CSS 控制 white-space，代码块仍由 .md-body pre 单独管理
-    wrapper.style.whiteSpace = 'pre-wrap';
-    wrapper.style.wordBreak = 'break-word';
+    // 由 CSS 统一管理换行与折行
+    wrapper.removeAttribute('style');
     wrapper.innerHTML = html;
     if (window.hljs) {
-        wrapper.querySelectorAll('pre code').forEach(block => {
-            window.hljs.highlightElement(block);
-        });
+        wrapper.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
     }
     return wrapper;
 }

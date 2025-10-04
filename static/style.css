@@ -293,7 +293,6 @@ button { font: inherit; }
     background: var(--bubble-assistant);
     color: var(--text);
     box-shadow: var(--shadow-1);
-    white-space: pre-wrap;
     word-wrap: break-word;
 }
 .msg.user .bubble-inner {
@@ -316,7 +315,7 @@ button { font: inherit; }
 .msg.assistant + .msg.user { margin-top: 16px; }
 
 /* Markdown 展示（接近 ChatGPT） */
-.md-body { line-height: 1.6; color: var(--text); }
+.md-body { line-height: 1.6; color: var(--text); white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
 .md-body p { margin: .6em 0; }
 .md-body ul, .md-body ol { padding-left: 1.2em; margin: .4em 0; }

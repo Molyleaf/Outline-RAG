@@ -84,7 +84,6 @@ engine: Engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
 
 # SQL 初始化（表 + pgvector）
 INIT_SQL = f"""
-CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
