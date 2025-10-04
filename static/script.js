@@ -94,10 +94,26 @@ function confirmDialog(message, { okText = '确定', cancelText = '取消' } = {
             <sl-button class="ok" variant="primary">${okText}</sl-button>
         </div>`;
         document.body.appendChild(dlg);
+
+        // 创建一个健壮的隐藏对话框的辅助函数
+        const hideDialog = () => {
+            if (typeof dlg.hide === 'function') {
+                dlg.hide();
+            } else {
+                dlg.removeAttribute('open');
+            }
+        };
+
         dlg.addEventListener('sl-after-hide', () => dlg.remove());
-        dlg.querySelector('.cancel').addEventListener('click', () => { dlg.hide(); resolve(false); });
-        dlg.querySelector('.ok').addEventListener('click', () => { dlg.hide(); resolve(true); });
-        dlg.show();
+        dlg.querySelector('.cancel').addEventListener('click', () => { hideDialog(); resolve(false); });
+        dlg.querySelector('.ok').addEventListener('click', () => { hideDialog(); resolve(true); });
+
+        // 使用健壮的方式显示对话框
+        if (typeof dlg.show === 'function') {
+            dlg.show();
+        } else {
+            dlg.setAttribute('open', '');
+        }
     });
 }
 
@@ -113,12 +129,28 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
           </div>`;
         document.body.appendChild(dlg);
         const input = dlg.querySelector('sl-input');
-        function done(val) { dlg.hide(); resolve(val); }
+
+        // 创建一个健壮的隐藏对话框的辅助函数
+        const hideDialog = () => {
+            if (typeof dlg.hide === 'function') {
+                dlg.hide();
+            } else {
+                dlg.removeAttribute('open');
+            }
+        };
+
+        function done(val) { hideDialog(); resolve(val); }
         dlg.addEventListener('sl-after-hide', () => dlg.remove());
         dlg.querySelector('.cancel').addEventListener('click', () => done(null));
         dlg.querySelector('.ok').addEventListener('click', () => done(input.value.trim()));
         dlg.addEventListener('sl-initial-focus', () => input.focus());
-        dlg.show();
+
+        // 使用健壮的方式显示对话框
+        if (typeof dlg.show === 'function') {
+            dlg.show();
+        } else {
+            dlg.setAttribute('open', '');
+        }
     });
 }
 
