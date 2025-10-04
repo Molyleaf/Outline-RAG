@@ -80,7 +80,7 @@ if OUTLINE_WEBHOOK_SIGN and not OUTLINE_WEBHOOK_SECRET:
 app.secret_key = SECRET_KEY
 # 确保 Flask JSON 使用 UTF-8 且不转义中文
 app.config["JSON_AS_ASCII"] = False
-engine: Engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
+engine: Engine = create_engine(DATABASE_URL, future=True)
 
 # SQL 初始化（表 + pgvector）
 INIT_SQL = f"""
@@ -161,38 +161,105 @@ except Exception as e:
     raise
 
 # 启动时对外部依赖进行自检（embedding/reranker/chat 三个 URL/TOKEN）
+import os
+import logging
+import requests
+
+# --- 假设这些变量和 logger 实例已在上下文中定义 ---
+logger = logging.getLogger("app")
+EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "").rstrip("/")
+EMBEDDING_API_TOKEN = os.getenv("EMBEDDING_API_TOKEN", "")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
+RERANKER_API_URL = os.getenv("RERANKER_API_URL", "").rstrip("/")
+RERANKER_API_TOKEN = os.getenv("RERANKER_API_TOKEN", "")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
+CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
+CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
+# -----------------------------------------------------
+
+
 def _startup_self_check():
-    def _req_ok(url, token, payload):
+    """
+    启动时对外部依赖服务进行自检。
+    """
+    def _check_service_connectivity(url: str, token: str, payload: dict) -> bool:
+        """
+        发送一个POST请求来检查服务的连通性。
+        返回 True 表示连通性正常（包括客户端错误），False 表示网络或认证问题。
+        """
         if not url or not token:
             return False
         try:
-            r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=10)
-            return 200 <= r.status_code < 500  # 4xx 也认为连通性正常（如参数错误）
-        except Exception:
+            r = requests.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                timeout=10
+            )
+            # 4xx 状态码（如 400 Bad Request, 401 Unauthorized）也表明服务是可达的，
+            # 只是我们的请求参数或Token可能有误，但这不影响判断连通性。
+            # 5xx 状态码则表示服务端错误，此时我们认为服务异常。
+            if r.status_code >= 500:
+                logger.warning(f"服务自检失败: {url} 返回状态码 {r.status_code}")
+                return False
+            return True
+        except requests.RequestException as e:
+            # 只捕获 requests 相关的网络异常，避免屏蔽其他问题
+            logger.warning(f"服务自检失败: 无法连接到 {url}，错误: {e}")
             return False
 
-    errs = []
-    # embedding
-    if not EMBEDDING_API_URL or not EMBEDDING_API_TOKEN:
-        errs.append("缺少 EMBEDDING_API_URL 或 EMBEDDING_API_TOKEN")
-    elif not _req_ok(f"{EMBEDDING_API_URL}/v1/embeddings", {"Authorization": f"Bearer {EMBEDDING_API_TOKEN}"}, {"model": EMBEDDING_MODEL, "input": ["ping"]}):
-        errs.append("无法连通 Embedding 服务，请检查 EMBEDDING_API_URL/TOKEN/MODEL")
-    # reranker
-    if not RERANKER_API_URL or not RERANKER_API_TOKEN:
-        errs.append("缺少 RERANKER_API_URL 或 RERANKER_API_TOKEN")
-    elif not _req_ok(f"{RERANKER_API_URL}/v1/rerank", {"Authorization": f"Bearer {RERANKER_API_TOKEN}"}, {"model": RERANKER_MODEL, "query": "ping", "documents": ["a", "b"], "top_n": 1}):
-        errs.append("无法连通 Reranker 服务，请检查 RERANKER_API_URL/TOKEN/MODEL")
-    # chat
-    if not CHAT_API_URL or not CHAT_API_TOKEN:
-        errs.append("缺少 CHAT_API_URL 或 CHAT_API_TOKEN")
-    elif not _req_ok(f"{CHAT_API_URL}/v1/chat/completions", {"Authorization": f"Bearer {CHAT_API_TOKEN}"}, {"model": CHAT_MODEL, "messages": [{"role":"user","content":"ping"}]}):
-        errs.append("无法连通 Chat 服务，请检查 CHAT_API_URL/TOKEN/MODEL")
+    # 将服务配置信息结构化，便于统一处理和扩展
+    services_to_check = [
+        {
+            "name": "Embedding",
+            "url": EMBEDDING_API_URL,
+            "token": EMBEDDING_API_TOKEN,
+            "endpoint": "/v1/embeddings",
+            "payload": {"model": EMBEDDING_MODEL, "input": ["ping"]}
+        },
+        {
+            "name": "Reranker",
+            "url": RERANKER_API_URL,
+            "token": RERANKER_API_TOKEN,
+            "endpoint": "/v1/rerank",
+            "payload": {"model": RERANKER_MODEL, "query": "ping", "documents": ["a", "b"], "top_n": 1}
+        },
+        {
+            "name": "Chat",
+            "url": CHAT_API_URL,
+            "token": CHAT_API_TOKEN,
+            "endpoint": "/v1/chat/completions",
+            "payload": {"model": CHAT_MODEL, "messages": [{"role": "user", "content": "ping"}]}
+        }
+    ]
 
-    if errs:
-        for e in errs:
-            logger.critical("[启动自检] %s", e)
-        # 启动不中断，保留服务可用性
-        return
+    errors = []
+    for service in services_to_check:
+        name = service["name"]
+        url = service["url"]
+        token = service["token"]
+
+        if not url or not token:
+            errors.append(f"缺少 {name} 服务的 API_URL 或 API_TOKEN")
+            continue
+
+        full_url = f"{url}{service['endpoint']}"
+        payload = service["payload"]
+
+        if not _check_service_connectivity(full_url, token, payload):
+            errors.append(f"无法连通 {name} 服务，请检查其 API_URL/TOKEN/MODEL 配置")
+
+    if errors:
+        for e in errors:
+            logger.critical(f"[启动自检] {e}")
+        # 设计决策：启动不中断，保留部分服务的可用性。
+        # 如果需要严格模式，可以在此处 raise SystemExit("启动自检失败，服务中止。")
+
+# 在应用启动时调用
 _startup_self_check()
 
 def require_login():
@@ -248,7 +315,9 @@ def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None)
                 raise ValueError("nonce 不匹配")
             return payload
         except Exception as e:
-            logger.warning("使用 jose 验签失败，将回退到最小声明校验（不建议生产）：%s", e)
+            logger.error("JWT signature verification failed: %s", e)
+            # 不要有回退逻辑，直接抛出异常或返回 None
+            raise ValueError("JWT validation failed.") from e
 
     # 回退：仅 iss/aud/exp/nonce 声明校验（不做签名校验）
     jwks = _get_jwks(disc["jwks_uri"])
