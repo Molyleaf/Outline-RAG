@@ -607,11 +607,18 @@ async function sendQuestion() {
         document.head.appendChild(l);
     }
     // 顺序：先获取用户，再会话；完成后若有当前会话再加载消息
-    try { await loadUser(); } catch(_) {}
-    await loadConvs();
-    if (currentConvId) {
-        try { await loadMessages(); } catch(_) {}
-    }
+    (async () => {
+        try { await loadUser(); } catch(_) {}
+        await loadConvs();
+        // 无会话 ID 时确保问候语显示（包括直接打开 /chat 或新建对话后）
+        const greet = document.getElementById('greeting');
+        if (!currentConvId && greet) {
+            greet.style.display = 'block';
+        }
+        if (currentConvId) {
+            try { await loadMessages(); } catch(_) {}
+        }
+    })();
 })();
 
 // 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
