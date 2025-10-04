@@ -19,7 +19,7 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
 // 按 CHAT_MODEL 选择 AI 头像与外发光
 (function initAssistantAvatar() {
-    // 优先读取 window.CHAT_MODEL，并先 trim 再判断是否为空，若为空再尝试 meta 标签
+    // [修复] 优先读取 window.CHAT_MODEL，并先 trim 再判断是否为空，若为空再尝试 meta 标签
     const chatModelFromWindow = (window.CHAT_MODEL || '').trim();
     const chatModelFromMeta = (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '').trim();
     const m = chatModelFromWindow || chatModelFromMeta;
@@ -205,22 +205,31 @@ document.addEventListener('click', (e) => {
 });
 refreshAll.addEventListener('click', async (e) => {
     e.preventDefault();
-    // 先提示“已开始全量刷新”
-    toast('已开始全量刷新', 'primary', 2500);
-    const r = await fetch('/chat/update/all', {method: 'POST', credentials: 'include'});
-    if (r.status === 202) {
-        // 后台异步刷新，前端不阻塞
-        return;
-    }
-    if (r.ok) {
-        toast('已完成全量刷新', 'success');
+    const r = await api('/chat/update/all', {method: 'POST'});
+
+    if (r && r.ok) {
+        toast('已开始全量刷新', 'primary', 2500);
+        const poll = setInterval(async () => {
+            const data = await api('/chat/api/refresh/status');
+            if (!data) { // api() 返回 null 代表网络或认证失败
+                clearInterval(poll);
+                return;
+            }
+            if (data.status === 'success') {
+                clearInterval(poll);
+                toast(data.message || '全量刷新完成', 'success', 4000);
+                console.log('全量刷新完成:', data.message);
+            } else if (data.status === 'error') {
+                clearInterval(poll);
+                toast(data.message || '刷新失败', 'danger');
+                console.error('全量刷新失败:', data.message);
+            }
+            // 若状态是 'running' 或 'idle'，则继续轮询
+        }, 3000);
+    } else if (r && r.error) {
+        toast(r.error, 'warning');
     } else {
-        try {
-            const j = await r.json();
-            toast(j?.error || '刷新失败', 'danger');
-        } catch {
-            toast('刷新失败', 'danger');
-        }
+        toast('启动刷新失败', 'danger');
     }
 });
 fileInput.addEventListener('change', async (e) => {

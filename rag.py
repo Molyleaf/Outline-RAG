@@ -1,4 +1,3 @@
-# rag.py
 # 包含文本分块、向量检索、以及与 Outline 同步（全量、增量）等核心 RAG 功能
 import re
 import json
@@ -54,9 +53,13 @@ def refresh_all():
     docs = services.outline_list_docs()
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE TABLE chunks, documents"))
+    if not docs:
+        logger.info("全量刷新完成，没有发现任何文档。")
+        return 0
     for d in docs:
         upsert_one_doc(d["id"])
     logger.info("全量刷新完成，共处理 %d 个文档。", len(docs))
+    return len(docs)
 
 def verify_outline_signature(raw_body, signature_hex: str) -> bool:
     from config import OUTLINE_WEBHOOK_SIGN, OUTLINE_WEBHOOK_SECRET

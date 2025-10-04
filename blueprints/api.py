@@ -1,7 +1,6 @@
 # blueprints/api.py
 import json
 import logging
-import os
 import secrets
 import threading
 import time
@@ -12,12 +11,11 @@ from sqlalchemy import text
 import config
 import rag
 import services
-from database import engine
+from database import engine, redis_client
 from utils import require_login, current_user, allowed_file
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
-_refresh_lock = threading.Lock()
 
 @api_bp.route("/api/me")
 def api_me():
@@ -102,7 +100,7 @@ def api_ask():
         top_passages = [passages[r["index"]] for r in ranked if r.get("index") is not None and 0 <= r["index"] < len(passages)]
         contexts = top_passages or passages[:5]
 
-    system_prompt = "你是一个企业知识库助理..." # (保持原样)
+    system_prompt = "你是一个企业知识库助理。知识库基于我们开发中的科幻战争题材游戏，游戏世界位于一颗名为“余烬”的类地行星。\n游戏主要设定：1. 货币名为联合币，由北方企业联合体发行。\n2. 存在一种“屏障粒子”阻止了短波和微波在大气中传播。\n3. 核心玩法为舰船设计、海战和社交。\n\n使用提供的参考资料片段结合你的知识回答问题。\n\n回答使用中文。"
     user_prompt = f"问题：{query}\n\n参考资料片段：\n" + "\n\n".join([f"[片段{i+1}]\n{ctx}" for i, ctx in enumerate(contexts)])
     messages = [{"role":"system","content": system_prompt}, {"role":"user","content": user_prompt}]
 
@@ -156,18 +154,65 @@ def upload():
     rag.upsert_one_doc(doc_id)
     return jsonify({"ok": True, "filename": name})
 
+def refresh_task():
+    """在后台线程中执行的全量刷新任务"""
+    try:
+        num_docs = rag.refresh_all()
+        if redis_client:
+            status = {"status": "success", "message": f"全量刷新完成，共处理 {num_docs} 个文档。"}
+            # 设置一个较短的过期时间，避免状态信息永久留存
+            redis_client.set("refresh:status", json.dumps(status), ex=300)
+            logger.info(status["message"])
+    except Exception as e:
+        logger.exception("refresh_all background task failed: %s", e)
+        if redis_client:
+            status = {"status": "error", "message": f"刷新失败: {e}"}
+            redis_client.set("refresh:status", json.dumps(status), ex=300)
+            logger.error(status["message"])
+    finally:
+        if redis_client:
+            # 任务结束，删除锁
+            redis_client.delete("refresh:lock")
+
 @api_bp.route("/update/all", methods=["POST"])
 def update_all():
     require_login()
-    if not _refresh_lock.acquire(blocking=False):
+    if not redis_client:
+        return jsonify({"ok": False, "error": "任务队列服务未配置"}), 503
+
+    # 使用 Redis 实现分布式锁，ex=3600 设置锁的过期时间为1小时，防止任务异常导致死锁
+    if not redis_client.set("refresh:lock", "1", ex=3600, nx=True):
         return jsonify({"ok": False, "error": "正在刷新中"}), 429
+
     try:
-        threading.Thread(target=lambda: (rag.refresh_all(), _refresh_lock.release()), daemon=True).start()
+        # 启动前清除旧的状态
+        redis_client.delete("refresh:status")
+        threading.Thread(target=refresh_task, daemon=True).start()
         return jsonify({"ok": True, "message": "已开始全量刷新"}), 202
     except Exception as e:
-        _refresh_lock.release()
-        logger.exception("refresh_all failed: %s", e)
+        # 如果启动线程失败，确保释放锁
+        redis_client.delete("refresh:lock")
+        logger.exception("Failed to start refresh_all task: %s", e)
         return jsonify({"ok": False, "error": "启动刷新失败"}), 500
+
+@api_bp.route("/api/refresh/status", methods=["GET"])
+def refresh_status():
+    """轮询刷新状态"""
+    require_login()
+    if not redis_client:
+        return jsonify({"status": "disabled", "message": "Redis not configured"})
+
+    status_json = redis_client.get("refresh:status")
+    if status_json:
+        # 返回最终状态（成功或失败）
+        return jsonify(json.loads(status_json))
+
+    if redis_client.get("refresh:lock"):
+        # 如果仍在锁定，说明正在运行
+        return jsonify({"status": "running"})
+
+    # 无锁也无最终状态，视为空闲
+    return jsonify({"status": "idle"})
 
 @api_bp.route("/update/webhook", methods=["POST"])
 def update_webhook():

@@ -10,6 +10,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", None)
 
 # --- 数据库 ---
 DATABASE_URL = os.getenv("DATABASE_URL")
+REDIS_URL = os.getenv("REDIS_URL")
 
 # --- Outline ---
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")

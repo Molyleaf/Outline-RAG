@@ -1,8 +1,10 @@
 # database.py
 # 负责数据库连接引擎的创建和表结构的初始化
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 import logging
 import config
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +12,22 @@ if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
 engine = create_engine(config.DATABASE_URL, future=True)
+
+Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# --- Redis 连接 ---
+redis_client = None
+if config.REDIS_URL:
+    try:
+        # decode_responses=True 确保从 Redis 获取的是字符串而不是字节
+        redis_client = redis.from_url(config.REDIS_URL, decode_responses=True)
+        redis_client.ping()
+        logger.info("Successfully connected to Redis.")
+    except redis.exceptions.ConnectionError as e:
+        logger.critical("Failed to connect to Redis: %s", e)
+        redis_client = None
+else:
+    logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
 INIT_SQL = f"""
 CREATE EXTENSION IF NOT EXISTS vector;
