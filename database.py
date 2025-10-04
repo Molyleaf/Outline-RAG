@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 import logging
 import config
 import redis
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,27 @@ Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 redis_client = None
 if config.REDIS_URL:
     try:
-        # decode_responses=True 确保从 Redis 获取的是字符串而不是字节
-        redis_client = redis.from_url(config.REDIS_URL, decode_responses=True)
+        # 2. 使用更健壮的方式解析 URL 并创建连接
+        parsed_url = urllib.parse.urlparse(config.REDIS_URL)
+
+        # 从路径中提取数据库编号，例如 /2 -> 2
+        db_num = 0
+        if parsed_url.path and parsed_url.path.startswith('/'):
+            try:
+                db_num = int(parsed_url.path[1:])
+            except (ValueError, IndexError):
+                db_num = 0 # 如果路径不是数字，则默认为 0
+
+        redis_client = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            password=parsed_url.password,
+            db=db_num,
+            decode_responses=True # 确保从 Redis 获取的是字符串而不是字节
+        )
         redis_client.ping()
         logger.info("Successfully connected to Redis.")
-    except redis.exceptions.ConnectionError as e:
+    except Exception as e: # 捕获更广泛的异常以防解析失败
         logger.critical("Failed to connect to Redis: %s", e)
         redis_client = None
 else:
