@@ -528,6 +528,7 @@ async function sendQuestion() {
             if (type === 'module') s.type = 'module';
             s.src = src;
             s.onload = () => resolve();
+            s.onerror = () => resolve(); // 不阻塞后续逻辑，避免因 CDN 波动导致初始化中断
             document.head.appendChild(s);
         });
     }
@@ -542,15 +543,18 @@ async function sendQuestion() {
     // Shoelace（弹窗/按钮/alert）
     await ensureScript('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js', 'module');
     ensureStyle('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css');
-    // 等待 sl-alert 定义，避免早期调用无方法
+    // 等待 sl-alert 定义，避免早期调用无方法（失败也不阻塞）
     try { await customElements.whenDefined('sl-alert'); } catch(e) {}
-    // marked + highlight
+
+    // 重要：先加载用户与会话，确保触发 /chat/api/me 与历史对话列表
+    await loadUser();
+    await loadConvs();
+
+    // marked + highlight（这些不影响 /me 请求与会话列表）
     await ensureScript('https://jsd.onmicrosoft.cn/npm/marked/marked.min.js');
     await ensureScript('https://jsd.onmicrosoft.cn/npm/highlight.js/highlight.min.js');
     ensureStyle('https://jsd.onmicrosoft.cn/npm/highlight.js/styles/github.min.css');
 
-    await loadUser();
-    await loadConvs();
     if (currentConvId) {
         await loadMessages();
     }
