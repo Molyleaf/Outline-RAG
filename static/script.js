@@ -425,10 +425,28 @@ function appendMsg(role, text) {
     return div;
 }
 
-newConvBtn.addEventListener('click', async () => {
-    const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: '新会话'})});
-    if (c?.url) { location.href = c.url; return; }
-    if (c?.id) { location.href = '/chat/' + c.id; return; }
+// “新建对话”仅跳转到 /chat，不创建 ID；等待首次发送时再创建并替换 URL
+newConvBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    // 清空当前对话上下文与消息区，展示问候语
+    currentConvId = null;
+    chatEl.innerHTML = '';
+    const greet = document.getElementById('greeting');
+    if (greet) greet.style.display = 'block';
+    // 使用 History API 保持在 /chat
+    try { history.pushState(null, '', '/chat'); } catch (_) { location.href = '/chat'; return; }
+});
+
+// 监听浏览器前进后退，保持 currentConvId 与视图同步（pjax 式体验）
+window.addEventListener('popstate', () => {
+    const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/);
+    currentConvId = m ? m[1] : null;
+    chatEl.innerHTML = '';
+    // 无会话则显示问候语
+    const greet = document.getElementById('greeting');
+    if (greet) greet.style.display = currentConvId ? 'none' : 'block';
+    // 有会话则异步加载消息
+    if (currentConvId) loadMessages();
 });
 
 sendBtn.addEventListener('click', sendQuestion);
@@ -448,10 +466,19 @@ async function sendQuestion() {
     if (greet) greet.style.display = 'none';
 
     if (!currentConvId) {
-        const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30)})});
-        if (c?.url) { location.href = c.url; return; }
-        if (c?.id) { location.href = '/chat/' + c.id; return; }
-        return;
+        // 首次发送：先创建会话，再以 pjax 方式替换 URL（不整页跳转），随后继续发送
+        const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30) || '新会话'})});
+        const newId = c?.id;
+        const newUrl = (c?.url && c.url.startsWith('/')) ? c.url : (newId ? ('/chat/' + newId) : null);
+        if (!newId || !newUrl) {
+            toast('创建会话失败', 'danger');
+            return;
+        }
+        currentConvId = newId;
+        // pjax：仅替换地址，不刷新页面
+        try { history.replaceState(null, '', newUrl); } catch(_) { location.href = newUrl; return; }
+        // 确保侧栏高亮更新
+        try { await loadConvs(); } catch(_) {}
     }
     // 追加用户消息（统一结构）
     appendMsg('user', text);
@@ -523,7 +550,7 @@ async function sendQuestion() {
     }
 }
 
-(async function init(){
+(async function init() {
     // 动态加载前端库（若页面未引入时）
     function ensureScript(src, type = 'text/javascript') {
         return new Promise((resolve) => {
