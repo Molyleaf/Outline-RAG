@@ -54,6 +54,12 @@ def chat_static_deepseek_svg():
 def chat_static_tongyi_svg():
     return _serve_static_with_cache("Tongyi.svg", "image/svg+xml")
 
+# --- 新增 zhipu.svg 路由 ---
+@views_bp.route("/static/zhipu.svg")
+def chat_static_zhipu_svg():
+    return _serve_static_with_cache("zhipu.svg", "image/svg+xml")
+# --- 结束新增 ---
+
 @views_bp.route("/static/moonshotai_new.png")
 def chat_static_kimi_png():
     return _serve_static_with_cache("moonshotai_new.png", "image/png")

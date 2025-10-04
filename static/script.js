@@ -11,7 +11,7 @@ const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
-let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
+let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 默认头像，将在运行时按 CHAT_MODEL 覆盖
 // 计算输入框最大高度（屏幕 20%）
 let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 // 主题菜单项（系统/浅色/深色）
@@ -19,7 +19,6 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
 // 按 CHAT_MODEL 选择 AI 头像与外发光
 (function initAssistantAvatar() {
-    // [修复] 优先读取 window.CHAT_MODEL，并先 trim 再判断是否为空，若为空再尝试 meta 标签
     const chatModelFromWindow = (window.CHAT_MODEL || '').trim();
     const chatModelFromMeta = (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '').trim();
     const m = chatModelFromWindow || chatModelFromMeta;
@@ -35,18 +34,23 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
         `;
     }
 
-    // 路径要求：
-    let applyGlow = false;
-    if (/^deepseek/i.test(m)) {
+    // --- 修复开始: 根据新的模型命名规则进行精确匹配 ---
+    // 提取模型名称中斜杠前的部分作为服务商标识，并转为小写
+    const provider = (m.split('/')[0] || '').toLowerCase();
+
+    let applyGlow = true; // 默认给匹配到的自定义头像加上光晕效果
+    if (provider === 'deepseek-ai') {
         ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg';
-        applyGlow = true;
-    } else if (/^(qwen|qwq)/i.test(m)) {
+    } else if (provider === 'qwen') {
         ASSISTANT_AVATAR_URL = '/chat/static/Tongyi.svg';
-        applyGlow = true;
-    } else if (/^kimi/i.test(m)) {
+    } else if (provider === 'moonshotai') {
         ASSISTANT_AVATAR_URL = '/chat/static/moonshotai_new.png';
-        applyGlow = true;
+    } else if (provider === 'zai-org') {
+        ASSISTANT_AVATAR_URL = '/chat/static/zhipu.svg'; // 新增 Zhipu AI 头像
+    } else {
+        applyGlow = false; // 如果不匹配任何已知提供商，则使用默认头像且不加光晕
     }
+    // --- 修复结束 ---
 
     if (applyGlow) {
         styleEl.textContent = glowCss('.msg.assistant');
