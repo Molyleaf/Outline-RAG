@@ -467,9 +467,9 @@ newConvBtn.addEventListener('click', async (e) => {
             <div class="greet-title">你好！</div>
             <div class="greet-sub">随时提问，或从以下示例开始</div>
             <div class="greet-suggestions">
-                <button class="chip">总结最近的公告要点</button>
-                <button class="chip">帮我写一封项目进展周报</button>
-                <button class="chip">从知识库找出与XX相关的文档</button>
+                <button class="chip">总结新手教程</button>
+                <button class="chip">拉汶帝国完蛋了吗</button>
+                <button class="chip">开发组的烂摊子怎么样了</button>
             </div>
         `;
         chatEl.appendChild(greet);
@@ -480,6 +480,12 @@ newConvBtn.addEventListener('click', async (e) => {
                 qEl.focus();
             });
         });
+    }
+    // 若已有 userInfo，立即填充用户名
+    const greetTitle = greet.querySelector('.greet-title');
+    if (greetTitle) {
+        const name = (userInfo?.name || userInfo?.username || '').trim();
+        greetTitle.textContent = name ? `你好，${name}！` : '你好！';
     }
     greet.style.display = 'block';
 
