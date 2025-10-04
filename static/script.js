@@ -251,6 +251,10 @@ function toSameOriginUrl(c) {
 }
 
 async function loadConvs() {
+    // 若用户信息未加载，先尝试一次，确保会话接口的鉴权上下文与头像渲染
+    if (!userInfo) {
+        try { await loadUser(); } catch(_) {}
+    }
     const data = await api('/chat/api/conversations');
     convsEl.innerHTML = '';
     const list = data?.items || [];
@@ -357,6 +361,11 @@ async function loadConvs() {
         convsEl.appendChild(row);
         animateIn(row);
     });
+
+    // 关键：如果当前 URL 对应会话有效，加载其历史消息
+    if (currentConvId) {
+        try { await loadMessages(); } catch(_) {}
+    }
 }
 
 async function loadMessages() {
@@ -539,24 +548,11 @@ async function sendQuestion() {
         l.href = href;
         document.head.appendChild(l);
     }
-
-    // Shoelace（弹窗/按钮/alert）
-    await ensureScript('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js', 'module');
-    ensureStyle('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css');
-    // 等待 sl-alert 定义，避免早期调用无方法（失败也不阻塞）
-    try { await customElements.whenDefined('sl-alert'); } catch(e) {}
-
-    // 重要：先加载用户与会话，确保触发 /chat/api/me 与历史对话列表
-    await loadUser();
+    // 顺序：先获取用户，再会话；完成后若有当前会话再加载消息
+    try { await loadUser(); } catch(_) {}
     await loadConvs();
-
-    // marked + highlight（这些不影响 /me 请求与会话列表）
-    await ensureScript('https://jsd.onmicrosoft.cn/npm/marked/marked.min.js');
-    await ensureScript('https://jsd.onmicrosoft.cn/npm/highlight.js/highlight.min.js');
-    ensureStyle('https://jsd.onmicrosoft.cn/npm/highlight.js/styles/github.min.css');
-
     if (currentConvId) {
-        await loadMessages();
+        try { await loadMessages(); } catch(_) {}
     }
 })();
 
