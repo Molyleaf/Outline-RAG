@@ -31,11 +31,12 @@ logger = logging.getLogger("app")
 TOP_K = int(os.getenv("TOP_K", "12"))  # 向量检索召回数（search_similar）
 K = int(os.getenv("K", "6"))           # reranker 选取 top_n
 
-POSTGRES_DB = os.getenv("POSTGRES_DB", "outline_rag")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "outline")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "outlinepass")
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "db")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+# 改为通过 DATABASE_URL 统一获取连接信息（支持 Unix Socket）
+# 例子（TCP）：postgresql+psycopg2://user:pass@host:5432/dbname
+# 例子（Socket）：postgresql+psycopg2://user:pass@/dbname?host=/var/run/postgresql
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise SystemExit("缺少 DATABASE_URL 环境变量")
 
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
@@ -79,7 +80,6 @@ if OUTLINE_WEBHOOK_SIGN and not OUTLINE_WEBHOOK_SECRET:
 app.secret_key = SECRET_KEY
 # 确保 Flask JSON 使用 UTF-8 且不转义中文
 app.config["JSON_AS_ASCII"] = False
-DATABASE_URL = f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 engine: Engine = create_engine(DATABASE_URL, poolclass=NullPool, future=True)
 
 # SQL 初始化（表 + pgvector）
@@ -434,6 +434,13 @@ def chat_static_tongyi_svg():
 def chat_static_kimi_png():
     resp = send_from_directory(app.static_folder, "moonshotai_new.png")
     resp.headers["Content-Type"] = "image/png"
+    resp.headers.setdefault("Cache-Control", "public, max-age=86400")
+    return resp
+
+@app.route("/chat/static/favicon.ico")
+def chat_static_favicon():
+    resp = send_from_directory(app.static_folder, "favicon.ico")
+    resp.headers["Content-Type"] = "image/*"
     resp.headers.setdefault("Cache-Control", "public, max-age=86400")
     return resp
 

@@ -138,6 +138,10 @@ function renderMarkdown(md) {
     });
     const wrapper = document.createElement('div');
     wrapper.className = 'md-body';
+    // 保证逐字节增量渲染时的换行可见（SSE 场景）
+    // 通过 CSS 控制 white-space，代码块仍由 .md-body pre 单独管理
+    wrapper.style.whiteSpace = 'pre-wrap';
+    wrapper.style.wordBreak = 'break-word';
     wrapper.innerHTML = html;
     if (window.hljs) {
         wrapper.querySelectorAll('pre code').forEach(block => {
