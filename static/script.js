@@ -454,13 +454,38 @@ function appendMsg(role, text) {
 // “新建对话”仅跳转到 /chat，不创建 ID；等待首次发送时再创建并替换 URL
 newConvBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    // 清空当前对话上下文与消息区，展示问候语
+    // 清空当前对话上下文与消息区
     currentConvId = null;
     chatEl.innerHTML = '';
-    const greet = document.getElementById('greeting');
-    if (greet) greet.style.display = 'block';
+    // 确保问候语节点存在则插回去再显示（避免被清空后无法展示）
+    let greet = document.getElementById('greeting');
+    if (!greet) {
+        greet = document.createElement('div');
+        greet.id = 'greeting';
+        greet.className = 'greeting';
+        greet.innerHTML = `
+            <div class="greet-title">你好！</div>
+            <div class="greet-sub">随时提问，或从以下示例开始</div>
+            <div class="greet-suggestions">
+                <button class="chip">总结最近的公告要点</button>
+                <button class="chip">帮我写一封项目进展周报</button>
+                <button class="chip">从知识库找出与XX相关的文档</button>
+            </div>
+        `;
+        chatEl.appendChild(greet);
+        // 绑定示例 chip 点击
+        greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                qEl.value = btn.textContent.trim();
+                qEl.focus();
+            });
+        });
+    }
+    greet.style.display = 'block';
+
     // 使用 History API 保持在 /chat
     try { history.pushState(null, '', '/chat'); } catch (_) { location.href = '/chat'; return; }
+
     // 窄屏下新建完成后自动关闭侧边栏
     if (window.innerWidth <= 960) {
         appRoot?.classList.remove('sidebar-open');
