@@ -161,24 +161,6 @@ except Exception as e:
     raise
 
 # 启动时对外部依赖进行自检（embedding/reranker/chat 三个 URL/TOKEN）
-import os
-import logging
-import requests
-
-# --- 假设这些变量和 logger 实例已在上下文中定义 ---
-logger = logging.getLogger("app")
-EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "").rstrip("/")
-EMBEDDING_API_TOKEN = os.getenv("EMBEDDING_API_TOKEN", "")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
-RERANKER_API_URL = os.getenv("RERANKER_API_URL", "").rstrip("/")
-RERANKER_API_TOKEN = os.getenv("RERANKER_API_TOKEN", "")
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
-CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
-CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
-# -----------------------------------------------------
-
-
 def _startup_self_check():
     """
     启动时对外部依赖服务进行自检。
@@ -258,8 +240,6 @@ def _startup_self_check():
             logger.critical(f"[启动自检] {e}")
         # 设计决策：启动不中断，保留部分服务的可用性。
         # 如果需要严格模式，可以在此处 raise SystemExit("启动自检失败，服务中止。")
-
-# 在应用启动时调用
 _startup_self_check()
 
 def require_login():
