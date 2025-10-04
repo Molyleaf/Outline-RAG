@@ -13,6 +13,8 @@ const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
 let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
+// 计算输入框最大高度（屏幕 20%）
+let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
@@ -174,6 +176,30 @@ avatar.addEventListener('click', () => {
             menu.style.display = 'none';
         });
     });
+})();
+
+// 自动增高：输入框随输入自适应，最高为屏幕高度的 20%
+(function initAutoResize() {
+    function applyMax() {
+        INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
+        qEl.style.maxHeight = INPUT_MAX_PX + 'px';
+    }
+    function autoresize() {
+        // 先重置高度以便计算 scrollHeight
+        qEl.style.height = 'auto';
+        // 在最大高度限制内自适应
+        const next = Math.min(qEl.scrollHeight, INPUT_MAX_PX);
+        qEl.style.height = next + 'px';
+        // 当达到上限时允许滚动，未达上限时不出现滚动条
+        qEl.style.overflowY = (qEl.scrollHeight > INPUT_MAX_PX) ? 'auto' : 'hidden';
+    }
+    applyMax();
+    // 初始一次（比如有占位文本或默认值时）
+    autoresize();
+    // 事件绑定
+    qEl.addEventListener('input', autoresize);
+    // 窗口尺寸变化时更新上限并重新计算
+    window.addEventListener('resize', () => { applyMax(); autoresize(); });
 })();
 
 document.addEventListener('click', (e) => {
@@ -464,6 +490,12 @@ async function sendQuestion() {
     // 一旦用户开始对话，隐藏问候语
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = 'none';
+
+    // 发送后清空并重置高度
+    qEl.value = '';
+    // 触发一次自适应（与上面的监听共享逻辑）
+    const ev = new Event('input');
+    qEl.dispatchEvent(ev);
 
     if (!currentConvId) {
         // 首次发送：先创建会话，再以 pjax 方式替换 URL（不整页跳转），随后继续发送
