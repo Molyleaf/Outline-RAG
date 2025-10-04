@@ -12,9 +12,10 @@ import requests
 from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, abort
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.pool import NullPool
 import urllib.request
 from flask import make_response
+from jose import jwt
+from jose.exceptions import JOSEError
 # 环境变量
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
@@ -264,59 +265,52 @@ def _b64url_decode(b):
     return base64.urlsafe_b64decode(b + pad)
 
 def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None):
-    # 优先使用 jose/cryptography 完整验签；若关闭或失败则回退到仅声明校验（不建议生产）
-    disc = oidc_discovery()
-    if USE_JOSE_VERIFY:
-        try:
-            from jose import jwt
-            from jose.utils import base64url_decode  # 触发 ImportError 时落入回退逻辑
-            jwks = _get_jwks(disc["jwks_uri"])
-            # 构造 jwks 客户端验证
-            # python-jose 直接传递 jwk 集合通过 options 验证
-            options = {
-                "verify_signature": True,
-                "verify_aud": True,
-                "verify_iat": True,
-                "verify_exp": True,
-                "verify_nbf": True,
-                "require_exp": True,
-                "require_iat": False,
-                "require_nbf": False,
-            }
-            payload = jwt.decode(
-                id_token,
-                jwks,  # 直接传入 JWKS（python-jose 支持字典包含 "keys"）
-                algorithms=["RS256"],
-                audience=expected_aud,
-                issuer=expected_iss,
-                options=options,
-            )
-            if expected_nonce is not None and payload.get("nonce") != expected_nonce:
-                raise ValueError("nonce 不匹配")
-            return payload
-        except Exception as e:
-            logger.error("JWT signature verification failed: %s", e)
-            # 不要有回退逻辑，直接抛出异常或返回 None
-            raise ValueError("JWT validation failed.") from e
+    """
+    安全地验证ID Token的签名和声明。
+    此函数强制使用 OIDC 发现和 JWKS 进行完整的加密验证，不再包含不安全的回退逻辑。
+    如果验证的任何环节失败，都会抛出异常，从而中止认证流程。
+    """
+    try:
+        # 1. 发现 OIDC 配置并获取 JWKS (JSON Web Key Set)
+        disc = oidc_discovery()
+        jwks = _get_jwks(disc["jwks_uri"])
 
-    # 回退：仅 iss/aud/exp/nonce 声明校验（不做签名校验）
-    jwks = _get_jwks(disc["jwks_uri"])
-    header_b64, payload_b64, sig_b64 = id_token.split(".")
-    header = json.loads(_b64url_decode(header_b64).decode())
-    payload = json.loads(_b64url_decode(payload_b64).decode())
-    alg = header.get("alg")
-    if alg != "RS256":
-        raise ValueError("不支持的签名算法")
-    now = int(time.time())
-    iss_ok = payload.get("iss") == expected_iss
-    aud_field = payload.get("aud")
-    aud_ok = (aud_field == expected_aud) or (isinstance(aud_field, list) and expected_aud in aud_field)
-    exp_ok = int(payload.get("exp", 0)) > now
-    nonce_ok = True if expected_nonce is None else (payload.get("nonce") == expected_nonce)
-    if not (iss_ok and aud_ok and exp_ok and nonce_ok):
-        raise ValueError("ID Token 声明校验失败")
-    payload["_unsigned_validated"] = True
-    return payload
+        # 2. 设置 python-jose 库的验证选项
+        # iss 和 aud 会作为 decode 函数的参数直接进行验证
+        options = {
+            "verify_signature": True,
+            "verify_aud": True,
+            "verify_iat": True,
+            "verify_exp": True,
+            "require_exp": True,
+        }
+
+        # 3. 使用 JWKS 解码并验证 token
+        # 任何失败（如签名错误、声明不匹配、过期）都会在此处抛出 JOSEError
+        payload = jwt.decode(
+            id_token,
+            jwks,
+            algorithms=["RS256"],
+            audience=expected_aud,
+            issuer=expected_iss,
+            options=options,
+        )
+
+        # 4. 手动验证 nonce 声明
+        # nonce 用于防止重放攻击，是 OIDC 流程中的关键安全步骤
+        if expected_nonce is not None and payload.get("nonce") != expected_nonce:
+            raise ValueError("ID Token a nonce mismatch.")
+
+        return payload
+
+    except JOSEError as e:
+        # 捕获所有来自 jose 库的错误（签名无效、声明错误等）
+        logger.error("JWT verification failed with JOSEError: %s", e)
+        raise ValueError(f"Invalid ID token: verification failed. Reason: {e}") from e
+    except Exception as e:
+        # 捕获其他意外错误（如网络问题、JSON解析失败等）
+        logger.error("An unexpected error occurred during JWT verification: %s", e)
+        raise ValueError("Could not verify ID token due to an unexpected error.") from e
 
 def oidc_build_auth_url(state, code_challenge):
     disc = oidc_discovery()
