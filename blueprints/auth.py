@@ -1,4 +1,3 @@
-# blueprints/auth.py
 # 处理用户登录、登出和 OIDC 回调逻辑
 import base64
 import hashlib
@@ -12,18 +11,40 @@ from jose import jwt
 from jose.exceptions import JOSEError
 from sqlalchemy import text
 import config
-from database import engine
+from database import engine, redis_client
 
 auth_bp = Blueprint('auth', __name__)
 
 # --- OIDC Helpers ---
 def oidc_discovery():
+    """获取OIDC配置，优先从Redis缓存读取。"""
+    cache_key = "oidc:discovery"
+    if redis_client:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+
     with urllib.request.urlopen(f"{config.GITLAB_URL}/.well-known/openid-configuration", timeout=10) as resp:
-        return json.loads(resp.read().decode())
+        data = json.loads(resp.read().decode())
+        if redis_client:
+            # 缓存12小时
+            redis_client.set(cache_key, json.dumps(data), ex=43200)
+        return data
 
 def _get_jwks(jwks_uri):
+    """获取JWKS公钥集，优先从Redis缓存读取。"""
+    cache_key = f"oidc:jwks:{jwks_uri}"
+    if redis_client:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+
     with urllib.request.urlopen(jwks_uri, timeout=10) as resp:
-        return json.loads(resp.read().decode())
+        data = json.loads(resp.read().decode())
+        if redis_client:
+            # 缓存12小时
+            redis_client.set(cache_key, json.dumps(data), ex=43200)
+        return data
 
 def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None):
     try:

@@ -1,4 +1,3 @@
-# services.py
 # 封装了对所有外部 API (Embedding, Reranker, Chat, Outline) 的 HTTP 请求
 import json
 import logging
@@ -6,7 +5,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import urllib.request
+import hashlib
 import config
+from database import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +32,64 @@ def http_post_json(url, payload, token, stream=False):
         return None
 
 def create_embeddings(texts):
-    payload = {"model": config.EMBEDDING_MODEL, "input": texts}
-    res = http_post_json(f"{config.EMBEDDING_API_URL}/v1/embeddings", payload, config.EMBEDDING_API_TOKEN)
-    if not res: return [[] for _ in texts]
-    return [item.get("embedding", []) for item in res.get("data", [])]
+    if not redis_client:
+        payload = {"model": config.EMBEDDING_MODEL, "input": texts}
+        res = http_post_json(f"{config.EMBEDDING_API_URL}/v1/embeddings", payload, config.EMBEDDING_API_TOKEN)
+        if not res: return [[] for _ in texts]
+        return [item.get("embedding", []) for item in res.get("data", [])]
+
+    # --- 带缓存的逻辑 ---
+    hashes = [f"emb:{hashlib.sha256(t.encode()).hexdigest()}" for t in texts]
+    cached_results = {h: json.loads(v) for h, v in zip(hashes, redis_client.mget(hashes)) if v}
+
+    miss_indices, miss_texts = [], []
+    for i, (text, h) in enumerate(zip(texts, hashes)):
+        if h not in cached_results:
+            miss_indices.append(i)
+            miss_texts.append(text)
+
+    final_embeddings = [[]] * len(texts)
+    for i, h in enumerate(hashes):
+        if h in cached_results:
+            final_embeddings[i] = cached_results[h]
+
+    if miss_texts:
+        payload = {"model": config.EMBEDDING_MODEL, "input": miss_texts}
+        res = http_post_json(f"{config.EMBEDDING_API_URL}/v1/embeddings", payload, config.EMBEDDING_API_TOKEN)
+        new_embeddings = [item.get("embedding", []) for item in (res.get("data", []) if res else [])]
+
+        if new_embeddings:
+            cache_pipe = redis_client.pipeline()
+            for i, emb in enumerate(new_embeddings):
+                original_index = miss_indices[i]
+                final_embeddings[original_index] = emb
+                # 缓存 7 天
+                cache_pipe.set(hashes[original_index], json.dumps(emb), ex=604800)
+            cache_pipe.execute()
+
+    return final_embeddings
+
 
 def rerank(query, passages, top_k=5):
+    if redis_client:
+        # 创建一个稳定的输入表示形式用于哈希
+        stable_input = json.dumps({"query": query, "documents": sorted(passages)}, ensure_ascii=False)
+        cache_key = f"rerank:{hashlib.sha256(stable_input.encode()).hexdigest()}"
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+
     payload = {"model": config.RERANKER_MODEL, "query": query, "documents": passages, "top_n": top_k}
     res = http_post_json(f"{config.RERANKER_API_URL}/v1/rerank", payload, config.RERANKER_API_TOKEN)
     if not res: return []
     items = res.get("results") or res.get("data") or []
-    return sorted(items, key=lambda x: x.get("score", 0), reverse=True)
+    sorted_items = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
+
+    if redis_client and sorted_items:
+        # 缓存 7 天
+        redis_client.set(cache_key, json.dumps(sorted_items), ex=604800)
+
+    return sorted_items
 
 def chat_completion_stream(messages, temperature=0.2):
     if config.SAFE_LOG_CHAT_INPUT:
