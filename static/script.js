@@ -8,14 +8,12 @@ const qEl = document.getElementById('q');
 const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
 const streamToggle = document.getElementById('streamToggle');
-// 3. 移动端侧边栏开关元素
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
 let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 将在运行时按 CHAT_MODEL 覆盖
 // 计算输入框最大高度（屏幕 20%）
 let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
-
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 

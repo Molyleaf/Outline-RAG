@@ -673,7 +673,7 @@ def rerank(query, passages, top_k=5):
     ranked = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
     return ranked
 
-def chat_completion(messages, temperature=0.2):
+def chat_completion(messages, temperature=1):
     # 安全日志（可选截断）
     if SAFE_LOG_CHAT_INPUT:
         try:
@@ -1067,9 +1067,9 @@ def api_ask():
     else:
         contexts = []
 
-    system_prompt = "你是一个企业知识库助理。使用提供的参考片段回答问题。如果参考不足，请明确说明。回答使用中文。"
+    system_prompt = "你是一个企业知识库助理。知识库基于我们开发中的科幻战争题材游戏，游戏剧情发生在一颗类地行星上。使用提供的参考资料片段结合你的知识回答问题。\n\n游戏主要设定：1. 货币名为联合币。\n2. 存在一种“屏障粒子”阻止了短波和微波在大气中传播。\n\n回答使用中文。"
     context_block = "\n\n".join([f"[片段{i+1}]\n{ctx}" for i, ctx in enumerate(contexts)])
-    user_prompt = f"问题：{query}\n\n参考资料（可能不完整，请谨慎）：\n{context_block}"
+    user_prompt = f"问题：{query}\n\n参考资料片段（可能不完整，请谨慎）：\n{context_block}"
 
     messages = [
         {"role":"system","content": system_prompt},
