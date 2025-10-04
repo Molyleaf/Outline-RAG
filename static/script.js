@@ -11,52 +11,32 @@ const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
-let ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg'; // 默认头像，将在运行时按 CHAT_MODEL 覆盖
 // 计算输入框最大高度（屏幕 20%）
 let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
-// 按 CHAT_MODEL 选择 AI 头像与外发光
-(function initAssistantAvatar() {
-    const chatModelFromWindow = (window.CHAT_MODEL || '').trim();
-    const chatModelFromMeta = (document.querySelector('meta[name="chat-model"]')?.getAttribute('content') || '').trim();
-    const m = chatModelFromWindow || chatModelFromMeta;
-
-    const styleEl = document.createElement('style');
-    styleEl.setAttribute('data-dynamic-style', 'assistant-avatar-glow');
-
-    function glowCss(selector) {
-        return `
-            ${selector} .avatar {
-                filter: drop-shadow(0 0 6px rgba(255,255,255,.9)) drop-shadow(0 0 16px rgba(255,255,255,.6));
-            }
-        `;
-    }
-
-    // --- 修复开始: 根据新的模型命名规则进行精确匹配 ---
-    // 提取模型名称中斜杠前的部分作为服务商标识，并转为小写
+// --- 新增: 根据模型名称返回头像 URL 的辅助函数 ---
+function getAvatarUrlForModel(m) {
+    const defaultAvatar = '/chat/static/DeepSeek.svg';
+    if (!m) return defaultAvatar;
     const provider = (m.split('/')[0] || '').toLowerCase();
 
-    let applyGlow = true; // 默认给匹配到的自定义头像加上光晕效果
     if (provider === 'deepseek-ai') {
-        ASSISTANT_AVATAR_URL = '/chat/static/DeepSeek.svg';
+        return '/chat/static/DeepSeek.svg';
     } else if (provider === 'qwen') {
-        ASSISTANT_AVATAR_URL = '/chat/static/Tongyi.svg';
+        return '/chat/static/Tongyi.svg';
     } else if (provider === 'moonshotai') {
-        ASSISTANT_AVATAR_URL = '/chat/static/moonshotai_new.png';
+        return '/chat/static/moonshotai_new.png';
     } else if (provider === 'zai-org') {
-        ASSISTANT_AVATAR_URL = '/chat/static/zhipu.svg'; // 新增 Zhipu AI 头像
+        return '/chat/static/zhipu.svg';
     } else {
-        applyGlow = false; // 如果不匹配任何已知提供商，则使用默认头像且不加光晕
+        return defaultAvatar;
     }
-    // --- 修复结束 ---
+}
 
-    if (applyGlow) {
-        styleEl.textContent = glowCss('.msg.assistant');
-        document.head.appendChild(styleEl);
-    }
-})();
+// --- 移除: 旧的、基于全局变量的头像初始化逻辑 ---
+// (function initAssistantAvatar() { ... })();
 
 let currentConvId = null;
 // 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
@@ -442,11 +422,13 @@ async function loadMessages() {
     if (greet) {
         greet.style.display = msgs.length ? 'none' : 'block';
     }
-    msgs.forEach(m => appendMsg(m.role, m.content));
+    // --- 修改: 传入 model ---
+    msgs.forEach(m => appendMsg(m.role, m.content, m.model));
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-function appendMsg(role, text) {
+// --- 修改: 增加 model 参数 ---
+function appendMsg(role, text, model = null) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
 
@@ -454,7 +436,9 @@ function appendMsg(role, text) {
     const avatarEl = document.createElement('div');
     avatarEl.className = 'avatar';
     if (role === 'assistant') {
-        avatarEl.style.backgroundImage = `url('${ASSISTANT_AVATAR_URL}')`;
+        // --- 修改: 根据 model 动态设置头像 ---
+        const avatarUrl = getAvatarUrlForModel(model);
+        avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
     } else {
         // 取消显示用户消息内的头像
         avatarEl.style.display = 'none';
@@ -636,6 +620,7 @@ async function sendQuestion() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let modelDetected = false; // --- 新增: 标记是否已检测到模型
 
     try {
         while (true) {
@@ -654,6 +639,16 @@ async function sendQuestion() {
                     }
                     try {
                         const j = JSON.parse(data);
+                        // --- 新增: 实时更新头像 ---
+                        if (!modelDetected && j.model) {
+                            const avatarUrl = getAvatarUrlForModel(j.model);
+                            const avatarEl = placeholderDiv.querySelector('.avatar');
+                            if (avatarEl) {
+                                avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+                            }
+                            modelDetected = true;
+                        }
+
                         const delta = j.choices?.[0]?.delta?.content;
                         if (typeof delta === 'string' && delta.length > 0) {
                             acc += delta;

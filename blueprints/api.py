@@ -85,7 +85,7 @@ def api_messages():
         if not conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
                             {"cid": conv_id, "u": current_user()["id"]}).scalar():
             abort(403)
-        rs = conn.execute(text("SELECT id, role, content, created_at FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
+        rs = conn.execute(text("SELECT id, role, content, created_at, model FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
                           {"cid": conv_id}).mappings().all()
 
     # 序列化为字典列表，并处理日期时间对象
@@ -129,6 +129,7 @@ def api_ask():
     def generate():
         yield ": ping\n\n"
         buffer = []
+        model_name = None # --- 新增: 用于存储模型名称
         resp_stream = services.chat_completion_stream(messages)
         if resp_stream is None:
             yield f"data: {json.dumps({'error': '上游服务不可用'})}\n\n"
@@ -144,6 +145,9 @@ def api_ask():
                     if "[DONE]" not in line:
                         try:
                             data = json.loads(line[len("data: "):])
+                            # --- 新增: 从流数据中捕获模型名称 ---
+                            if not model_name and data.get("model"):
+                                model_name = data["model"]
                             if delta := data.get("choices", [{}])[0].get("delta", {}).get("content"):
                                 buffer.append(delta)
                         except (json.JSONDecodeError, IndexError):
@@ -152,8 +156,9 @@ def api_ask():
         full_response = "".join(buffer)
         if full_response:
             with engine.begin() as conn:
-                conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'assistant',:c)"),
-                             {"cid": conv_id, "c": full_response})
+                # --- 修改: 插入消息时包含模型名称 ---
+                conn.execute(text("INSERT INTO messages (conv_id, role, content, model) VALUES (:cid,'assistant',:c, :m)"),
+                             {"cid": conv_id, "c": full_response, "m": model_name})
             # 助手消息已添加，再次删除缓存
             if redis_client:
                 redis_client.delete(f"messages:{conv_id}")

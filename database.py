@@ -20,7 +20,7 @@ Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 redis_client = None
 if config.REDIS_URL:
     try:
-        # 2. 使用更健壮的方式解析 URL 并创建连接
+        # 2. 使用更健 robuste 的方式解析 URL 并创建连接
         parsed_url = urllib.parse.urlparse(config.REDIS_URL)
 
         # 从路径中提取数据库编号，例如 /2 -> 2
@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS messages (
   conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  model TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
