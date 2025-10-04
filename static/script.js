@@ -70,9 +70,16 @@ function toast(message, variant = 'primary', timeout = 3000) {
     el.closable = true;
     el.innerHTML = `<sl-icon name="${variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle'}" slot="icon"></sl-icon>${message}`;
     document.body.appendChild(el);
-    el.toast();
+    // 兼容：若 Shoelace 组件尚未注册，降级为直接打开
+    if (typeof el.toast === 'function') {
+        el.toast();
+    } else {
+        el.setAttribute('open', '');
+    }
     if (timeout) {
-        setTimeout(() => el.hide(), timeout);
+        setTimeout(() => {
+            if (typeof el.hide === 'function') el.hide(); else el.remove();
+        }, timeout);
     }
     return el;
 }
@@ -442,20 +449,21 @@ async function sendQuestion() {
         if (c?.id) { location.href = '/chat/' + c.id; return; }
         return;
     }
-    // 追加用户消息
+    // 追加用户消息（统一结构）
     appendMsg('user', text);
     qEl.value = '';
 
-    // 流式始终开启：不再依赖隐藏的开关节点
-    const placeholderDiv = document.createElement('div');
-    placeholderDiv.className = 'msg assistant';
-    let placeholderContent = document.createElement('div');
-    placeholderContent.className = 'md-body';
-    placeholderContent.innerHTML = ''; // 将持续增量写入
-    placeholderDiv.appendChild(placeholderContent);
-    chatEl.appendChild(placeholderDiv);
-    animateIn(placeholderDiv);
-    chatEl.scrollTop = chatEl.scrollHeight;
+    // 使用 appendMsg 生成 assistant 占位，保证结构一致与正确对齐
+    const placeholderDiv = appendMsg('assistant', '');
+    let placeholderContentRef = placeholderDiv.querySelector('.md-body');
+    if (!placeholderContentRef) {
+        // 若空内容未生成 md-body，补一个
+        placeholderContentRef = document.createElement('div');
+        placeholderContentRef.className = 'md-body';
+        const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv;
+        bubbleInner.appendChild(placeholderContentRef);
+    }
+    let acc = '';
 
     const res = await fetch('/chat/api/ask', { // 始终开启 SSE
         method: 'POST',
@@ -465,21 +473,20 @@ async function sendQuestion() {
     });
 
     if (!res.ok) {
-        placeholderContent.textContent = '请求失败';
+        // 修正引用：使用 placeholderContentRef
+        placeholderContentRef.textContent = '请求失败';
         toast('请求失败', 'danger');
         return;
     }
 
-    // 流式解析 + 增量 markdown 渲染（简单策略：累积文本后按块渲染）
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let acc = '';
-    let placeholderContentRef = placeholderContent;
 
     const rerender = () => {
         const tmp = renderMarkdown(acc);
-        placeholderDiv.replaceChild(tmp, placeholderContentRef);
+        const parent = placeholderContentRef.parentElement || placeholderDiv;
+        parent.replaceChild(tmp, placeholderContentRef);
         placeholderContentRef = tmp;
         chatEl.scrollTop = chatEl.scrollHeight;
     };
@@ -495,15 +502,11 @@ async function sendQuestion() {
                 buffer = buffer.slice(idx + 2);
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
-                    if (data === '[DONE]') {
-                        rerender();
-                        return;
-                    }
+                    if (data === '[DONE]') { rerender(); return; }
                     try {
                         const j = JSON.parse(data);
                         if (j.delta) {
                             acc += j.delta;
-                            // 到标点或换行时重渲染
                             if (/[。\.\n\r]$/.test(j.delta)) rerender();
                         }
                     } catch {}
@@ -539,6 +542,8 @@ async function sendQuestion() {
     // Shoelace（弹窗/按钮/alert）
     await ensureScript('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js', 'module');
     ensureStyle('https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css');
+    // 等待 sl-alert 定义，避免早期调用无方法
+    try { await customElements.whenDefined('sl-alert'); } catch(e) {}
     // marked + highlight
     await ensureScript('https://jsd.onmicrosoft.cn/npm/marked/marked.min.js');
     await ensureScript('https://jsd.onmicrosoft.cn/npm/highlight.js/highlight.min.js');
@@ -546,7 +551,6 @@ async function sendQuestion() {
 
     await loadUser();
     await loadConvs();
-    // 初次进入带 GUID 的地址时加载消息
     if (currentConvId) {
         await loadMessages();
     }
