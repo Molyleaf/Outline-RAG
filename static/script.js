@@ -712,7 +712,7 @@ async function sendQuestion() {
         // 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:36px;height:36px;border-radius:50%;background-color: white;padding: 3px;">`;
+        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
         const tempBtn = document.createElement('button');
         tempBtn.className = 'btn tonal';
         tempBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>`;
@@ -792,7 +792,7 @@ async function sendQuestion() {
                 const modelConf = MODELS[currentModelId];
                 currentTemperature = modelConf.temp;
                 currentTopP = modelConf.top_p;
-                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:36px;height:36px;border-radius:50%;background-color: white;padding: 3px;">`;
+                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
                 toast(`已切换模型为 ${modelConf.name}`, 'success', 1800);
