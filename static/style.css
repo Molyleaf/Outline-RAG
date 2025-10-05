@@ -255,7 +255,7 @@ button { font: inherit; }
 
 /* 聊天区主体滚动 */
 .chat {
-    overflow: auto;
+    overflow-y: scroll;
     padding: 24px 12%;
     padding-bottom: 160px;
 }
@@ -318,9 +318,6 @@ button { font: inherit; }
 }
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
-}
-.msg.assistant .avatar {
-    box-shadow: 0 0 12px 2px var(--accent-glow);
 }
 .msg .bubble-inner {
     padding: 12px 14px;
@@ -419,9 +416,8 @@ button { font: inherit; }
 #send:hover { filter: brightness(1.1); }
 .upload { cursor: pointer; }
 
-.model-item img,
-
-.topbar .actions .btn img {
+/* 模型图标背景 */
+.model-item img {
     background-color: white;
     padding: 2px;
     box-sizing: border-box;

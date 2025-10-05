@@ -713,7 +713,7 @@ async function sendQuestion() {
         // 2. 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:20px;height:20px;border-radius:4px;">`;
+        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:36px;height:36px;border-radius:50%;">`;
 
         const tempBtn = document.createElement('button');
         tempBtn.className = 'btn tonal';
@@ -795,7 +795,7 @@ async function sendQuestion() {
                 const modelConf = MODELS[currentModelId];
                 currentTemperature = modelConf.temp;
                 currentTopP = modelConf.top_p;
-                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:20px;height:20px;border-radius:4px;">`;
+                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:36px;height:36px;border-radius:50%;">`;
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
                 toast(`已切换模型为 ${modelConf.name}`, 'success', 1800);
