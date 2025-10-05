@@ -754,15 +754,13 @@ async function sendQuestion() {
 
                 // 如果当前弹窗不是打开状态，则显示它
                 if (!wasOpen) {
-                    const uploadBtn = document.querySelector('.topbar .actions .upload');
-                    if (uploadBtn) {
-                        const rect = uploadBtn.getBoundingClientRect();
-                        // 定位在上传按钮的左下方（对齐右下角）
-                        pop.style.top = rect.bottom + 8 + 'px';
-                        pop.style.left = 'auto';
-                        pop.style.right = `${window.innerWidth - rect.right}px`;
-                        pop.style.transform = ''; // 确保没有遗留的 transform
-                    }
+                    const rect = btn.getBoundingClientRect();
+                    // 定位在触发按钮的下方，并对齐右侧
+                    pop.style.top = rect.bottom + 8 + 'px';
+                    pop.style.left = 'auto';
+                    pop.style.right = `${window.innerWidth - rect.right}px`;
+                    pop.style.transform = ''; // 确保没有遗留的 transform
+
                     pop.style.display = 'block';
                     if (onOpen) onOpen(pop);
                 }
@@ -800,7 +798,6 @@ async function sendQuestion() {
                 modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
-                toast(`已切换模型为 ${modelConf.name}`, 'success', 1800);
                 modelPop.style.display = 'none';
             });
         });
@@ -828,6 +825,7 @@ async function sendQuestion() {
             document.querySelectorAll('.toolbar-popover').forEach(p => p.style.display = 'none');
         });
 
+        // 注入CSS
         const styles = `
             .toolbar-popover { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; display: none; }
             .model-menu { display: flex; flex-direction: column; gap: 4px; }
@@ -862,7 +860,7 @@ async function sendQuestion() {
     })();
 })();
 
-// 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
+// 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
 if (hamburger) {
     hamburger.addEventListener('click', (e) => {
         e.preventDefault();
