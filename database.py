@@ -87,7 +87,9 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  model TEXT
+  model TEXT,
+  temperature REAL,
+  top_p REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);

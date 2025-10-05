@@ -85,7 +85,7 @@ def api_messages():
         if not conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
                             {"cid": conv_id, "u": current_user()["id"]}).scalar():
             abort(403)
-        rs = conn.execute(text("SELECT id, role, content, created_at, model FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
+        rs = conn.execute(text("SELECT id, role, content, created_at, model, temperature, top_p FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
                           {"cid": conv_id}).mappings().all()
 
     # 序列化为字典列表，并处理日期时间对象
@@ -104,6 +104,10 @@ def api_ask():
     require_login()
     body = request.get_json(force=True)
     query, conv_id = (body.get("query") or "").strip(), body.get("conv_id")
+    model = body.get("model")
+    temperature = body.get("temperature")
+    top_p = body.get("top_p")
+
     if not query or not conv_id: return jsonify({"error":"missing query or conv_id"}), 400
 
     with engine.begin() as conn:
@@ -129,8 +133,8 @@ def api_ask():
     def generate():
         yield ": ping\n\n"
         buffer = []
-        model_name = None # --- 新增: 用于存储模型名称
-        resp_stream = services.chat_completion_stream(messages)
+        model_name = model # 默认使用请求的模型名
+        resp_stream = services.chat_completion_stream(messages, model=model, temperature=temperature, top_p=top_p)
         if resp_stream is None:
             yield f"data: {json.dumps({'error': '上游服务不可用'})}\n\n"
             yield "data: [DONE]\n\n"
@@ -145,8 +149,8 @@ def api_ask():
                     if "[DONE]" not in line:
                         try:
                             data = json.loads(line[len("data: "):])
-                            # --- 新增: 从流数据中捕获模型名称 ---
-                            if not model_name and data.get("model"):
+                            # 流数据中可能包含更具体的模型名称，优先使用
+                            if data.get("model"):
                                 model_name = data["model"]
                             if delta := data.get("choices", [{}])[0].get("delta", {}).get("content"):
                                 buffer.append(delta)
@@ -156,9 +160,10 @@ def api_ask():
         full_response = "".join(buffer)
         if full_response:
             with engine.begin() as conn:
-                # --- 修改: 插入消息时包含模型名称 ---
-                conn.execute(text("INSERT INTO messages (conv_id, role, content, model) VALUES (:cid,'assistant',:c, :m)"),
-                             {"cid": conv_id, "c": full_response, "m": model_name})
+                conn.execute(
+                    text("INSERT INTO messages (conv_id, role, content, model, temperature, top_p) VALUES (:cid, 'assistant', :c, :m, :t, :p)"),
+                    {"cid": conv_id, "c": full_response, "m": model_name, "t": temperature, "p": top_p}
+                )
             # 助手消息已添加，再次删除缓存
             if redis_client:
                 redis_client.delete(f"messages:{conv_id}")

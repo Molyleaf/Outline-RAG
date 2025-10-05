@@ -16,6 +16,23 @@ let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
+// --- 新增：模型定义与状态管理 ---
+const MODELS = {
+    'deepseek-ai/DeepSeek-V3.1': { name: 'Deepseek', icon: '/chat/static/img/DeepSeek.svg', temp: 0.7, top_p: 0.7 },
+    'moonshotai/Kimi-K2-Instruct-0905': { name: 'Kimi K2', icon: '/chat/static/img/moonshotai_new.png', temp: 0.6, top_p: 0.7 },
+    'zai-org/GLM-4.6': { name: 'ChatGLM', icon: '/chat/static/img/thudm.svg', temp: 0.6, top_p: 0.95 },
+    'Qwen/Qwen3-Next-80B-A3B-Thinking': { name: 'Qwen3-Next', icon: '/chat/static/img/Tongyi.svg', temp: 0.6, top_p: 0.95 }
+};
+// 默认模型为列表第一个，或从 LocalStorage 读取
+let currentModelId = localStorage.getItem('chat_model') || Object.keys(MODELS)[0];
+if (!MODELS[currentModelId]) { // 如果存储的模型ID无效，则重置
+    currentModelId = Object.keys(MODELS)[0];
+    localStorage.setItem('chat_model', currentModelId);
+}
+let currentTemperature = MODELS[currentModelId].temp;
+let currentTopP = MODELS[currentModelId].top_p;
+
+
 // 根据模型名称返回头像 URL 的辅助函数 ---
 function getAvatarUrlForModel(m) {
     const defaultAvatar = '/chat/static/img/openai.svg';
@@ -28,9 +45,9 @@ function getAvatarUrlForModel(m) {
         return '/chat/static/img/Tongyi.svg';
     } else if (provider === 'moonshotai') {
         return '/chat/static/img/moonshotai_new.png';
-    } else if (provider === 'zai-org') {
-        return '/chat/static/img/zhipu.svg';
-    } else if (provider === 'THUDM') {
+    } else if (provider === 'zai-org' || provider === 'thudm') { // 兼容
+        return '/chat/static/img/thudm.svg';
+    } else if (provider === 'thudm') {
         return '/chat/static/img/thudm.svg';
     } else if (provider === 'inclusionAI') {
         return '/chat/static/img/ling.png';
@@ -423,50 +440,52 @@ async function loadMessages() {
     if (greet) {
         greet.style.display = msgs.length ? 'none' : 'block';
     }
-    // --- 修改: 传入 model ---
-    msgs.forEach(m => appendMsg(m.role, m.content, m.model));
+    msgs.forEach(m => appendMsg(m.role, m.content, m));
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-// --- 修改: 增加 model 参数 ---
-function appendMsg(role, text, model = null) {
+function appendMsg(role, text, metadata = {}) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
 
-    // 左/右侧头像
     const avatarEl = document.createElement('div');
     avatarEl.className = 'avatar';
     if (role === 'assistant') {
-        // --- 修改: 根据 model 动态设置头像 ---
-        const avatarUrl = getAvatarUrlForModel(model);
+        const avatarUrl = getAvatarUrlForModel(metadata.model);
         avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
     } else {
-        // 取消显示用户消息内的头像
         avatarEl.style.display = 'none';
     }
 
-    // 气泡容器
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     const bubbleInner = document.createElement('div');
     bubbleInner.className = 'bubble-inner';
 
-    // 三边圆角：用户右上角方形；AI 左上角方形
-    if (role === 'user') {
-        bubbleInner.classList.add('bubble-user-corners');
-    } else {
-        bubbleInner.classList.add('bubble-ai-corners');
-    }
-
-    // Markdown 渲染
     const node = renderMarkdown(String(text ?? ''));
     bubbleInner.appendChild(node);
     bubble.appendChild(bubbleInner);
 
-    // 组装
+    // --- 新增：显示 AI 回复的元数据 ---
+    if (role === 'assistant' && (metadata.model || metadata.temperature !== undefined)) {
+        const metaEl = document.createElement('div');
+        metaEl.className = 'msg-meta';
+        const modelInfo = MODELS[metadata.model] || {};
+        const modelName = modelInfo.name || (metadata.model || 'N/A').split('/')[1];
+        const temp = typeof metadata.temperature === 'number' ? metadata.temperature.toFixed(2) : 'N/A';
+        const topP = typeof metadata.top_p === 'number' ? metadata.top_p.toFixed(2) : 'N/A';
+        const time = metadata.created_at ? new Date(metadata.created_at).toLocaleString() : '';
+
+        let metaText = `Model: ${modelName} · T: ${temp} · P: ${topP}`;
+        if (time) metaText += ` · ${time}`;
+
+        metaEl.textContent = metaText;
+        // 放在 bubble-inner 外部，气泡的下方
+        bubble.appendChild(metaEl);
+    }
+
     if (role === 'user') {
-        // 用户消息在右侧（不显示用户头像）
-        div.appendChild(document.createElement('div')); // 占位，维持网格
+        div.appendChild(document.createElement('div')); // 占位
         div.appendChild(bubble);
     } else {
         div.appendChild(avatarEl);
@@ -478,6 +497,7 @@ function appendMsg(role, text, model = null) {
     chatEl.scrollTop = chatEl.scrollHeight;
     return div;
 }
+
 
 // “新建对话”仅跳转到 /chat，不创建 ID；等待首次发送时再创建并替换 URL
 newConvBtn.addEventListener('click', async (e) => {
@@ -573,9 +593,12 @@ async function sendQuestion() {
     appendMsg('user', text);
     qEl.value = '';
 
-    const placeholderDiv = appendMsg('assistant', '');
+    const placeholderDiv = appendMsg('assistant', '', {
+        model: currentModelId,
+        temperature: currentTemperature,
+        top_p: currentTopP
+    });
     let placeholderContentRef = placeholderDiv.querySelector('.md-body');
-    // 如果 appendMsg 未能创建 .md-body (例如在无 marked.js 的情况下)，确保它存在
     if (!placeholderContentRef) {
         const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv.querySelector('.bubble') || placeholderDiv;
         const newBody = document.createElement('div');
@@ -583,15 +606,12 @@ async function sendQuestion() {
         bubbleInner.appendChild(newBody);
         placeholderContentRef = newBody;
     }
+    placeholderContentRef.innerHTML = '▍'; // 初始光标
 
     let acc = '';
 
-    // --- 修复开始: 简化并修正 rerender 逻辑 ---
     const rerender = (isFinal = false) => {
-        // 直接更新 innerHTML，而不是替换节点，更简单且健壮
-        placeholderContentRef.innerHTML = marked.parse(acc, { breaks: true, gfm: true });
-
-        // 仅在最后一次渲染时执行代码高亮，提高性能
+        placeholderContentRef.innerHTML = marked.parse(acc + (!isFinal ? '▍' : ''), { breaks: true, gfm: true });
         if (isFinal && window.hljs) {
             placeholderContentRef.querySelectorAll('pre code').forEach(block => {
                 try {
@@ -603,11 +623,16 @@ async function sendQuestion() {
         }
         chatEl.scrollTop = chatEl.scrollHeight;
     };
-    // --- 修复结束 ---
 
     const res = await fetch('/chat/api/ask', {
         method: 'POST',
-        body: JSON.stringify({conv_id: currentConvId, query: text}),
+        body: JSON.stringify({
+            conv_id: currentConvId,
+            query: text,
+            model: currentModelId,
+            temperature: currentTemperature,
+            top_p: currentTopP
+        }),
         headers: {'Content-Type':'application/json'},
         credentials: 'include'
     });
@@ -621,7 +646,7 @@ async function sendQuestion() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let modelDetected = false; // --- 新增: 标记是否已检测到模型
+    let modelDetected = false;
 
     try {
         while (true) {
@@ -635,12 +660,11 @@ async function sendQuestion() {
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        rerender(true); // 传入 true 表示这是最后一次渲染
+                        rerender(true);
                         return;
                     }
                     try {
                         const j = JSON.parse(data);
-                        // --- 新增: 实时更新头像 ---
                         if (!modelDetected && j.model) {
                             const avatarUrl = getAvatarUrlForModel(j.model);
                             const avatarEl = placeholderDiv.querySelector('.avatar');
@@ -653,13 +677,13 @@ async function sendQuestion() {
                         const delta = j.choices?.[0]?.delta?.content;
                         if (typeof delta === 'string' && delta.length > 0) {
                             acc += delta;
-                            rerender(false); // 实时渲染，不执行高亮
+                            rerender(false);
                         }
                     } catch {}
                 }
             }
         }
-        rerender(true); // 所有数据显示完后，执行最终渲染
+        rerender(true);
     } catch (e) {
         console.error("Stream processing error:", e);
         toast('连接中断', 'warning');
@@ -667,25 +691,158 @@ async function sendQuestion() {
 }
 
 (async function init() {
-    // 动态加载前端库（若页面未引入时）
-    function ensureScript(src, type = 'text/javascript') {
-        return new Promise((resolve) => {
-            if ([...document.scripts].some(s => (s.src || '').includes(src))) return resolve();
-            const s = document.createElement('script');
-            if (type === 'module') s.type = 'module';
-            s.src = src;
-            s.onload = () => resolve();
-            s.onerror = () => resolve(); // 不阻塞后续逻辑，避免因 CDN 波动导致初始化中断
-            document.head.appendChild(s);
+    // --- 适配新HTML：设置顶部操作栏 ---
+    function setupTopbarActions() {
+        const actionsContainer = document.querySelector('.topbar .actions');
+        if (!actionsContainer) return;
+
+        // 1. 修改上传按钮为图标
+        const uploadLabel = actionsContainer.querySelector('label.upload');
+        const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
+        if (uploadSpan) {
+            uploadSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>`;
+            uploadSpan.style.width = '40px';
+            uploadSpan.style.height = '40px';
+            uploadSpan.style.borderRadius = '50%';
+            uploadSpan.style.padding = '0';
+            uploadSpan.style.display = 'inline-flex';
+            uploadSpan.style.alignItems = 'center';
+            uploadSpan.style.justifyContent = 'center';
+        }
+
+        // 2. 创建新按钮和弹窗
+        const modelBtn = document.createElement('button');
+        modelBtn.className = 'btn tonal';
+        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:20px;height:20px;border-radius:4px;">`;
+
+        const tempBtn = document.createElement('button');
+        tempBtn.className = 'btn tonal';
+        tempBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>`;
+        tempBtn.title = `Temperature: ${currentTemperature}`;
+
+        const topPBtn = document.createElement('button');
+        topPBtn.className = 'btn tonal';
+        topPBtn.innerHTML = `<b>P</b>`;
+        topPBtn.title = `Top-P: ${currentTopP}`;
+
+        [modelBtn, tempBtn, topPBtn].forEach(btn => {
+            btn.style.width = '40px';
+            btn.style.height = '40px';
+            btn.style.borderRadius = '50%';
+            btn.style.padding = '0';
         });
+
+        // 插入新按钮到上传按钮之前
+        if (uploadLabel) {
+            actionsContainer.insertBefore(modelBtn, uploadLabel);
+            actionsContainer.insertBefore(tempBtn, uploadLabel);
+            actionsContainer.insertBefore(topPBtn, uploadLabel);
+        }
+
+        // 3. 弹窗逻辑
+        function createPopover(btn, contentHtml, onOpen) {
+            const pop = document.createElement('div');
+            pop.className = 'toolbar-popover';
+            pop.innerHTML = contentHtml;
+            document.body.appendChild(pop);
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const allPops = document.querySelectorAll('.toolbar-popover');
+                allPops.forEach(p => { if(p !== pop) p.style.display = 'none'; });
+
+                if (pop.style.display === 'block') {
+                    pop.style.display = 'none';
+                } else {
+                    const rect = btn.getBoundingClientRect();
+                    pop.style.left = rect.left + 'px';
+                    pop.style.top = rect.bottom + 8 + 'px'; // 显示在按钮下方
+                    pop.style.display = 'block';
+                    if(onOpen) onOpen(pop);
+                }
+            });
+            return pop;
+        }
+
+        const modelMenuHtml = `<div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
+            `<div class="model-item" data-id="${id}">
+                <img src="${m.icon}"><span>${m.name}</span>
+            </div>`).join('')}</div>`;
+        const modelPop = createPopover(modelBtn, modelMenuHtml);
+
+        const paramSliderHtml = (label, value, max, step) => `
+            <div class="param-slider">
+                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
+                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
+            </div>`;
+        const tempPop = createPopover(tempBtn, paramSliderHtml('Temperature', currentTemperature, 2, 0.05), (pop) => {
+            pop.querySelector('.param-input').value = currentTemperature.toFixed(2);
+            pop.querySelector('.param-range').value = currentTemperature;
+        });
+        const topPPop = createPopover(topPBtn, paramSliderHtml('Top-P', currentTopP, 2, 0.05), (pop) => {
+            pop.querySelector('.param-input').value = currentTopP.toFixed(2);
+            pop.querySelector('.param-range').value = currentTopP;
+        });
+
+        // 4. 事件绑定
+        modelPop.querySelectorAll('.model-item').forEach(item => {
+            item.addEventListener('click', () => {
+                currentModelId = item.dataset.id;
+                localStorage.setItem('chat_model', currentModelId);
+                const modelConf = MODELS[currentModelId];
+                currentTemperature = modelConf.temp;
+                currentTopP = modelConf.top_p;
+                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:20px;height:20px;border-radius:4px;">`;
+                tempBtn.title = `Temperature: ${currentTemperature}`;
+                topPBtn.title = `Top-P: ${currentTopP}`;
+                toast(`已切换模型为 ${modelConf.name}`, 'success', 1800);
+                modelPop.style.display = 'none';
+            });
+        });
+
+        function setupSlider(pop, stateUpdater, btn, titlePrefix) {
+            const input = pop.querySelector('.param-input');
+            const range = pop.querySelector('.param-range');
+            const update = (val) => {
+                const num = parseFloat(val);
+                if (!isNaN(num)) {
+                    stateUpdater(num);
+                    input.value = num.toFixed(2);
+                    range.value = num;
+                    btn.title = `${titlePrefix}: ${num.toFixed(2)}`;
+                }
+            };
+            input.addEventListener('input', (e) => update(e.target.value));
+            range.addEventListener('input', (e) => update(e.target.value));
+        }
+
+        setupSlider(tempPop, (val) => currentTemperature = val, tempBtn, 'Temperature');
+        setupSlider(topPPop, (val) => currentTopP = val, topPBtn, 'Top-P');
+
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.toolbar-popover').forEach(p => p.style.display = 'none');
+        });
+
+        // 注入CSS
+        const styles = `
+            .toolbar-popover { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; display: none; }
+            .model-menu { display: flex; flex-direction: column; gap: 4px; }
+            .model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
+            .model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+            .model-item img { width: 24px; height: 24px; border-radius: 4px; }
+            .param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
+            .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
+            .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
+            .param-range { width: 100%; accent-color: var(--accent); }
+            .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+        `;
+        const styleSheet = document.createElement("style");
+        styleSheet.innerText = styles;
+        document.head.appendChild(styleSheet);
     }
-    function ensureStyle(href) {
-        if ([...document.styleSheets].some(ss => (ss.href || '').includes(href))) return;
-        const l = document.createElement('link');
-        l.rel = 'stylesheet';
-        l.href = href;
-        document.head.appendChild(l);
-    }
+
+    setupTopbarActions();
+
     // 顺序：先获取用户，再会话；完成后若有当前会话再加载消息
     (async () => {
         try { await loadUser(); } catch(_) {}

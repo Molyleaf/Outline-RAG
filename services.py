@@ -91,7 +91,7 @@ def rerank(query, passages, top_k=5):
 
     return sorted_items
 
-def chat_completion_stream(messages, temperature=0.2):
+def chat_completion_stream(messages, model, temperature=None, top_p=None):
     if config.SAFE_LOG_CHAT_INPUT:
         try:
             preview = json.dumps(messages, ensure_ascii=False)
@@ -99,7 +99,17 @@ def chat_completion_stream(messages, temperature=0.2):
                 preview = preview[:config.MAX_LOG_INPUT_CHARS] + "...(truncated)"
             logger.info("chat_completion_stream input preview(len=%s)", len(preview))
         except Exception: pass
-    payload = {"model": config.CHAT_MODEL, "messages": messages, "temperature": temperature, "stream": True}
+
+    payload = {
+        "model": model or config.CHAT_MODEL,
+        "messages": messages,
+        "stream": True
+    }
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+
     return http_post_json(f"{config.CHAT_API_URL}/v1/chat/completions", payload, config.CHAT_API_TOKEN, stream=True)
 
 # --- Outline API 调用 ---
