@@ -1,4 +1,3 @@
-# blueprints/views.py
 # 处理所有服务于前端页面和静态资源的路由
 import re
 from flask import Blueprint, session, redirect, send_from_directory, current_app
@@ -37,7 +36,6 @@ def chat_page_with_guid(conv_guid: str):
         return resp
     return chat_page()
 
-# --- 静态资源路由 ---
 @views_bp.route("/static/style.css")
 def chat_static_style():
     return _serve_static_with_cache("style.css", "text/css", 3600)
@@ -46,24 +44,30 @@ def chat_static_style():
 def chat_static_script():
     return _serve_static_with_cache("script.js", "application/javascript")
 
-@views_bp.route("/static/DeepSeek.svg")
+@views_bp.route("/img/static/DeepSeek.svg")
 def chat_static_deepseek_svg():
     return _serve_static_with_cache("DeepSeek.svg", "image/svg+xml")
 
-@views_bp.route("/static/Tongyi.svg")
+@views_bp.route("/img/static/Tongyi.svg")
 def chat_static_tongyi_svg():
     return _serve_static_with_cache("Tongyi.svg", "image/svg+xml")
 
-# --- 新增 zhipu.svg 路由 ---
-@views_bp.route("/static/zhipu.svg")
+@views_bp.route("/img/static/zhipu.svg")
 def chat_static_zhipu_svg():
     return _serve_static_with_cache("zhipu.svg", "image/svg+xml")
-# --- 结束新增 ---
 
-@views_bp.route("/static/moonshotai_new.png")
-def chat_static_kimi_png():
+@views_bp.route("/img/static/moonshotai_new.png")
+def chat_static_kmoonshotai_new_png():
     return _serve_static_with_cache("moonshotai_new.png", "image/png")
 
-@views_bp.route("/static/favicon.ico")
-def chat_static_favicon():
-    return _serve_static_with_cache("favicon.ico", "image/*")
+@views_bp.route("/img/static/ling.png")
+def chat_static_ling_png():
+    return _serve_static_with_cache("ling.png", "image/png")
+
+@views_bp.route("/img/static/openai.svg")
+def chat_static_openai_svg():
+    return _serve_static_with_cache("openai.svg", "image/svg+xml")
+
+@views_bp.route("/img/static/thudm.svg")
+def chat_static_thudm_svg():
+    return _serve_static_with_cache("thudm.svg", "image/svg+xml")

@@ -18,18 +18,22 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
 // --- 新增: 根据模型名称返回头像 URL 的辅助函数 ---
 function getAvatarUrlForModel(m) {
-    const defaultAvatar = '/chat/static/DeepSeek.svg';
+    const defaultAvatar = '/chat/static/img/openai.svg';
     if (!m) return defaultAvatar;
     const provider = (m.split('/')[0] || '').toLowerCase();
 
     if (provider === 'deepseek-ai') {
-        return '/chat/static/DeepSeek.svg';
+        return '/chat/static/img/DeepSeek.svg';
     } else if (provider === 'qwen') {
-        return '/chat/static/Tongyi.svg';
+        return '/chat/static/img/Tongyi.svg';
     } else if (provider === 'moonshotai') {
-        return '/chat/static/moonshotai_new.png';
+        return '/chat/static/img/moonshotai_new.png';
     } else if (provider === 'zai-org') {
-        return '/chat/static/zhipu.svg';
+        return '/chat/static/img/zhipu.svg';
+    } else if (provider === 'THUDM') {
+        return '/chat/static/img/thudm.svg';
+    } else if (provider === 'inclusionAI') {
+        return '/chat/static/img/ling.png';
     } else {
         return defaultAvatar;
     }
