@@ -476,7 +476,7 @@ function appendMsg(role, text, metadata = {}) {
         const topP = typeof metadata.top_p === 'number' ? metadata.top_p.toFixed(2) : 'N/A';
         const time = metadata.created_at ? new Date(metadata.created_at).toLocaleString() : '';
 
-        let metaText = `Model: ${modelName} · T: ${temp} · P: ${topP}`;
+        let metaText = `模型: ${modelName} · Temp: ${temp} · Top-P: ${topP}`;
         if (time) metaText += ` · ${time}`;
 
         metaEl.textContent = metaText;
