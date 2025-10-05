@@ -696,7 +696,6 @@ async function sendQuestion() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;
 
-        // 1. 修改上传按钮为图标
         const uploadLabel = actionsContainer.querySelector('label.upload');
         const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
         if (uploadSpan) {
@@ -710,7 +709,7 @@ async function sendQuestion() {
             uploadSpan.style.justifyContent = 'center';
         }
 
-        // 2. 创建新按钮和弹窗
+        // 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
         modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:36px;height:36px;border-radius:50%;">`;
@@ -739,7 +738,7 @@ async function sendQuestion() {
             actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
 
-        // 3. 弹窗逻辑
+        // 弹窗逻辑
         function createPopover(btn, contentHtml, onOpen) {
             const pop = document.createElement('div');
             pop.className = 'toolbar-popover';
@@ -787,7 +786,6 @@ async function sendQuestion() {
             pop.querySelector('.param-range').value = currentTopP;
         });
 
-        // 4. 事件绑定
         modelPop.querySelectorAll('.model-item').forEach(item => {
             item.addEventListener('click', () => {
                 currentModelId = item.dataset.id;
@@ -795,7 +793,7 @@ async function sendQuestion() {
                 const modelConf = MODELS[currentModelId];
                 currentTemperature = modelConf.temp;
                 currentTopP = modelConf.top_p;
-                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:36px;height:36px;border-radius:50%;">`;
+                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:36px;height:36px;border-radius:50%;background-color: white;padding: 3px;">`;
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
                 toast(`已切换模型为 ${modelConf.name}`, 'success', 1800);
