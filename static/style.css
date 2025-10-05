@@ -1,52 +1,50 @@
 :root {
-    /* 基础样式 (亮色主题) */
-    --bg: #ffffff;
+    --bg: #f0f4f9;
     --text: #1f1f1f;
-    --muted: #6b7280;
-    --border: #e0e0e0;
-    --panel: #f8f9fa;
-    --bubble-user: #e8eefa; /* Gemini 风格用户气泡 */
-    --bubble-assistant: #f1f3f4; /* Gemini 风格助手气泡 */
-    --accent: #1a73e8; /* Gemini 风格强调色 */
-    --accent-glow: rgba(26, 115, 232, 0.4); /* 发光效果颜色 */
-    --shadow-1: 0 1px 2px rgba(0,0,0,.08);
-    --shadow-2: 0 8px 24px rgba(0,0,0,.1);
-    --radius-s: 10px;
-    --radius-m: 18px;
-    --radius-l: 22px; /* 增大了圆角以匹配 Gemini */
+    --muted: #444746;
+    --border: #dfe1e5;
+    --panel: #ffffff;
+    --bubble-user: #d1e3ff;
+    --bubble-assistant: #ffffff;
+    --accent: #1b6ef3;
+    --accent-glow: rgba(27, 110, 243, 0.4);
+    --shadow-1: 0 1px 2px rgba(0,0,0,.1);
+    --shadow-2: 0 4px 12px rgba(0,0,0,.12);
+    --radius-s: 8px;
+    --radius-m: 16px;
+    --radius-l: 24px;
 }
 
-/* 深色主题 (自动/手动) */
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] {
         --bg: #131314;
         --text: #e3e3e3;
-        --muted: #9aa0a6;
-        --border: #3c4043;
+        --muted: #8e9092;
+        --border: #444746;
         --panel: #1e1f20;
-        --bubble-user: #2f364e; /* Gemini 深色用户气泡 */
-        --bubble-assistant: #1e1f20; /* Gemini 深色助手气泡 */
-        --accent: #8ab4f8; /* Gemini 深色强调色 */
-        --accent-glow: rgba(138, 180, 248, 0.35); /* 发光效果颜色 */
+        --bubble-user: #26344f;
+        --bubble-assistant: #1e1f20;
+        --accent: #8ab4f8;
+        --accent-glow: rgba(138, 180, 248, 0.35);
         --shadow-1: 0 1px 2px rgba(0,0,0,.5);
-        --shadow-2: 0 10px 28px rgba(0,0,0,.6);
+        --shadow-2: 0 8px 24px rgba(0,0,0,.6);
     }
 }
 :root[data-theme="dark"] {
     --bg: #131314;
     --text: #e3e3e3;
-    --muted: #9aa0a6;
-    --border: #3c4043;
+    --muted: #8e9092;
+    --border: #444746;
     --panel: #1e1f20;
-    --bubble-user: #2f364e; /* Gemini 深色用户气泡 */
-    --bubble-assistant: #1e1f20; /* Gemini 深色助手气泡 */
-    --accent: #8ab4f8; /* Gemini 深色强调色 */
-    --accent-glow: rgba(138, 180, 248, 0.35); /* 发光效果颜色 */
+    --bubble-user: #26344f;
+    --bubble-assistant: #1e1f20;
+    --accent: #8ab4f8;
+    --accent-glow: rgba(138, 180, 248, 0.35);
     --shadow-1: 0 1px 2px rgba(0,0,0,.5);
-    --shadow-2: 0 10px 28px rgba(0,0,0,.6);
+    --shadow-2: 0 8px 24px rgba(0,0,0,.6);
 }
 
-/* 新增: 为深色模式下的所有头像添加白色背景 */
+/* 为深色模式下的所有头像添加白色背景 */
 :root[data-theme="dark"] .avatar,
 :root[data-theme="system"] body .avatar {
     @media (prefers-color-scheme: dark) {
@@ -63,7 +61,6 @@ html, body {
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    /* 修改: 优先使用 Google Sans 字体 */
     font-family: system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -71,7 +68,7 @@ html, body {
 a { color: inherit; text-decoration: none; }
 button { font: inherit; }
 
-/* 布局：左侧侧栏 + 右侧主区（各自滚动），输入区悬浮 */
+/* 布局 */
 .app {
     height: 100vh;
     display: grid;
@@ -79,7 +76,7 @@ button { font: inherit; }
     overflow: hidden;
 }
 
-/* 侧栏（ChatGPT 风格） */
+/* 侧栏 */
 .sidebar {
     height: 100%;
     display: flex;
@@ -188,11 +185,16 @@ button { font: inherit; }
     gap: 10px;
     padding: 0 12px;
     border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
     backdrop-filter: blur(8px) saturate(120%);
     position: sticky;
     top: 0;
     z-index: 5;
+}
+.topbar .actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 .topbar .hamburger {
     display: none;
@@ -210,7 +212,7 @@ button { font: inherit; }
 
 /* 头像与菜单 */
 .avatar {
-    width: 36px; height: 36px;
+    width: 40px; height: 40px;
     border-radius: 50%;
     background-size: cover; background-position: center;
     cursor: pointer;
@@ -237,7 +239,7 @@ button { font: inherit; }
 /* 按钮 */
 .btn {
     padding: 10px 14px;
-    border-radius: 10px;
+    border-radius: 18px;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text);
@@ -255,12 +257,12 @@ button { font: inherit; }
 .chat {
     overflow: auto;
     padding: 24px 12%;
-    padding-bottom: 160px; /* 预留输入区高度 */
+    padding-bottom: 160px;
 }
 @media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
 @media (max-width: 960px)  { .chat { padding-left: 16px; padding-right: 16px; } }
 
-/* 问候区（居中） */
+/* 问候区 */
 .greeting {
     max-width: 720px;
     margin: 10vh auto 2vh;
@@ -271,12 +273,12 @@ button { font: inherit; }
     font-weight: 800;
     letter-spacing: .2px;
     margin-bottom: 10px;
-    background: linear-gradient(90deg, #8ab4f8, #c181fe);
-    background-size: 200% 100%;
+    background: linear-gradient(45deg, #4285f4, #9b72cb, #d96570, #f2a600);
+    background-size: 300% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: hero-anim 8s linear infinite
+    animation: hero-anim 2s linear infinite
 }
 .greet-sub { font-size: 14px; color: var(--muted); margin-bottom: 14px; }
 .greet-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -291,34 +293,32 @@ button { font: inherit; }
 }
 .chip:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
 
-/* 对话项（头像 + 气泡） */
+/* 对话项 */
 .msg {
     margin: 12px 0;
     display: grid;
-    gap: 12px;
+    gap: 16px;
     align-items: flex-start;
 }
 .msg.assistant {
     grid-template-columns: 36px minmax(0,1fr);
 }
+.msg.assistant .bubble {
+    max-width: 95%;
+}
 .msg.user {
-    /* 用户消息居右显示 */
     grid-template-columns: minmax(0,1fr) 36px;
 }
 .msg.user .avatar {
-    /* 用户头像在第二列 */
     grid-column: 2;
 }
 .msg.user .bubble {
-    /* 用户气泡在第一列 */
     grid-column: 1;
-    justify-self: end; /* 气泡靠右 */
+    justify-self: end;
 }
-
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
 }
-/* 为 AI 头像添加外发光效果 */
 .msg.assistant .avatar {
     box-shadow: 0 0 12px 2px var(--accent-glow);
 }
@@ -330,51 +330,25 @@ button { font: inherit; }
     box-shadow: var(--shadow-1);
     word-wrap: break-word;
     max-width: 100%;
-    position: relative; /* 修改: 增加相对定位，为气泡尾巴做准备 */
+    position: relative;
+    border: 1px solid var(--border); /* 为助手气泡增加边框，使其在白色背景上可见 */
 }
-
-/* 修改: 为用户气泡增加尾巴 */
 .msg.user .bubble-inner {
     background: var(--bubble-user);
-    border-top-right-radius: 0; /* 尾巴连接处为直角 */
+    border-top-right-radius: 0;
+    border: none; /* 用户气泡颜色足够区分，无需边框 */
 }
-.msg.user .bubble-inner::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: -10px;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-width: 0 0 12px 12px;
-    border-color: transparent transparent transparent var(--bubble-user);
-}
-
-
-/* 修改: 为助手气泡增加尾巴 */
 .msg.assistant .bubble-inner {
     background: var(--bubble-assistant);
-    border-top-left-radius: 0; /* 尾巴连接处为直角 */
+    border-top-left-radius: 0;
 }
-.msg.assistant .bubble-inner::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -10px;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-width: 0 12px 12px 0;
-    border-color: transparent var(--bubble-assistant) transparent transparent;
-}
-
 
 /* 分组间距 */
 .msg + .msg { margin-top: 8px; }
 .msg.user + .msg.assistant,
 .msg.assistant + .msg.user { margin-top: 16px; }
 
-/* Markdown 展示（接近 ChatGPT） */
+/* Markdown 展示 */
 .md-body { line-height: 1.6; color: var(--text); white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
 .md-body p { margin: .6em 0; }
@@ -394,7 +368,7 @@ button { font: inherit; }
 }
 .md-body pre code { background: transparent; padding: 0; }
 
-/* 输入区（悬浮，双层阴影） */
+/* 输入区 */
 .input {
     position: fixed;
     left: 280px;
@@ -413,14 +387,15 @@ button { font: inherit; }
     gap: 10px;
     min-height: 56px;
     border-radius: 28px;
-    background: var(--bg);
+    /* 输入区使用 panel 色 */
+    background: var(--panel);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
     padding: 10px 10px 10px 16px;
 }
 .input textarea {
     flex: 1;
-    height: 26px; /* 初始高度 */
+    height: 26px;
     max-height: 260px;
     resize: none;
     border: none;
@@ -442,7 +417,56 @@ button { font: inherit; }
     box-shadow: none !important;
 }
 #send:hover { filter: brightness(1.1); }
-
-/* 上传/开关小组件 */
-.switch { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .upload { cursor: pointer; }
+
+.model-item img,
+
+.topbar .actions .btn img {
+    background-color: white;
+    padding: 2px;
+    box-sizing: border-box;
+    border-radius: 4px;
+}
+
+/* Shoelace 组件深色模式适配 */
+:root[data-theme="dark"] sl-dialog::part(panel),
+:root[data-theme="dark"] sl-alert::part(base) {
+    background-color: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+:root[data-theme="dark"] sl-dialog::part(title),
+:root[data-theme="dark"] sl-dialog::part(body) { color: var(--text); }
+:root[data-theme="dark"] sl-dialog::part(header) { border-bottom-color: var(--border); }
+:root[data-theme="dark"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
+:root[data-theme="dark"] sl-input::part(input) { color: var(--text); }
+
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] sl-dialog::part(panel),
+    :root[data-theme="system"] sl-alert::part(base) {
+        background-color: var(--panel); border: 1px solid var(--border); color: var(--text);
+    }
+    :root[data-theme="system"] sl-dialog::part(title),
+    :root[data-theme="system"] sl-dialog::part(body) { color: var(--text); }
+    :root[data-theme="system"] sl-dialog::part(header) { border-bottom-color: var(--border); }
+    :root[data-theme="system"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
+    :root[data-theme="system"] sl-input::part(input) { color: var(--text); }
+}
+
+sl-dialog::part(overlay) {
+    justify-items: start;
+    align-items: start;
+}
+sl-dialog::part(panel) {
+    margin-top: 80px; /* 56px topbar + 24px buffer */
+    margin-left: 304px; /* 280px sidebar + 24px buffer */
+    max-width: min(600px, calc(100vw - 320px));
+}
+@media (max-width: 960px) {
+    sl-dialog::part(panel) {
+        margin-left: 16px;
+        margin-right: 16px;
+        width: auto;
+        max-width: 100%;
+    }
+}

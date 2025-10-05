@@ -755,8 +755,11 @@ async function sendQuestion() {
                     pop.style.display = 'none';
                 } else {
                     const rect = btn.getBoundingClientRect();
-                    pop.style.left = rect.left + 'px';
+                    // 使弹窗右侧与按钮右侧对齐，防止溢出屏幕
+                    pop.style.left = 'auto';
+                    pop.style.right = `${window.innerWidth - rect.right}px`;
                     pop.style.top = rect.bottom + 8 + 'px'; // 显示在按钮下方
+
                     pop.style.display = 'block';
                     if(onOpen) onOpen(pop);
                 }
