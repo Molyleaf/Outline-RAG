@@ -16,7 +16,7 @@ let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
-// --- 新增: 根据模型名称返回头像 URL 的辅助函数 ---
+// 根据模型名称返回头像 URL 的辅助函数 ---
 function getAvatarUrlForModel(m) {
     const defaultAvatar = '/chat/static/img/openai.svg';
     if (!m) return defaultAvatar;
@@ -38,9 +38,6 @@ function getAvatarUrlForModel(m) {
         return defaultAvatar;
     }
 }
-
-// --- 移除: 旧的、基于全局变量的头像初始化逻辑 ---
-// (function initAssistantAvatar() { ... })();
 
 let currentConvId = null;
 // 尝试从 URL /chat/<guid> 解析当前会话（与后端返回的 url 对齐）
