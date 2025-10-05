@@ -747,19 +747,24 @@ async function sendQuestion() {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const allPops = document.querySelectorAll('.toolbar-popover');
-                allPops.forEach(p => { if(p !== pop) p.style.display = 'none'; });
+                const wasOpen = pop.style.display === 'block';
 
-                if (pop.style.display === 'block') {
-                    pop.style.display = 'none';
-                } else {
-                    const rect = btn.getBoundingClientRect();
-                    // 使弹窗右侧与按钮右侧对齐，防止溢出屏幕
-                    pop.style.left = 'auto';
-                    pop.style.right = `${window.innerWidth - rect.right}px`;
-                    pop.style.top = rect.bottom + 8 + 'px'; // 显示在按钮下方
+                // 先隐藏所有弹窗
+                allPops.forEach(p => { p.style.display = 'none'; });
 
+                // 如果当前弹窗不是打开状态，则显示它
+                if (!wasOpen) {
+                    const uploadBtn = document.querySelector('.topbar .actions .upload');
+                    if (uploadBtn) {
+                        const rect = uploadBtn.getBoundingClientRect();
+                        // 定位在上传按钮的左下方（对齐右下角）
+                        pop.style.top = rect.bottom + 8 + 'px';
+                        pop.style.left = 'auto';
+                        pop.style.right = `${window.innerWidth - rect.right}px`;
+                        pop.style.transform = ''; // 确保没有遗留的 transform
+                    }
                     pop.style.display = 'block';
-                    if(onOpen) onOpen(pop);
+                    if (onOpen) onOpen(pop);
                 }
             });
             return pop;
@@ -823,7 +828,6 @@ async function sendQuestion() {
             document.querySelectorAll('.toolbar-popover').forEach(p => p.style.display = 'none');
         });
 
-        // 注入CSS
         const styles = `
             .toolbar-popover { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; display: none; }
             .model-menu { display: flex; flex-direction: column; gap: 4px; }
@@ -858,7 +862,7 @@ async function sendQuestion() {
     })();
 })();
 
-// 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
+// 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
 if (hamburger) {
     hamburger.addEventListener('click', (e) => {
         e.preventDefault();
