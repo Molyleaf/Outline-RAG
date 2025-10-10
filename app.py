@@ -1,16 +1,18 @@
 # app.py
+import json
 import logging
-import requests
+import os
 import time
 from datetime import datetime, timezone, timedelta
-import json
-import os
-from flask import Flask, jsonify
+
+import requests
+from flask import Flask
+
 import config
-from database import db_init, engine
-from blueprints.views import views_bp
-from blueprints.auth import auth_bp
 from blueprints.api import api_bp
+from blueprints.auth import auth_bp
+from blueprints.views import views_bp
+from database import db_init, engine
 
 # --- 日志配置 ---
 logging.basicConfig(

@@ -1,11 +1,13 @@
 # 封装了对所有外部 API (Embedding, Reranker, Chat, Outline) 的 HTTP 请求
+import hashlib
 import json
 import logging
+import urllib.request
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import urllib.request
-import hashlib
+
 import config
 from database import redis_client
 

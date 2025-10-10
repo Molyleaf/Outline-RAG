@@ -1,7 +1,9 @@
 # 处理所有服务于前端页面和静态资源的路由
 import re
+
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
+
 from database import engine
 
 views_bp = Blueprint('views', __name__)

@@ -1,11 +1,13 @@
 # database.py
 # 负责数据库连接引擎的创建和表结构的初始化
+import logging
+import urllib.parse
+
+import redis
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-import logging
+
 import config
-import redis
-import urllib.parse
 
 logger = logging.getLogger(__name__)
 
