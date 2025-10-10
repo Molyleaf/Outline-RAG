@@ -34,6 +34,7 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 # --- RAG/检索参数 ---
 TOP_K = int(os.getenv("TOP_K", "12"))
 K = int(os.getenv("K", "6"))
+REFRESH_BATCH_SIZE = int(os.getenv("REFRESH_BATCH_SIZE", "100"))
 
 # --- OIDC (GitLab) ---
 GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")

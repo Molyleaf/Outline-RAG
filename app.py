@@ -1,18 +1,20 @@
 # app.py
-import json
+# 应用主入口
 import logging
-import os
+import requests
 import time
 from datetime import datetime, timezone, timedelta
-
-import requests
-from flask import Flask
-
+import json
+import os
+import uuid
+import threading
+from flask import Flask, jsonify, current_app, session
 import config
-from blueprints.api import api_bp
-from blueprints.auth import auth_bp
+from database import db_init, engine, redis_client
 from blueprints.views import views_bp
-from database import db_init, engine
+from blueprints.auth import auth_bp
+from blueprints.api import api_bp
+import rag
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -24,6 +26,11 @@ logger = logging.getLogger("app")
 
 # --- 应用初始化与配置 ---
 app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
+
+# 新增: 应用实例启动ID，用于会话验证
+BOOT_ID = str(uuid.uuid4())
+app.config['BOOT_ID'] = BOOT_ID
+logger.info("当前应用实例 Boot ID: %s", BOOT_ID)
 
 if not config.SECRET_KEY:
     logger.critical("SECRET_KEY 未设置，拒绝启动。")
@@ -70,32 +77,88 @@ app.register_blueprint(api_bp, url_prefix='/chat')
 
 
 # --- 健康检查与后台任务 ---
-_last_archive_ts = 0
-
-def archive_old_messages(days=90, batch_size=2000):
+def archive_old_messages_task(days=90, batch_size=2000):
+    """归档旧消息的任务，由后台工作线程执行。"""
     from sqlalchemy import text
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    logger.info("开始归档 %s 天前的旧消息...", days)
+    processed_count = 0
     while True:
         with engine.begin() as conn:
             rows = conn.execute(text("SELECT * FROM messages WHERE created_at < :cutoff ORDER BY id LIMIT :limit"),
                                 {"cutoff": cutoff, "limit": batch_size}).mappings().all()
             if not rows: break
+            processed_count += len(rows)
             ts = int(time.time())
             fname = os.path.join(config.ARCHIVE_DIR, f"messages_{ts}_{rows[0]['id']}_{rows[-1]['id']}.jsonl")
             with open(fname, "a", encoding="utf-8") as f:
                 for r in rows: f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
             conn.execute(text("DELETE FROM messages WHERE id = ANY(:ids)"), {"ids": [r["id"] for r in rows]})
-    logger.info("旧消息归档任务完成。")
+    logger.info("旧消息归档任务完成，共处理 %d 条消息。", processed_count)
 
 @app.route("/healthz")
 def healthz():
-    global _last_archive_ts
-    now = time.time()
-    if now - _last_archive_ts > 3600:
-        try: archive_old_messages()
-        except Exception as e: logger.error("归档任务失败: %s", e)
-        _last_archive_ts = now
+    """健康检查，并周期性地将归档任务加入队列。"""
+    if redis_client:
+        # 每小时触发一次归档任务
+        if redis_client.set("archive:lock", "1", ex=3600, nx=True):
+            logger.info("将归档任务加入队列。")
+            redis_client.lpush("task_queue", json.dumps({"task": "archive_old_messages"}))
     return "ok"
+
+# --- 后台工作线程 ---
+def task_worker():
+    """后台任务处理器，从 Redis 队列中消费任务。"""
+    logger.info("后台任务处理器已启动。")
+    while True:
+        try:
+            # 使用阻塞式弹出，高效等待任务
+            _queue, task_json = redis_client.brpop("task_queue", timeout=0)
+            task_data = json.loads(task_json)
+            task_name = task_data.get("task")
+            logger.info("接收到新任务: %s", task_name)
+
+            if task_name == "refresh_all":
+                rag.refresh_all_task()
+            elif task_name == "process_doc_batch":
+                rag.process_doc_batch_task(task_data.get("doc_ids", []))
+            elif task_name == "archive_old_messages":
+                archive_old_messages_task()
+            else:
+                logger.warning("未知任务类型: %s", task_name)
+
+        except redis_client.exceptions.ConnectionError as e:
+            logger.error("Redis 连接错误，任务处理器暂停5秒: %s", e)
+            time.sleep(5)
+        except TypeError: # brpop 在超时时返回 None
+            continue
+        except Exception as e:
+            logger.exception("任务处理器发生未知错误: %s", e)
+            time.sleep(1)
+
+def webhook_watcher():
+    """后台 Webhook 计时器监视器。"""
+    logger.info("Webhook 监视器已启动。")
+    while True:
+        try:
+            due_time_str = redis_client.get("webhook:refresh_timer_due")
+            if due_time_str:
+                due_time = int(due_time_str)
+                if time.time() > due_time:
+                    logger.info("Webhook 计时器到期，触发优雅刷新。")
+                    # 使用锁确保只有一个 worker 实例能触发
+                    if redis_client.set("webhook:trigger_lock", "1", ex=60, nx=True):
+                        redis_client.delete("webhook:refresh_timer_due")
+                        # 触发一个优雅刷新任务
+                        redis_client.lpush("task_queue", json.dumps({"task": "refresh_all"}))
+
+        except redis_client.exceptions.ConnectionError as e:
+            logger.error("Redis 连接错误，Webhook 监视器暂停5秒: %s", e)
+            time.sleep(5)
+        except Exception as e:
+            logger.exception("Webhook 监视器发生未知错误: %s", e)
+
+        time.sleep(5) # 每5秒检查一次
 
 # --- 应用启动 ---
 if __name__ == "__main__":
@@ -106,6 +169,12 @@ else:
     try:
         db_init()
         _startup_self_check()
+        # 启动后台任务处理器
+        if redis_client:
+            threading.Thread(target=task_worker, daemon=True).start()
+            threading.Thread(target=webhook_watcher, daemon=True).start()
+        else:
+            logger.warning("Redis 未配置，后台任务和 Webhook 计时器将不会启动。")
     except Exception as e:
         logger.exception("应用启动时初始化失败: %s", e)
         raise SystemExit(1)
