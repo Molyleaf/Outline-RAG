@@ -8,6 +8,17 @@ from database import engine
 
 views_bp = Blueprint('views', __name__)
 
+def _check_login_and_boot_id():
+    """
+    检查用户是否登录，并验证会话的 boot_id 是否与当前应用实例匹配。
+    如果不匹配，则会话无效，应重定向到登录页。
+    """
+    if "user" not in session or session.get("boot_id") != current_app.config.get("BOOT_ID"):
+        # 在重定向前清除可能无效的会话
+        session.clear()
+        return redirect("/chat/login")
+    return None
+
 def _serve_static_with_cache(filename, content_type, max_age=86400):
     resp = send_from_directory(current_app.static_folder, filename)
     resp.headers["Content-Type"] = f"{content_type}; charset=utf-8"
@@ -16,7 +27,11 @@ def _serve_static_with_cache(filename, content_type, max_age=86400):
 
 @views_bp.route("/")
 def chat_page():
-    if "user" not in session: return redirect("/chat/login")
+    # 修复：在返回页面前执行严格的登录检查
+    redirect_response = _check_login_and_boot_id()
+    if redirect_response:
+        return redirect_response
+
     resp = send_from_directory(current_app.static_folder, "index.html")
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers.setdefault("Cache-Control", "public, max-age=300")
@@ -24,7 +39,11 @@ def chat_page():
 
 @views_bp.route("/<string:conv_guid>")
 def chat_page_with_guid(conv_guid: str):
-    if "user" not in session: return redirect("/chat/login")
+    # 修复：在返回页面前执行严格的登录检查
+    redirect_response = _check_login_and_boot_id()
+    if redirect_response:
+        return redirect_response
+
     if not re.fullmatch(r"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", conv_guid):
         resp = redirect("/chat")
         resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
