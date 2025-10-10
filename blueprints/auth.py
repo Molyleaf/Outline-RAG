@@ -7,10 +7,12 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
+
 from flask import Blueprint, request, session, redirect, url_for, current_app
 from jose import jwt
 from jose.exceptions import JOSEError
 from sqlalchemy import text
+
 import config
 from database import engine, redis_client
 
