@@ -1,23 +1,10 @@
 # 处理所有服务于前端页面和静态资源的路由
 import re
-
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
-
 from database import engine
 
 views_bp = Blueprint('views', __name__)
-
-def _check_login_and_boot_id():
-    """
-    检查用户是否登录，并验证会话的 boot_id 是否与当前应用实例匹配。
-    如果不匹配，则会话无效，应重定向到登录页。
-    """
-    if "user" not in session or session.get("boot_id") != current_app.config.get("BOOT_ID"):
-        # 在重定向前清除可能无效的会话
-        session.clear()
-        return redirect("/chat/login")
-    return None
 
 def _serve_static_with_cache(filename, content_type, max_age=86400):
     resp = send_from_directory(current_app.static_folder, filename)
@@ -27,34 +14,40 @@ def _serve_static_with_cache(filename, content_type, max_age=86400):
 
 @views_bp.route("/")
 def chat_page():
-    # 修复：在返回页面前执行严格的登录检查
-    redirect_response = _check_login_and_boot_id()
-    if redirect_response:
-        return redirect_response
+    # 恢复：在返回页面前执行简单的登录检查
+    if "user" not in session:
+        return redirect("/chat/login")
 
     resp = send_from_directory(current_app.static_folder, "index.html")
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    resp.headers.setdefault("Cache-Control", "public, max-age=300")
+    # 为作为应用入口的HTML页面设置禁止缓存的响应头，这依然是好的实践
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
     return resp
 
 @views_bp.route("/<string:conv_guid>")
 def chat_page_with_guid(conv_guid: str):
-    # 修复：在返回页面前执行严格的登录检查
-    redirect_response = _check_login_and_boot_id()
-    if redirect_response:
-        return redirect_response
+    # 恢复：在返回页面前执行简单的登录检查
+    if "user" not in session:
+        return redirect("/chat/login")
 
     if not re.fullmatch(r"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", conv_guid):
         resp = redirect("/chat")
         resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
         return resp
     with engine.begin() as conn:
+        user_id = (session.get("user") or {}).get("id")
+        if not user_id:
+            return redirect("/chat/login")
+
         own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
-                           {"id": conv_guid, "u": session["user"]["id"]}).scalar()
+                           {"id": conv_guid, "u": user_id}).scalar()
     if not own:
         resp = redirect("/chat")
         resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="Lax")
         return resp
+    # 此路由最终也返回 chat_page() 的结果，该函数内已处理了缓存头
     return chat_page()
 
 @views_bp.route("/static/style.css")

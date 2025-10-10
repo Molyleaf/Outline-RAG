@@ -1,4 +1,3 @@
-# blueprints/auth.py
 # 处理用户登录、登出和 OIDC 回调逻辑
 import base64
 import hashlib
@@ -7,12 +6,10 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
-
-from flask import Blueprint, request, session, redirect, url_for, current_app
+from flask import Blueprint, request, session, redirect, url_for
 from jose import jwt
 from jose.exceptions import JOSEError
 from sqlalchemy import text
-
 import config
 from database import engine, redis_client
 
@@ -118,9 +115,8 @@ def oidc_callback():
     name = idp.get("name") or idp.get("preferred_username") or "user"
     avatar_url = idp.get("picture")
 
-    # 修改: 登录成功后，在 session 中同时存入用户信息和当前应用的 boot_id
+    # 移除 boot_id: 只保存用户信息
     session["user"] = {"id": user_id, "name": name, "avatar_url": avatar_url}
-    session["boot_id"] = current_app.config['BOOT_ID']
 
     with engine.begin() as conn:
         conn.execute(text("""
@@ -134,3 +130,4 @@ def oidc_callback():
 def logout():
     session.clear()
     return redirect("/chat")
+

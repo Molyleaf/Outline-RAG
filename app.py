@@ -1,22 +1,18 @@
 # app.py
-# 应用主入口
-import json
 import logging
+import requests
+import time
+from datetime import datetime, timezone, timedelta
+import json
 import os
 import threading
-import time
-import uuid
-from datetime import datetime, timezone, timedelta
-
-import requests
-from flask import Flask
-
+from flask import Flask, jsonify
 import config
-import rag
-from blueprints.api import api_bp
-from blueprints.auth import auth_bp
-from blueprints.views import views_bp
 from database import db_init, engine, redis_client
+from blueprints.views import views_bp
+from blueprints.auth import auth_bp
+from blueprints.api import api_bp
+import rag
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -28,11 +24,6 @@ logger = logging.getLogger("app")
 
 # --- 应用初始化与配置 ---
 app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
-
-# 新增: 应用实例启动ID，用于会话验证
-BOOT_ID = str(uuid.uuid4())
-app.config['BOOT_ID'] = BOOT_ID
-logger.info("当前应用实例 Boot ID: %s", BOOT_ID)
 
 if not config.SECRET_KEY:
     logger.critical("SECRET_KEY 未设置，拒绝启动。")
@@ -180,3 +171,4 @@ else:
     except Exception as e:
         logger.exception("应用启动时初始化失败: %s", e)
         raise SystemExit(1)
+
