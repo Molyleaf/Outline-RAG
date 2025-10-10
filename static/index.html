@@ -4,21 +4,17 @@
 	<meta charset="utf-8" />
 	<title>Outline RAG Chat</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<!-- Material 风格样式 -->
+	<link rel="icon" href="/chat/static/favicon.ico" />
 	<link rel="stylesheet" href="/chat/static/style.css" />
-	<!-- Shoelace（Material-like 组件：弹窗/按钮/alert） -->
 	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js"></script>
 	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css" />
-	<!-- Markdown & 代码高亮 -->
 	<script src="https://jsd.onmicrosoft.cn/npm/marked/marked.min.js"></script>
-	<!-- 替换为浏览器用的完整 UMD 版 -->
 	<script src="https://jsd.onmicrosoft.cn/npm/highlight.js/highlight.min.js"></script>
 	<link rel="stylesheet" href="https://jsd.onmicrosoft.cn/npm/highlight.js/styles/github.min.css">
 	<script>
-        // 主题初始化：localStorage 优先，其次系统偏好
         (function () {
             try {
-                const saved = localStorage.getItem('theme'); // 'light' | 'dark' | 'system' | null
+                const saved = localStorage.getItem('theme');
                 const root = document.documentElement;
                 if (saved === 'light' || saved === 'dark') {
                     root.setAttribute('data-theme', saved);
@@ -89,7 +85,6 @@
 
 <script src="/chat/static/script.js"></script>
 <script>
-    // 读取服务端设置的提示 cookie（用于不存在对话跳转场景）
     (function(){
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
         if (m) {
@@ -97,11 +92,9 @@
                 const msg = decodeURIComponent(m[1]);
                 if (msg) toast(msg, 'warning', 3000);
             } catch(_) {}
-            // 清理一次性提示
             document.cookie = 'chat_notice=; Max-Age=0; path=/';
         }
     })();
-    // 点击示例 chip 填充到输入框
     (function(){
         document.querySelectorAll('.greet-suggestions .chip').forEach(btn=>{
             btn.addEventListener('click', ()=>{

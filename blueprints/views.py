@@ -71,3 +71,7 @@ def chat_static_openai_svg():
 @views_bp.route("/img/static/thudm.svg")
 def chat_static_thudm_svg():
     return _serve_static_with_cache("thudm.svg", "image/svg+xml")
+
+@views_bp.route("/img/static/favicon.ico")
+def chat_static_favicon_ico():
+    return _serve_static_with_cache("favicon.ico", "image/x-icon")
