@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import os
 import threading
+import redis # 修复：导入 redis 模块以正确引用其异常
 from flask import Flask, jsonify
 import config
 from database import db_init, engine, redis_client
@@ -120,7 +121,8 @@ def task_worker():
             else:
                 logger.warning("未知任务类型: %s", task_name)
 
-        except redis_client.exceptions.ConnectionError as e:
+        # 修复：从 redis 模块而不是 redis_client 实例中引用异常
+        except redis.exceptions.ConnectionError as e:
             logger.error("Redis 连接错误，任务处理器暂停5秒: %s", e)
             time.sleep(5)
         except TypeError: # brpop 在超时时返回 None
@@ -145,7 +147,8 @@ def webhook_watcher():
                         # 触发一个优雅刷新任务
                         redis_client.lpush("task_queue", json.dumps({"task": "refresh_all"}))
 
-        except redis_client.exceptions.ConnectionError as e:
+        # 修复：从 redis 模块而不是 redis_client 实例中引用异常
+        except redis.exceptions.ConnectionError as e:
             logger.error("Redis 连接错误，Webhook 监视器暂停5秒: %s", e)
             time.sleep(5)
         except Exception as e:
