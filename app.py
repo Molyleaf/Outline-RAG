@@ -161,17 +161,34 @@ if __name__ == "__main__":
     logger.info("This app is intended to be run with gunicorn, e.g.: gunicorn -w 2 -k gthread -b 0.0.0.0:%s app:app", config.PORT)
     app.run(host="0.0.0.0", port=config.PORT, use_reloader=False)
 else:
-    # 在 gunicorn 启动模式下执行初始化
+    # 修复 #2：在 gunicorn 启动模式下执行初始化。
+    # gunicorn 会为每个 worker 进程执行一次此代码块。为避免重复执行初始化任务和产生重复日志，
+    # 我们使用 Redis 锁来确保只有一个 worker 执行 `db_init` 和 `_startup_self_check`。
     try:
-        db_init()
-        _startup_self_check()
-        # 启动后台任务处理器
+        should_initialize = True
+        if redis_client:
+            # 尝试获取一个短时锁。如果成功，此 worker 负责初始化。
+            # nx=True 确保只有第一个进程可以设置成功。
+            if not redis_client.set("app:startup:lock", "1", ex=60, nx=True):
+                should_initialize = False
+
+        if should_initialize:
+            # 此 worker 获取了锁（或无 Redis），执行一次性初始化。
+            db_init()
+            _startup_self_check()
+        else:
+            # 其他 worker 等待几秒钟，以确保第一个 worker 完成了数据库等初始化。
+            logger.info(f"Worker (pid: {os.getpid()}) 等待主初始化完成...")
+            time.sleep(5)
+
+        # 所有 worker 都需要启动自己的后台任务线程，形成一个健壮的、多进程的消费者池。
+        # 任务队列 (Redis) 和任务级锁 (Redis) 会确保任务不会被重复处理。
         if redis_client:
             threading.Thread(target=task_worker, daemon=True).start()
             threading.Thread(target=webhook_watcher, daemon=True).start()
         else:
             logger.warning("Redis 未配置，后台任务和 Webhook 计时器将不会启动。")
+
     except Exception as e:
         logger.exception("应用启动时初始化失败: %s", e)
         raise SystemExit(1)
-

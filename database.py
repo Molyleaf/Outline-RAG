@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  outline_updated_at_str TEXT -- 新增：存储来自 Outline API 的原始 updatedAt 字符串，用于精确比较
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
