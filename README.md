@@ -1,7 +1,5 @@
 # Outline-RAG
 
-[GPL 3.0](https://opensource.org/license/gpl-3-0)
-
 **为您的 [Outline](https://github.com/outline/outline) 知识库带来由大语言模型（LLM）驱动的智能问答能力。**
 
 Outline-RAG 是一个基于 **检索增强生成 (Retrieval-Augmented Generation, RAG)** 技术的应用程序，专为开源知识库 Outline Wiki 设计。它能够将您在 Outline 中存储的所有文档和知识转化为一个可对话的智能知识库。用户可以通过自然语言提问，并获得基于知识库内容的精准、可靠的回答。
@@ -356,10 +354,6 @@ server {
 ## 🤝 贡献
 
 欢迎任何形式的贡献！如果您有任何问题或建议，请随时提交 Issue 或 Pull Request。
-
-## 📄 许可证
-
-本项目基于 [GNU GPLv3 License](https://www.google.com/search?q=LICENSE) 开源。
 
 -----
 
@@ -719,7 +713,3 @@ Be sure to configure the following key environment variables in the `environment
 ## 🤝 Contributing
 
 Contributions of any kind are welcome\! If you have any questions or suggestions, please feel free to open an Issue or Pull Request.
-
-## 📄 License
-
-This project is open-source under the [GNU GPLv3 License](https://www.google.com/search?q=LICENSE).
