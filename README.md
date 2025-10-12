@@ -73,10 +73,11 @@ services:
         condition: service_started
     environment:
       # --- 基础配置 ---
-      TZ: Asia/Shanghai
       PORT: 8080
       LOG_LEVEL: INFO
-      SECRET_KEY: <请生成一个32位的随机字符串> # 例如: openssl rand -hex 16
+      TOP_K: 12
+      K: 6
+      REFRESH_BATCH_SIZE: 50
       
       # --- 数据库与Redis ---
       DATABASE_URL: postgresql+psycopg2://outline-rag:<YOUR_RAG_DB_PASSWORD>@/outline-rag?host=/var/run/postgresql
@@ -90,14 +91,16 @@ services:
       
       # --- AI 模型配置 (以 SiliconFlow 为例) ---
       EMBEDDING_API_URL: https://api.siliconflow.cn
-      EMBEDDING_API_TOKEN: <您的SiliconFlow API Token>
+      EMBEDDING_API_TOKEN: <您的 API Token>
       EMBEDDING_MODEL: BAAI/bge-m3
       RERANKER_API_URL: https://api.siliconflow.cn
-      RERANKER_API_TOKEN: <您的SiliconFlow API Token>
+      RERANKER_API_TOKEN: <您的 API Token>
       RERANKER_MODEL: BAAI/bge-reranker-v2-m3
       CHAT_API_URL: https://api.siliconflow.cn
-      CHAT_API_TOKEN: <您的SiliconFlow API Token>
+      CHAT_API_TOKEN: <您的 API Token>
       CHAT_MODEL: Qwen/Qwen2-7B-Instruct
+
+      SYSTEM_PROMPT: 你是一个企业知识库助理。你正在回答RAG应用的问题。
       
       # --- OIDC 单点登录配置 (以 GitLab 为例) ---
       USE_JOSE_VERIFY: true
@@ -105,12 +108,14 @@ services:
       GITLAB_CLIENT_ID: <您的GitLab OAuth App ID>
       GITLAB_CLIENT_SECRET: <您的GitLab OAuth App Secret>
       OIDC_REDIRECT_URI: https://<your-domain.com>/chat/oidc/callback
-      
+
+      SECRET_KEY: <请生成一个32位的随机字符串> # 例如: openssl rand -hex 16
       # --- 文件上传配置 ---
       MAX_CONTENT_LENGTH: 10485760 # 10MB
       ALLOWED_FILE_EXTENSIONS: txt,md,pdf
       ATTACHMENTS_DIR: /app/data/attachments
       ARCHIVE_DIR: /app/data/archive
+      TZ: Asia/Shanghai
 
     volumes:
       - ./attachments:/app/data/attachments
@@ -413,156 +418,7 @@ Copy the following content into your `docker-compose.yml` file. This template in
 
 **Please carefully review and replace all `<...>` placeholders with your actual configuration details.**
 
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  # 1. Outline-RAG Application Service
-  outline-rag-web:
-    image: molyleaf/outline-rag:latest # It's recommended to use a specific version tag
-    container_name: outline-rag-web
-    restart: always
-    depends_on:
-      outline-rag-db:
-        condition: service_healthy
-      pigeon-wiki:
-        condition: service_started
-      pigeon-wiki-redis:
-        condition: service_started
-    environment:
-      # --- Basic Configuration ---
-      TZ: Asia/Shanghai
-      PORT: 8080
-      LOG_LEVEL: INFO
-      SECRET_KEY: <Generate a 32-character random string> # e.g., openssl rand -hex 16
-      
-      # --- Database & Redis ---
-      DATABASE_URL: postgresql+psycopg2://outline-rag:<YOUR_RAG_DB_PASSWORD>@/outline-rag?host=/var/run/postgresql
-      REDIS_URL: redis://:<YOUR_OUTLINE_REDIS_PASSWORD>@pigeon-wiki-redis:6379/2
-      
-      # --- Outline Integration ---
-      OUTLINE_API_URL: https://<your-domain.com>
-      OUTLINE_API_TOKEN: <Your Outline API Token>
-      OUTLINE_WEBHOOK_SECRET: <The secret used when configuring the webhook in Outline>
-      OUTLINE_WEBHOOK_SIGN: "true"
-      
-      # --- AI Model Configuration (Example with SiliconFlow) ---
-      EMBEDDING_API_URL: https://api.siliconflow.cn
-      EMBEDDING_API_TOKEN: <Your SiliconFlow API Token>
-      EMBEDDING_MODEL: BAAI/bge-m3
-      RERANKER_API_URL: https://api.siliconflow.cn
-      RERANKER_API_TOKEN: <Your SiliconFlow API Token>
-      RERANKER_MODEL: BAAI/bge-reranker-v2-m3
-      CHAT_API_URL: https://api.siliconflow.cn
-      CHAT_API_TOKEN: <Your SiliconFlow API Token>
-      CHAT_MODEL: Qwen/Qwen2-7B-Instruct
-      
-      # --- OIDC Single Sign-On (Example with GitLab) ---
-      USE_JOSE_VERIFY: "true"
-      GITLAB_URL: https://<your-gitlab-instance.com>
-      GITLAB_CLIENT_ID: <Your GitLab OAuth App ID>
-      GITLAB_CLIENT_SECRET: <Your GitLab OAuth App Secret>
-      OIDC_REDIRECT_URI: https://<your-domain.com>/chat/oidc/callback
-      
-      # --- File Upload Configuration ---
-      MAX_CONTENT_LENGTH: 10485760 # 10MB
-      ALLOWED_FILE_EXTENSIONS: txt,md,pdf
-      ATTACHMENTS_DIR: /app/data/attachments
-      ARCHIVE_DIR: /app/data/archive
-
-    volumes:
-      - ./attachments:/app/data/attachments
-      - ./archive:/app/data/archive
-      - ./outline-rag-db/socket:/var/run/postgresql # More efficient DB connection via socket
-    ports:
-      - "127.0.0.1:8033:8080" # Binds to localhost only, proxied by Nginx
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 180s
-      timeout: 5s
-      retries: 5
-    networks:
-      - outline-network
-
-  # 2. Outline Wiki Service
-  pigeon-wiki:
-    image: outlinewiki/outline:latest # It's recommended to use a specific version tag
-    container_name: pigeon-wiki
-    restart: always
-    depends_on:
-      - pigeon-wiki-redis
-    environment:
-      # --- Basic Configuration ---
-      SECRET_KEY: <Generate another random string>
-      UTILS_SECRET: <Generate one more random string>
-      URL: https://<your-domain.com>
-      PORT: 3000
-      FORCE_HTTPS: "false" # SSL is handled by Nginx
-      TZ: Asia/Shanghai
-      
-      # --- Database & Redis (Outline uses its own DB, assumed to be external here) ---
-      # Note: This template does not include Outline's database. Connect to your existing PostgreSQL.
-      DATABASE_URL: postgres://<user>:<password>@<db-host>:<db-port>/<outline-db-name>
-      REDIS_URL: redis://:<YOUR_OUTLINE_REDIS_PASSWORD>@pigeon-wiki-redis:6379/1
-      
-      # --- OIDC Single Sign-On (Must match Outline-RAG's config) ---
-      OIDC_CLIENT_ID: <Your GitLab OAuth App ID>
-      OIDC_CLIENT_SECRET: <Your GitLab OAuth App Secret>
-      OIDC_AUTH_URI: https://<your-gitlab-instance.com>/oauth/authorize
-      OIDC_TOKEN_URI: https://<your-gitlab-instance.com>/oauth/token
-      OIDC_USERINFO_URI: https://<your-gitlab-instance.com>/oauth/userinfo
-      OIDC_USERNAME_CLAIM: username
-      OIDC_DISPLAY_NAME: <Name displayed on the login button>
-      
-      # --- File Storage ---
-      FILE_STORAGE: local
-      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
-      
-    volumes:
-      - ./pigeon-data:/var/lib/outline/data
-    ports:
-      - "127.0.0.1:8030:3000" # Binds to localhost only
-    networks:
-      - outline-network
-
-  # 3. Outline-RAG's Database (PostgreSQL with pgvector)
-  outline-rag-db:
-    image: pgvector/pgvector:pg16
-    container_name: outline-rag-db
-    restart: always
-    environment:
-      POSTGRES_DB: outline-rag
-      POSTGRES_USER: outline-rag
-      POSTGRES_PASSWORD: <YOUR_RAG_DB_PASSWORD>
-      TZ: Asia/Shanghai
-    volumes:
-      - ./outline-rag-db/data:/var/lib/postgresql/data
-      - ./outline-rag-db/socket:/var/run/postgresql # Share socket with the main app
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 60s
-      timeout: 5s
-      retries: 10
-    networks:
-      - outline-network
-
-  # 4. Redis Service (for both Outline and Outline-RAG)
-  pigeon-wiki-redis:
-    image: redis:7
-    container_name: pigeon-wiki-redis
-    restart: always
-    command: redis-server --requirepass <YOUR_OUTLINE_REDIS_PASSWORD>
-    volumes:
-      - ./pigeon-wiki-redis/data:/data
-    networks:
-      - outline-network
-
-# Define the shared network
-networks:
-  outline-network:
-    driver: bridge
-```
+Refer to the [Configuration](#配置 Docker Compose) section for more details.
 
 ### 3\. Configure Nginx Reverse Proxy
 
