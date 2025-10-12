@@ -111,7 +111,7 @@ def api_ask():
         ranked = services.rerank(query, passages, top_k=min(config.K, len(passages)))
         top_passages = [passages[r["index"]] for r in ranked if r.get("index") is not None and 0 <= r["index"] < len(passages)]
         contexts = top_passages or passages[:5]
-    system_prompt = "你是一个企业知识库助理。你正在回答RAG应用的问题。当前知识库基于我们开发中的科幻战争题材游戏，游戏名为《Planet E》，游戏世界位于一颗名为“余烬”的类地行星。\n使用提供的参考资料片段，结合你的知识回答问题。\n\n回答时不需要使用“正如片段所述”、“参考资料”、“片段”等字样。\n例如：不应该使用“根据开发组成员laffei在参考资料中的留言”，而是使用“根据开发组成员laffei的留言”\n\n其它主要设定：1. 货币名为联合币，由北方企业联合体发行。\n2. 存在一种“屏障粒子”阻止了短波和微波在大气中传播。\n3. 核心玩法为舰船设计、海战和社交。\n回答使用中文。"
+    system_prompt = config.SYSTEM_PROMPT
     user_prompt = f"问题：{query}\n\n参考资料片段：\n" + "\n\n".join([f"[片段{i+1}]\n{ctx}" for i, ctx in enumerate(contexts)])
     messages = [{"role":"system","content": system_prompt}, {"role":"user","content": user_prompt}]
     def generate():
@@ -200,14 +200,14 @@ def refresh_status():
 
     try:
         counts = redis_client.mget([
-            "refresh:total_queued", "refresh:success_count", 
+            "refresh:total_queued", "refresh:success_count",
             "refresh:skipped_count", "refresh:delete_count"
         ])
         total_queued = int(counts[0] or 0)
         success_count = int(counts[1] or 0)
         skipped_count = int(counts[2] or 0)
         delete_count = int(counts[3] or 0)
-        
+
         processed_count = success_count + skipped_count
 
         if total_queued > 0 and processed_count >= total_queued:
@@ -219,16 +219,16 @@ def refresh_status():
                 msg_parts.append(f"跳过 {skipped_count} 篇空文档")
             if delete_count > 0:
                 msg_parts.append(f"删除 {delete_count} 篇陈旧文档")
-            
+
             final_message = "刷新完成。" + "，".join(msg_parts) + "。" if msg_parts else "刷新完成，数据已是最新。"
             status = {"status": "success", "message": final_message}
-            
+
             # 写入最终状态并清理
             p = redis_client.pipeline()
             p.set("refresh:status", json.dumps(status), ex=300)
             p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count", "refresh:delete_count")
             p.execute()
-            
+
             return jsonify(status)
         else:
             # 仍在处理中

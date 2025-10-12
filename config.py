@@ -31,6 +31,10 @@ CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
 CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 
+# --- System Prompt ---
+DEFAULT_SYSTEM_PROMPT = """你是一个企业知识库助理。你正在回答RAG应用的问题。\n回答使用用户输入的语言。"""
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+
 # --- RAG/检索参数 ---
 TOP_K = int(os.getenv("TOP_K", "12"))
 K = int(os.getenv("K", "6"))
