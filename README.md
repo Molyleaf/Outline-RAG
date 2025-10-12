@@ -1,8 +1,14 @@
+# Outline RAG v2
+
+This document provides an overview of the Outline RAG v2 project, its structure, and how to get it running.
+
+---
+
 [English](#outline-rag-v2-english) | [中文](#outline-rag-v2-中文)
 
 ---
 
-## Outline RAG (English)
+## Outline RAG v2 (English)
 
 ### 1. Overview
 
@@ -56,7 +62,8 @@ This project includes a `Dockerfile` for easy containerization.
     ```
 
 ---
-## Outline RAG
+
+## Outline RAG v2 (中文)
 
 ### 1. 项目概述
 

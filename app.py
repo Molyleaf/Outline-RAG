@@ -1,19 +1,21 @@
 # app.py
-import logging
-import requests
-import time
-from datetime import datetime, timezone, timedelta
 import json
+import logging
 import os
 import threading
-import redis # 修复：导入 redis 模块以正确引用其异常
-from flask import Flask, jsonify
+import time
+from datetime import datetime, timezone, timedelta
+
+import redis  # 修复：导入 redis 模块以正确引用其异常
+import requests
+from flask import Flask
+
 import config
-from database import db_init, engine, redis_client
-from blueprints.views import views_bp
-from blueprints.auth import auth_bp
-from blueprints.api import api_bp
 import rag
+from blueprints.api import api_bp
+from blueprints.auth import auth_bp
+from blueprints.views import views_bp
+from database import db_init, engine, redis_client
 
 # --- 日志配置 ---
 logging.basicConfig(

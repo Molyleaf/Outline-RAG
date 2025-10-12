@@ -1,7 +1,9 @@
 # 处理所有服务于前端页面和静态资源的路由
 import re
+
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
+
 from database import engine
 
 views_bp = Blueprint('views', __name__)
@@ -47,7 +49,6 @@ def chat_page_with_guid(conv_guid: str):
         resp = redirect("/chat")
         resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="Lax")
         return resp
-    # 此路由最终也返回 chat_page() 的结果，该函数内已处理了缓存头
     return chat_page()
 
 @views_bp.route("/static/style.css")
@@ -58,34 +59,34 @@ def chat_static_style():
 def chat_static_script():
     return _serve_static_with_cache("script.js", "application/javascript")
 
-@views_bp.route("/img/static/DeepSeek.svg")
+@views_bp.route("/static/img/DeepSeek.svg")
 def chat_static_deepseek_svg():
     return _serve_static_with_cache("DeepSeek.svg", "image/svg+xml")
 
-@views_bp.route("/img/static/Tongyi.svg")
+@views_bp.route("/static/img/Tongyi.svg")
 def chat_static_tongyi_svg():
     return _serve_static_with_cache("Tongyi.svg", "image/svg+xml")
 
-@views_bp.route("/img/static/zhipu.svg")
+@views_bp.route("/static/img/zhipu.svg")
 def chat_static_zhipu_svg():
     return _serve_static_with_cache("zhipu.svg", "image/svg+xml")
 
-@views_bp.route("/img/static/moonshotai_new.png")
+@views_bp.route("/static/img/moonshotai_new.png")
 def chat_static_kmoonshotai_new_png():
     return _serve_static_with_cache("moonshotai_new.png", "image/png")
 
-@views_bp.route("/img/static/ling.png")
+@views_bp.route("/static/img/ling.png")
 def chat_static_ling_png():
     return _serve_static_with_cache("ling.png", "image/png")
 
-@views_bp.route("/img/static/openai.svg")
+@views_bp.route("/static/img/openai.svg")
 def chat_static_openai_svg():
     return _serve_static_with_cache("openai.svg", "image/svg+xml")
 
-@views_bp.route("/img/static/thudm.svg")
+@views_bp.route("/static/img/thudm.svg")
 def chat_static_thudm_svg():
     return _serve_static_with_cache("thudm.svg", "image/svg+xml")
 
-@views_bp.route("/img/static/favicon.ico")
+@views_bp.route("/static/favicon.ico")
 def chat_static_favicon_ico():
     return _serve_static_with_cache("favicon.ico", "image/x-icon")

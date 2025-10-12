@@ -2,7 +2,6 @@
 # API端点处理
 import json
 import logging
-import secrets
 import time
 import uuid
 
@@ -201,14 +200,14 @@ def refresh_status():
 
     try:
         counts = redis_client.mget([
-            "refresh:total_queued", "refresh:success_count",
+            "refresh:total_queued", "refresh:success_count", 
             "refresh:skipped_count", "refresh:delete_count"
         ])
         total_queued = int(counts[0] or 0)
         success_count = int(counts[1] or 0)
         skipped_count = int(counts[2] or 0)
         delete_count = int(counts[3] or 0)
-
+        
         processed_count = success_count + skipped_count
 
         if total_queued > 0 and processed_count >= total_queued:
@@ -220,16 +219,16 @@ def refresh_status():
                 msg_parts.append(f"跳过 {skipped_count} 篇空文档")
             if delete_count > 0:
                 msg_parts.append(f"删除 {delete_count} 篇陈旧文档")
-
+            
             final_message = "刷新完成。" + "，".join(msg_parts) + "。" if msg_parts else "刷新完成，数据已是最新。"
             status = {"status": "success", "message": final_message}
-
+            
             # 写入最终状态并清理
             p = redis_client.pipeline()
             p.set("refresh:status", json.dumps(status), ex=300)
             p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count", "refresh:delete_count")
             p.execute()
-
+            
             return jsonify(status)
         else:
             # 仍在处理中
