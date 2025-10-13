@@ -112,7 +112,9 @@ def api_ask():
         top_passages = [passages[r["index"]] for r in ranked if r.get("index") is not None and 0 <= r["index"] < len(passages)]
         contexts = top_passages or passages[:5]
     system_prompt = config.SYSTEM_PROMPT
-    user_prompt = f"问题：{query}\n\n参考资料片段：\n" + "\n\n".join([f"[片段{i+1}]\n{ctx}" for i, ctx in enumerate(contexts)])
+    # 将多个上下文片段用分隔符连接成一个更连续的文本块，这有助于模型更好地进行信息整合，而不是将它们视为孤立的片段
+    continuous_context = "\n\n---\n\n".join(contexts)
+    user_prompt = f"参考资料：\n{continuous_context}\n\n---\n\n请根据以上参考资料，并结合你的知识，回答以下问题：\n{query}"
     messages = [{"role":"system","content": system_prompt}, {"role":"user","content": user_prompt}]
     def generate():
         yield ": ping\n\n"
