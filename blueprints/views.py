@@ -90,3 +90,7 @@ def chat_static_thudm_svg():
 @views_bp.route("/static/favicon.ico")
 def chat_static_favicon_ico():
     return _serve_static_with_cache("favicon.ico", "image/x-icon")
+
+@views_bp.route("/static/favicon.svg")
+def chat_static_favicon_svg():
+    return _serve_static_with_cache("favicon.svg", "image/svg+xml")
