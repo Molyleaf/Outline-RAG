@@ -72,7 +72,7 @@ def chat_static_zhipu_svg():
     return _serve_static_with_cache("img/zhipu.svg", "image/svg+xml")
 
 @views_bp.route("/static/img/moonshotai_new.png")
-def chat_static_kmoonshotai_new_png():
+def chat_static_moonshotai_new_png():
     return _serve_static_with_cache("img/moonshotai_new.png", "image/png")
 
 @views_bp.route("/static/img/ling.png")
