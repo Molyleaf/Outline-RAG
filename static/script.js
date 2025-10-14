@@ -18,10 +18,10 @@ const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
 // --- 新增：模型定义与状态管理 ---
 const MODELS = {
-    'deepseek-ai/DeepSeek-V3.1': { name: 'Deepseek', icon: '/chat/static/img/DeepSeek.svg', temp: 0.7, top_p: 0.7 },
+    'deepseek-ai/DeepSeek-V3.2-Exp': { name: 'Deepseek', icon: '/chat/static/img/DeepSeek.svg', temp: 0.7, top_p: 0.7 },
     'moonshotai/Kimi-K2-Instruct-0905': { name: 'Kimi K2', icon: '/chat/static/img/moonshotai_new.png', temp: 0.6, top_p: 0.7 },
     'zai-org/GLM-4.6': { name: 'ChatGLM', icon: '/chat/static/img/thudm.svg', temp: 0.6, top_p: 0.95 },
-    'Qwen/Qwen3-Next-80B-A3B-Thinking': { name: 'Qwen3-Next', icon: '/chat/static/img/Tongyi.svg', temp: 0.6, top_p: 0.95 }
+    'Qwen/Qwen3-Next-80B-A3B-Instruct': { name: 'Qwen3-Next', icon: '/chat/static/img/Tongyi.svg', temp: 0.6, top_p: 0.95 }
 };
 // 默认模型为列表第一个，或从 LocalStorage 读取
 let currentModelId = localStorage.getItem('chat_model') || Object.keys(MODELS)[0];
