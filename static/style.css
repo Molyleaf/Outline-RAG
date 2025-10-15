@@ -320,7 +320,7 @@ button { font: inherit; }
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
 }
 .msg .bubble-inner {
-    padding: 12px 14px;
+    padding: 12px 16px;
     border-radius: var(--radius-l);
     background: var(--bubble-assistant);
     color: var(--text);
@@ -467,44 +467,50 @@ sl-dialog::part(panel) {
     }
 }
 
-/* 自定义聊天区滚动条 */
-.chat {
+/* 自定义聊天区和历史列表滚动条 */
+.chat, #convs {
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
 }
-.chat::-webkit-scrollbar {
+.chat::-webkit-scrollbar, #convs::-webkit-scrollbar {
     width: 8px;
 }
-.chat::-webkit-scrollbar-track {
+.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track {
     background: transparent;
 }
-.chat::-webkit-scrollbar-thumb {
+.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb {
     background-color: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
-.chat::-webkit-scrollbar-thumb:hover {
+.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover {
     background-color: rgba(0, 0, 0, 0.4);
 }
 
 /* 深色模式滚动条 */
-:root[data-theme="dark"] .chat {
+:root[data-theme="dark"] .chat,
+:root[data-theme="dark"] #convs {
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
-:root[data-theme="dark"] .chat::-webkit-scrollbar-thumb {
+:root[data-theme="dark"] .chat::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, 0.2);
 }
-:root[data-theme="dark"] .chat::-webkit-scrollbar-thumb:hover {
+:root[data-theme="dark"] .chat::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
-    :root[data-theme="system"] .chat {
+    :root[data-theme="system"] .chat,
+    :root[data-theme="system"] #convs {
         scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
-    :root[data-theme="system"] .chat::-webkit-scrollbar-thumb {
+    :root[data-theme="system"] .chat::-webkit-scrollbar-thumb,
+    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb {
         background-color: rgba(255, 255, 255, 0.2);
     }
-    :root[data-theme="system"] .chat::-webkit-scrollbar-thumb:hover {
+    :root[data-theme="system"] .chat::-webkit-scrollbar-thumb:hover,
+    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb:hover {
         background-color: rgba(255, 255, 255, 0.4);
     }
 }
