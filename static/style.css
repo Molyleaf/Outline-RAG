@@ -384,7 +384,6 @@ button { font: inherit; }
     gap: 10px;
     min-height: 56px;
     border-radius: 28px;
-    /* 输入区使用 panel 色 */
     background: var(--panel);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
