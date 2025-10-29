@@ -118,7 +118,7 @@ def chat_completion_blocking(messages, model, temperature=None, top_p=None):
         return None
 
 def outline_headers():
-    return {"Authorization": f"Bearer {config.OUTLINE_API_TOKEN}", "Content-Type":"application/json"}
+    return {"Authorization": f"Bearer {config.OUTLINE_API_TOKEN}", "Content-Type": "application/json"}
 
 def http_post_json_raw(url, payload, headers=None, session=None):
     session_req = session or _create_retry_session()

@@ -14,8 +14,8 @@ from requests.adapters import HTTPAdapter
 from sqlalchemy import text
 from urllib3.util.retry import Retry
 
-import config
-from database import engine, redis_client
+from app import config
+from app.database import engine, redis_client
 
 auth_bp = Blueprint('auth', __name__)
 

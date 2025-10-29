@@ -1,0 +1,11 @@
+deb https://mirrors.nju.edu.cn/debian/ trixie main contrib non-free non-free-firmware
+# deb-src https://mirrors.nju.edu.cn/debian/ trixie main contrib non-free non-free-firmware
+
+deb https://mirrors.nju.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware
+# deb-src https://mirrors.nju.edu.cn/debian/ trixie-updates main contrib non-free non-free-firmware
+
+deb https://mirrors.nju.edu.cn/debian/ trixie-backports main contrib non-free non-free-firmware
+# deb-src https://mirrors.nju.edu.cn/debian/ trixie-backports main contrib non-free non-free-firmware
+
+deb https://mirrors.nju.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware
+# deb-src https://mirrors.nju.edu.cn/debian-security trixie-security main contrib non-free non-free-firmware

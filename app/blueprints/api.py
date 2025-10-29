@@ -9,11 +9,9 @@ from flask import (Blueprint, jsonify, request, abort, make_response, Response)
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
-import config
-import rag
-import services
-from database import engine, redis_client
-from utils import require_login, current_user, allowed_file
+from app import config, services, rag
+from app.database import engine, redis_client
+from app.utils import require_login, current_user, allowed_file
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
