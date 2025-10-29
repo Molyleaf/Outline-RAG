@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-from app import config
-from app import services
-from app.database import engine, redis_client
+import config
+import services
+from database import engine, redis_client
 
 logger = logging.getLogger(__name__)
 

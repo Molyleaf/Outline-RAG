@@ -52,7 +52,7 @@ RUN apt-get remove --purge -y build-essential gcc \
 WORKDIR /app
 
 # 复制应用代码
-COPY app/ /app/
+COPY app /app
 
 # 创建可持久化目录并授权
 # 确保整个 /app 目录都属于 outline 用户

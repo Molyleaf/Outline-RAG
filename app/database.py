@@ -7,7 +7,7 @@ import redis
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app import config
+import config
 
 logger = logging.getLogger(__name__)
 

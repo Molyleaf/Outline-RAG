@@ -10,12 +10,12 @@ import redis  # 修复：导入 redis 模块以正确引用其异常
 import requests
 from flask import Flask
 
-from app import config
-from app import rag
-from app.blueprints.api import api_bp
-from app.blueprints.auth import auth_bp
-from app.blueprints.views import views_bp
-from app.database import db_init, engine, redis_client
+import config
+import rag
+from blueprints.api import api_bp
+from blueprints.auth import auth_bp
+from blueprints.views import views_bp
+from database import db_init, engine, redis_client
 
 # --- 日志配置 ---
 logging.basicConfig(

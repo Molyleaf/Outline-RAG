@@ -5,7 +5,7 @@ import re
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
 
-from app.database import engine
+from database import engine
 
 views_bp = Blueprint('views', __name__)
 
