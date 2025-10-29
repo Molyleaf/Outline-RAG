@@ -1,4 +1,4 @@
-# database.py
+# app/database.py
 # 负责数据库连接引擎的创建和表结构的初始化
 import logging
 import urllib.parse

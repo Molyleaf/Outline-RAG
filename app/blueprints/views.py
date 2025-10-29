@@ -1,3 +1,4 @@
+# app/blueprints/views.py
 # 处理所有服务于前端页面和静态资源的路由
 import re
 

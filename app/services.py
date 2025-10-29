@@ -1,3 +1,4 @@
+# app/services.py
 # 封装了对所有外部 API (Embedding, Reranker, Chat, Outline) 的 HTTP 请求
 import hashlib
 import json

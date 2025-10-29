@@ -1,3 +1,4 @@
+# app/blueprints/auth.py
 # 处理用户登录、登出和 OIDC 回调逻辑
 import base64
 import hashlib

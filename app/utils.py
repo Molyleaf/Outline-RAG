@@ -1,4 +1,4 @@
-# utils.py
+# app/utils.py
 # 包含登录校验、获取当前用户、文件类型检查等通用辅助函数
 from flask import session, abort
 

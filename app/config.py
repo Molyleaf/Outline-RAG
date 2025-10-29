@@ -1,4 +1,4 @@
-# config.py
+# app/config.py
 # 此文件集中管理所有从环境变量加载的配置项
 import os
 

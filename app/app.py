@@ -1,4 +1,4 @@
-# app.py
+# app/app.py
 import json
 import logging
 import os

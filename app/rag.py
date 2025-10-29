@@ -1,4 +1,4 @@
-# rag.py
+# app/rag.py
 # 包含文本分块、向量检索、以及与 Outline 同步（全量、增量）等核心 RAG 功能
 import hashlib
 import hmac
