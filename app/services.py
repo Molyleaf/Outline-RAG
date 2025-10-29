@@ -8,8 +8,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-import config
-from database import redis_client
+from app import config
+from app.database import redis_client
 
 logger = logging.getLogger(__name__)
 
