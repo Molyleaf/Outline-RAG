@@ -35,6 +35,17 @@ CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
 DEFAULT_SYSTEM_PROMPT = """你是一个企业知识库助理。你正在回答RAG应用的问题。\n回答使用用户输入的语言。"""
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
+# --- 多轮对话配置 ---
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20")) # 用于上下文的最大历史消息数 (用户+助手)
+
+# 查询重写模板
+DEFAULT_REWRITE_PROMPT_TEMPLATE = """根据下方提供的“对话历史”和“后续问题”，将“后续问题”改写为一个**完全独立、不依赖任何上下文**的完整问题。\n如果“后续问题”本身已经很完整，则直接返回它。\n\n对话历史:\n{history}\n\n后续问题:\n{query}\n\n重写后的独立问题:"""
+REWRITE_PROMPT_TEMPLATE = os.getenv("REWRITE_PROMPT_TEMPLATE", DEFAULT_REWRITE_PROMPT_TEMPLATE)
+
+# RAG 问答模板
+DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE = """参考资料：\n{context}\n\n---\n请根据以上参考资料，并结合你的知识，回答以下问题：\n{query}"""
+HISTORY_AWARE_PROMPT_TEMPLATE = os.getenv("HISTORY_AWARE_PROMPT_TEMPLATE", DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE)
+
 # --- RAG/检索参数 ---
 TOP_K = int(os.getenv("TOP_K", "12"))
 K = int(os.getenv("K", "6"))

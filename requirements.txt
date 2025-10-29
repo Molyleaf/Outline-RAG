@@ -1,10 +1,10 @@
 python-jose==3.5.0
 flask==3.1.2
-SQLAlchemy==2.0.44
+sqlalchemy==2.0.44
 psycopg2==2.9.11
 pgvector==0.4.1
 requests==2.32.5
-redis==6.4.0
+redis==7.0.1
 tasks_py==1.0.3
 python-dateutil==2.9.0.post0
 werkzeug==3.1.3

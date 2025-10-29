@@ -98,33 +98,90 @@ def api_ask():
     model = body.get("model")
     temperature = body.get("temperature")
     top_p = body.get("top_p")
-    if not query or not conv_id: return jsonify({"error":"missing query or conv_id"}), 400
+
+    if not query or not conv_id:
+        return jsonify({"error":"missing query or conv_id"}), 400
+
+    history_messages = []
     with engine.begin() as conn:
-        if not conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": current_user()["id"]}).scalar(): abort(403)
+        # 验证会话所有权
+        if not conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": current_user()["id"]}).scalar():
+            abort(403)
+
+        # 1. (修改) 获取历史消息
+        rs = conn.execute(
+            text("SELECT role, content FROM messages WHERE conv_id=:cid ORDER BY id DESC LIMIT :lim"),
+            {"cid": conv_id, "lim": config.MAX_HISTORY_MESSAGES}
+        ).mappings().all()
+        # 反转列表，使消息按时间顺序排列 (旧 -> 新)
+        history_messages = [{"role": r["role"], "content": r["content"]} for r in reversed(rs)]
+
+        # 2. 保存当前用户消息
         conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'user',:c)"), {"cid": conv_id, "c": query})
+
+    # 清理消息缓存
     if redis_client:
         redis_client.delete(f"messages:{conv_id}")
-    candidates = rag.search_similar(query, k=config.TOP_K)
+
+    # --- (新增) 步骤 1: 查询重写 ---
+    rewritten_query = query
+    if history_messages:
+        # 格式化历史
+        history_str = "\n".join([f"{m['role']}: {m['content']}" for m in history_messages])
+        # 构建重写提示词
+        rewrite_prompt = config.REWRITE_PROMPT_TEMPLATE.format(history=history_str, query=query)
+        rewrite_messages = [{"role": "user", "content": rewrite_prompt}]
+
+        logger.info(f"[{conv_id}] Performing query rewrite...")
+        # 调用阻塞式 API 进行重写（使用较低的温度以获取确定性输出）
+        rewritten_query_from_llm = services.chat_completion_blocking(
+            rewrite_messages,
+            model=model,
+            temperature=0.0,
+            top_p=1.0
+        )
+
+        if rewritten_query_from_llm:
+            rewritten_query = rewritten_query_from_llm
+            logger.info(f"[{conv_id}] Original query: '{query}' -> Rewritten query: '{rewritten_query}'")
+        else:
+            logger.warning(f"[{conv_id}] Query rewrite failed, falling back to original query.")
+            rewritten_query = query # 确保回退
+
+    # --- 步骤 2: RAG 检索 (使用 rewritten_query) ---
+    candidates = rag.search_similar(rewritten_query, k=config.TOP_K)
     passages = [c["content"] for c in candidates]
-    contexts = passages[:5]
+    contexts = passages[:5] # 默认回退
     if passages:
-        ranked = services.rerank(query, passages, top_k=min(config.K, len(passages)))
+        ranked = services.rerank(rewritten_query, passages, top_k=min(config.K, len(passages)))
         top_passages = [passages[r["index"]] for r in ranked if r.get("index") is not None and 0 <= r["index"] < len(passages)]
         contexts = top_passages or passages[:5]
+
+    # --- (修改) 步骤 3: 构建最终提示词 ---
     system_prompt = config.SYSTEM_PROMPT
-    # 将多个上下文片段用分隔符连接成一个更连续的文本块，这有助于模型更好地进行信息整合，而不是将它们视为孤立的片段
+    # 将多个上下文片段用分隔符连接
     continuous_context = "\n\n---\n\n".join(contexts)
-    user_prompt = f"参考资料：\n{continuous_context}\n\n---\n\n请根据以上参考资料，并结合你的知识，回答以下问题：\n{query}"
-    messages = [{"role":"system","content": system_prompt}, {"role":"user","content": user_prompt}]
+
+    # 使用新的模板，填充上下文和 *原始* query
+    final_user_prompt = config.HISTORY_AWARE_PROMPT_TEMPLATE.format(context=continuous_context, query=query)
+
+    # 最终发送给 LLM 的消息列表：系统指令 + 历史 + RAG提示
+    messages_for_llm = [{"role": "system", "content": system_prompt}] + history_messages + [{"role": "user", "content": final_user_prompt}]
+
+    # --- 步骤 4: 流式生成答案 ---
     def generate():
         yield ": ping\n\n"
         buffer = []
         model_name = model
-        resp_stream = services.chat_completion_stream(messages, model=model, temperature=temperature, top_p=top_p)
+
+        # (修改) 使用 messages_for_llm 进行调用
+        resp_stream = services.chat_completion_stream(messages_for_llm, model=model, temperature=temperature, top_p=top_p)
+
         if resp_stream is None:
             yield f"data: {json.dumps({'error': '上游服务不可用'})}\n\n"
             yield "data: [DONE]\n\n"
             return
+
         resp_stream.encoding = 'utf-8'
         for line in resp_stream.iter_lines(decode_unicode=True):
             if line:
@@ -138,6 +195,7 @@ def api_ask():
                                 buffer.append(delta)
                         except (json.JSONDecodeError, IndexError):
                             pass
+
         full_response = "".join(buffer)
         if full_response:
             with engine.begin() as conn:
@@ -147,6 +205,7 @@ def api_ask():
                 )
             if redis_client:
                 redis_client.delete(f"messages:{conv_id}")
+
     resp = make_response(generate(), 200)
     resp.mimetype = "text/event-stream; charset=utf-8"
     resp.headers["Cache-Control"] = "no-cache"

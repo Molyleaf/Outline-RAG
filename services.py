@@ -20,7 +20,7 @@ def _create_retry_session():
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
-    session.mount("http://", adapter)
+    # session.mount("http://", adapter)
     return session
 
 def http_post_json(url, payload, token, stream=False):
@@ -68,6 +68,7 @@ def create_embeddings(texts):
     return final_embeddings
 
 def rerank(query, passages, top_k=5):
+    cache_key = None  # 修复：在此处初始化变量以消除 Linter 警告
     if redis_client:
         stable_input = json.dumps({"query": query, "documents": sorted(passages)}, ensure_ascii=False)
         cache_key = f"rerank:{hashlib.sha256(stable_input.encode()).hexdigest()}"
@@ -95,6 +96,26 @@ def chat_completion_stream(messages, model, temperature=None, top_p=None):
     if temperature is not None: payload["temperature"] = temperature
     if top_p is not None: payload["top_p"] = top_p
     return http_post_json(f"{config.CHAT_API_URL}/v1/chat/completions", payload, config.CHAT_API_TOKEN, stream=True)
+
+# (新增) 阻塞式的 Chat Completion，用于查询重写
+def chat_completion_blocking(messages, model, temperature=None, top_p=None):
+    """执行一次非流式的聊天补全，并返回文本结果。"""
+    payload = {"model": model or config.CHAT_MODEL, "messages": messages, "stream": False}
+    if temperature is not None: payload["temperature"] = temperature
+    if top_p is not None: payload["top_p"] = top_p
+
+    res = http_post_json(f"{config.CHAT_API_URL}/v1/chat/completions", payload, config.CHAT_API_TOKEN, stream=False)
+
+    if not res:
+        logger.warning("chat_completion_blocking: API call failed or returned empty.")
+        return None
+    try:
+        # 提取响应内容
+        content = res.get("choices", [{}])[0].get("message", {}).get("content")
+        return content.strip() if content else None
+    except (IndexError, AttributeError, TypeError) as e:
+        logger.error(f"chat_completion_blocking: Failed to parse response: {e} | Response: {res}")
+        return None
 
 def outline_headers():
     return {"Authorization": f"Bearer {config.OUTLINE_API_TOKEN}", "Content-Type":"application/json"}

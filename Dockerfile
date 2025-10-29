@@ -1,5 +1,5 @@
 # 基于 Python 3.13 轻量镜像
-FROM python:3.13-slim
+FROM python:3.13-slim-trixie
 
 ARG DEBIAN_FRONTEND=noninteractive
 

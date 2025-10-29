@@ -28,7 +28,7 @@ def _create_retry_session():
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
-    session.mount("http://", adapter)
+    # session.mount("http://", adapter)
     return session
 
 # --- OIDC Helpers (使用 requests 重构) ---
