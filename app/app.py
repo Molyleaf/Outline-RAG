@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 
-import redis  # 修复：导入 redis 模块以正确引用其异常
+import redis
 import requests
 from flask import Flask
 

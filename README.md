@@ -343,7 +343,7 @@ server {
 请务必在 `docker-compose.yml` 的 `environment` 部分配置以下关键变量：
 
 | 变量名 | 说明 | 示例 |
-| :--- | :--- | :--- |
+| - | - | - |
 | `SECRET_KEY` | Flask 应用的会话密钥，请务必修改为一个随机长字符串。 | `openssl rand -hex 16` |
 | `DATABASE_URL` | Outline-RAG 使用的数据库连接字符串。 | `postgresql+psycopg2://user:pass@...` |
 | `OUTLINE_API_URL` | 您的 Outline 实例的访问 URL。 | `https://wiki.example.com` |
@@ -417,8 +417,6 @@ touch nginx.conf
 Copy the following content into your `docker-compose.yml` file. This template integrates Outline-RAG, Outline Wiki, a PostgreSQL database with the pgvector extension, and a Redis service.
 
 **Please carefully review and replace all `<...>` placeholders with your actual configuration details.**
-
-Refer to the [Configuration](#配置 Docker Compose) section for more details.
 
 ### 3\. Configure Nginx Reverse Proxy
 
