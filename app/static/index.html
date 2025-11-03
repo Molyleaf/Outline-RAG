@@ -4,13 +4,14 @@
 	<meta charset="utf-8" />
 	<title>Outline RAG Chat</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<link rel="icon" href="chat/static/favicon.svg" type="image/svg+xml" />
-	<link rel="icon" href="chat/static/favicon.ico" />
-	<link rel="stylesheet" href="chat/static/style.css" />
+	<link rel="icon" href="static/favicon.svg" type="image/svg+xml" />
+	<link rel="icon" href="static/favicon.ico" />
+	<link rel="stylesheet" href="static/style.css" />
+	<!-- 不要更改CDN源 -->
 	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/shoelace-autoloader.js"></script>
 	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace/cdn/themes/light.css" />
-	<script src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.esm.js"></script>
-	<script src="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+	<script src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.esm.js" defer></script>
+	<script src="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
 	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/googlecode.min.css">
 	<script>
         (function () {
@@ -47,6 +48,7 @@
 					<span class="btn tonal">上传附件</span>
 				</label>
 			</div>
+			<!-- (Req 9) 移除 style="display:none" -->
 			<div class="menu" id="menu">
 				<div class="menu-section">
 					<div class="menu-label">主题</div>
@@ -56,7 +58,7 @@
 				</div>
 				<div class="menu-divider"></div>
 				<a href="/chat/logout">登出</a>
-				<a id="refreshAll" href="#">手动刷新 Outline</a>
+				<a id="refreshAll" href="#">手动刷新数据库</a>
 			</div>
 			<div class="avatar" id="avatar" title="菜单"></div>
 		</div>
@@ -84,7 +86,8 @@
 	</div>
 </div>
 
-<script src="/chat/static/script.js"></script>
+<!-- (Req 1) 添加 defer -->
+<script src="static/script.js" defer></script>
 <script>
     (function(){
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);

@@ -163,6 +163,12 @@ function renderMarkdown(md) {
         pre.textContent = md || '';
         return pre;
     }
+    // 等待 marked 加载完成
+    if (typeof window.marked.parse !== 'function') {
+        const pre = document.createElement('pre');
+        pre.textContent = md || '(Markdown 渲染器加载中...)';
+        return pre;
+    }
     const html = marked.parse(md || '', { breaks: true, gfm: true });
     const wrapper = document.createElement('div');
     wrapper.className = 'md-body';
@@ -184,7 +190,8 @@ function animateIn(el) {
 }
 
 avatar.addEventListener('click', () => {
-    menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+    // (Req 9) 改为 toggle class
+    menu.classList.toggle('visible');
 });
 // 初始化主题菜单选中态 + 点击切换保存
 (function initThemeMenu(){
@@ -204,7 +211,8 @@ avatar.addEventListener('click', () => {
             document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'system');
             applyActive();
             toast(`已切换为${t === 'system' ? '系统' : t === 'light' ? '浅色' : '深色'}主题`, 'success', 1800);
-            menu.style.display = 'none';
+            // (Req 9) 改为 remove class
+            menu.classList.remove('visible');
         });
     });
 })();
@@ -234,7 +242,8 @@ avatar.addEventListener('click', () => {
 })();
 
 document.addEventListener('click', (e) => {
-    if (!avatar.contains(e.target) && !menu.contains(e.target)) menu.style.display = 'none';
+    // (Req 9) 改为 remove class
+    if (!avatar.contains(e.target) && !menu.contains(e.target)) menu.classList.remove('visible');
 });
 refreshAll.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -343,30 +352,51 @@ async function loadConvs() {
         const del = document.createElement('div');
         del.textContent = '删除';
 
-        function go() {
-            const href = toSameOriginUrl(c);
-            if (href) location.href = href;
-        }
+        // (Req 3) 修改点击逻辑为 PJAX
         row.addEventListener('click', (e) => {
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
-            go();
+
+            e.preventDefault();
+            const href = toSameOriginUrl(c);
+            if (!href || href === location.href) return; // 已经是当前会话
+
+            currentConvId = c.id;
+            try {
+                history.pushState(null, '', href);
+            } catch(_) {
+                location.href = href; // 回退到跳转
+                return;
+            }
+
+            chatEl.innerHTML = '';
+            document.getElementById('greeting')?.remove(); // 移除问候语
+            loadMessages(); // 手动加载消息
+
+            // 更新侧边栏高亮
+            document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
+            row.classList.add('active');
         });
+
         row.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                go();
+                row.click(); // 触发上面修改过的 click 事件
             }
         });
-        titleEl.onclick = (e) => { e.stopPropagation(); go(); };
+
+        // titleEl.onclick = (e) => { e.stopPropagation(); go(); }; // 已被 row click 替代
+
         menuBtn.onclick = (e) => {
             e.stopPropagation();
-            rowMenu.style.display = (rowMenu.style.display === 'block') ? 'none' : 'block';
+            // (Req 5, 9) 改为 toggle class
+            rowMenu.classList.toggle('visible');
         };
 
         rename.onclick = async (e) => {
             e.stopPropagation();
             const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
-            if (val == null) { rowMenu.style.display = 'none'; return; }
+            // (Req 5, 9) 改为 remove class
+            if (val == null) { rowMenu.classList.remove('visible'); return; }
             const t = val.trim();
             if (!t) { toast('标题不能为空', 'warning'); return; }
             // 改为使用 POST /chat/api/conversations/<id>/rename
@@ -376,17 +406,19 @@ async function loadConvs() {
             });
             const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
             if (success) {
-                await loadConvs();
+                await loadConvs(); // 重新加载列表以更新标题
                 toast('已重命名', 'success');
             } else {
                 toast(res?.error || '重命名失败', 'danger');
             }
-            rowMenu.style.display = 'none';
+            // (Req 5, 9) 改为 remove class
+            rowMenu.classList.remove('visible');
         };
         del.onclick = async (e) => {
             e.stopPropagation();
             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
-            if (!ok) { rowMenu.style.display = 'none'; return; }
+            // (Req 5, 9) 改为 remove class
+            if (!ok) { rowMenu.classList.remove('visible'); return; }
             // 改为使用 POST /chat/api/conversations/<id>/delete
             const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
             const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
@@ -394,18 +426,22 @@ async function loadConvs() {
                 if (String(currentConvId) === String(c.id)) {
                     currentConvId = null; chatEl.innerHTML = '';
                     try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
+                    // 删除后显示问候语
+                    document.getElementById('greeting')?.remove();
+                    loadMessages(); // loadMessages 内部会处理 greeting 显示
                 }
-                await loadConvs();
+                await loadConvs(); // 重新加载列表
                 toast('已删除', 'success');
             } else {
                 toast(res?.error || '删除失败', 'danger');
             }
-            rowMenu.style.display = 'none';
+            // (Req 5, 9) 改为 remove class
+            rowMenu.classList.remove('visible');
         };
 
         rowMenu.appendChild(rename);
         rowMenu.appendChild(del);
-        rowMenu.style.display = 'none';
+        // rowMenu.style.display = 'none'; // 由 CSS 控制
 
         if (!document.__convMenuCloserBound__) {
             document.addEventListener('click', (e) => {
@@ -413,8 +449,9 @@ async function loadConvs() {
                 pops.forEach(pop => {
                     const parent = pop.parentElement;
                     const btn = parent?.querySelector('.conv-menu');
-                    if (pop.style.display === 'block' && !pop.contains(e.target) && e.target !== btn) {
-                        pop.style.display = 'none';
+                    // (Req 5, 9) 改为检查 class 和 remove class
+                    if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
+                        pop.classList.remove('visible');
                     }
                 });
             });
@@ -424,6 +461,58 @@ async function loadConvs() {
         row.appendChild(titleEl);
         row.appendChild(menuBtn);
         row.appendChild(rowMenu);
+
+        // --- (Req 6) 移动端长按支持 ---
+        let touchTimer = null;
+        row.addEventListener('touchstart', (e) => {
+            // 只在移动端（窄屏）且菜单按钮不可见时触发
+            if (window.innerWidth > 960 || menuBtn.offsetParent !== null) return;
+
+            touchTimer = setTimeout(async () => {
+                touchTimer = null;
+                // 确保 e.preventDefault() 只在定时器触发时调用，以允许默认的滚动
+                e.preventDefault(); // 阻止后续的 click 和滚动
+
+                const sheet = document.createElement('sl-action-sheet');
+                sheet.innerHTML = `
+                    <sl-menu-item data-action="rename">重命名</sl-menu-item>
+                    <sl-menu-item data-action="delete" style="color: var(--sl-color-danger-600);">删除对话</sl-menu-item>
+                `;
+                document.body.appendChild(sheet);
+
+                try {
+                    // 确保 sl-action-sheet 注册完成
+                    await customElements.whenDefined('sl-action-sheet');
+                    sheet.show();
+                } catch (err) {
+                    console.error("Shoelace action-sheet failed:", err);
+                    sheet.remove();
+                    return;
+                }
+
+                sheet.addEventListener('sl-select', async (ev) => {
+                    const action = ev.detail.item.dataset.action;
+                    if (action === 'rename') {
+                        // 模拟一个事件对象以复用现有逻辑
+                        rename.onclick(new Event('click', { bubbles: false }));
+                    } else if (action === 'delete') {
+                        del.onclick(new Event('click', { bubbles: false }));
+                    }
+                    sheet.hide();
+                });
+                sheet.addEventListener('sl-after-hide', () => sheet.remove());
+
+            }, 500); // 500ms 长按
+        }, { passive: false }); // 需要 ability to preventDefault
+
+        const clearLongPress = () => {
+            if (touchTimer) clearTimeout(touchTimer);
+            touchTimer = null;
+        };
+        row.addEventListener('touchend', clearLongPress);
+        row.addEventListener('touchmove', clearLongPress);
+        // --- 结束 (Req 6) ---
+
         convsEl.appendChild(row);
         animateIn(row);
     });
@@ -431,14 +520,47 @@ async function loadConvs() {
 
 async function loadMessages() {
     chatEl.innerHTML = '';
-    if (!currentConvId) return;
+    // (Req 3) 确保问候语被移除
+    document.getElementById('greeting')?.remove();
+
+    if (!currentConvId) {
+        // 如果没有会话ID，需要重新创建和显示问候语
+        let greet = document.getElementById('greeting');
+        if (!greet) {
+            greet = document.createElement('div');
+            greet.id = 'greeting';
+            greet.className = 'greeting';
+            greet.innerHTML = `
+                 <div class="greet-title">你好！</div>
+                 <div class="greet-sub">随时提问，或从以下示例开始</div>
+                 <div class="greet-suggestions">
+                     <button class="chip">总结新手教程</button>
+                     <button class="chip">拉汶帝国完蛋了吗</button>
+                     <button class="chip">开发组的烂摊子怎么样了</button>
+                 </div>
+             `;
+            chatEl.appendChild(greet);
+            // 绑定示例 chip 点击
+            greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    qEl.value = btn.textContent.trim();
+                    qEl.focus();
+                });
+            });
+        }
+        // 若已有 userInfo，立即填充用户名
+        const greetTitle = greet.querySelector('.greet-title');
+        if (greetTitle) {
+            const name = (userInfo?.name || userInfo?.username || '').trim();
+            greetTitle.textContent = name ? `你好，${name}！` : '你好！';
+        }
+        greet.style.display = 'block';
+        return;
+    }
+
     const res = await api('/chat/api/messages?conv_id=' + currentConvId);
     const msgs = res?.items || [];
-    // 有历史消息则隐藏问候语
-    const greet = document.getElementById('greeting');
-    if (greet) {
-        greet.style.display = msgs.length ? 'none' : 'block';
-    }
+
     msgs.forEach(m => appendMsg(m.role, m.content, m));
     chatEl.scrollTop = chatEl.scrollHeight;
 }
@@ -539,6 +661,9 @@ newConvBtn.addEventListener('click', async (e) => {
     // 使用 History API 保持在 /chat
     try { history.pushState(null, '', '/chat'); } catch (_) { location.href = '/chat'; return; }
 
+    // (Req 3) 更新侧边栏高亮
+    document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
+
     // 窄屏下新建完成后自动关闭侧边栏
     if (window.innerWidth <= 960) {
         appRoot?.classList.remove('sidebar-open');
@@ -550,11 +675,24 @@ window.addEventListener('popstate', () => {
     const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/);
     currentConvId = m ? m[1] : null;
     chatEl.innerHTML = '';
+
+    // (Req 3) 更新侧边栏高亮
+    document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
+    if (currentConvId) {
+        const activeRow = Array.from(convsEl.querySelectorAll('.conv')).find(r => r.dataset.id === currentConvId); // 假设 row 有 data-id
+        if (activeRow) activeRow.classList.add('active');
+    }
+
     // 无会话则显示问候语
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = currentConvId ? 'none' : 'block';
     // 有会话则异步加载消息
-    if (currentConvId) loadMessages();
+    if (currentConvId) {
+        loadMessages();
+    } else {
+        // 确保在 /chat 路径时显示问候语
+        loadMessages();
+    }
 });
 
 sendBtn.addEventListener('click', sendQuestion);
@@ -605,13 +743,18 @@ async function sendQuestion() {
         bubbleInner.appendChild(newBody);
         placeholderContentRef = newBody;
     }
-    placeholderContentRef.innerHTML = '▍'; // 初始光标
+    // (Req 11) 初始为空，并添加 streaming class
+    placeholderContentRef.innerHTML = '';
+    placeholderContentRef.classList.add('streaming');
 
     let acc = '';
 
     const rerender = (isFinal = false) => {
-        placeholderContentRef.innerHTML = marked.parse(acc + (!isFinal ? '▍' : ''), { breaks: true, gfm: true });
+        // (Req 11) 移除 '▍'
+        placeholderContentRef.innerHTML = marked.parse(acc, { breaks: true, gfm: true });
         if (isFinal && window.hljs) {
+            // (Req 11) 移除 streaming class
+            placeholderContentRef.classList.remove('streaming');
             placeholderContentRef.querySelectorAll('pre code').forEach(block => {
                 try {
                     window.hljs.highlightElement(block);
@@ -638,6 +781,7 @@ async function sendQuestion() {
 
     if (!res.ok) {
         placeholderContentRef.textContent = '请求失败';
+        placeholderContentRef.classList.remove('streaming'); // (Req 11) 失败时移除
         toast('请求失败', 'danger');
         return;
     }
@@ -685,6 +829,7 @@ async function sendQuestion() {
         rerender(true);
     } catch (e) {
         console.error("Stream processing error:", e);
+        rerender(true); // (Req 11) 异常时也确保移除光标
         toast('连接中断', 'warning');
     }
 }
@@ -708,10 +853,29 @@ async function sendQuestion() {
             uploadSpan.style.justifyContent = 'center';
         }
 
+        // (Req 8) 更新模型按钮外观的辅助函数
+        function updateModelButtonLook(modelId, btnElement) {
+            const modelConf = MODELS[modelId] || {};
+            let iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;padding: 3px;">`;
+
+            if (modelId.includes('moonshotai')) {
+                btnElement.classList.add('moonshot-dark');
+                // Kimi图标在黑色背景上不需要白色padding背景
+                iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
+            } else {
+                btnElement.classList.remove('moonshot-dark');
+                // 其他模型图标可能需要白色背景
+                iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+            }
+            btnElement.innerHTML = iconHtml;
+        }
+
         // 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        modelBtn.innerHTML = `<img src="${MODELS[currentModelId].icon}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+        // (Req 8) 调用辅助函数设置初始外观
+        updateModelButtonLook(currentModelId, modelBtn);
+
         const tempBtn = document.createElement('button');
         tempBtn.className = 'btn tonal';
         tempBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>`;
@@ -736,6 +900,12 @@ async function sendQuestion() {
             actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
 
+        const paramSliderHtml = (label, value, max, step) => `
+            <div class="param-slider">
+                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
+                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
+            </div>`;
+
         // 弹窗逻辑
         function createPopover(btn, contentHtml, onOpen) {
             const pop = document.createElement('div');
@@ -745,11 +915,46 @@ async function sendQuestion() {
 
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+
+                // (Req 7) 移动端底部弹出
+                if (window.innerWidth <= 768 && (btn === tempBtn || btn === topPBtn)) {
+                    const sheet = document.createElement('sl-action-sheet');
+                    sheet.label = (btn === tempBtn) ? `Temperature: ${currentTemperature.toFixed(2)}` : `Top-P: ${currentTopP.toFixed(2)}`;
+                    sheet.innerHTML = paramSliderHtml(
+                        (btn === tempBtn) ? 'Temperature' : 'Top-P',
+                        (btn === tempBtn) ? currentTemperature : currentTopP,
+                        2, 0.05
+                    );
+                    document.body.appendChild(sheet);
+
+                    customElements.whenDefined('sl-action-sheet').then(() => {
+                        sheet.show();
+                        // 动作面板里的 slider 逻辑
+                        if (btn === tempBtn) {
+                            setupSlider(sheet, (val) => currentTemperature = val, btn, 'Temperature');
+                            // 同步更新标签
+                            sheet.querySelector('.param-range').addEventListener('input', (ev) => {
+                                sheet.label = `Temperature: ${parseFloat(ev.target.value).toFixed(2)}`;
+                            });
+                        } else {
+                            setupSlider(sheet, (val) => currentTopP = val, btn, 'Top-P');
+                            sheet.querySelector('.param-range').addEventListener('input', (ev) => {
+                                sheet.label = `Top-P: ${parseFloat(ev.target.value).toFixed(2)}`;
+                            });
+                        }
+
+                        sheet.addEventListener('sl-after-hide', () => sheet.remove());
+                    });
+                    return; // 移动端逻辑结束
+                }
+
+                // --- 桌面端 popover 逻辑 ---
                 const allPops = document.querySelectorAll('.toolbar-popover');
-                const wasOpen = pop.style.display === 'block';
+                // (Req 9) 改为检查 class
+                const wasOpen = pop.classList.contains('visible');
 
                 // 先隐藏所有弹窗
-                allPops.forEach(p => { p.style.display = 'none'; });
+                allPops.forEach(p => { p.classList.remove('visible'); }); // (Req 9)
 
                 // 如果当前弹窗不是打开状态，则显示它
                 if (!wasOpen) {
@@ -760,7 +965,7 @@ async function sendQuestion() {
                     pop.style.right = `${window.innerWidth - rect.right}px`;
                     pop.style.transform = ''; // 确保没有遗留的 transform
 
-                    pop.style.display = 'block';
+                    pop.classList.add('visible'); // (Req 9)
                     if (onOpen) onOpen(pop);
                 }
             });
@@ -773,11 +978,6 @@ async function sendQuestion() {
             </div>`).join('')}</div>`;
         const modelPop = createPopover(modelBtn, modelMenuHtml);
 
-        const paramSliderHtml = (label, value, max, step) => `
-            <div class="param-slider">
-                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
-                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
-            </div>`;
         const tempPop = createPopover(tempBtn, paramSliderHtml('Temperature', currentTemperature, 2, 0.05), (pop) => {
             pop.querySelector('.param-input').value = currentTemperature.toFixed(2);
             pop.querySelector('.param-range').value = currentTemperature;
@@ -794,10 +994,11 @@ async function sendQuestion() {
                 const modelConf = MODELS[currentModelId];
                 currentTemperature = modelConf.temp;
                 currentTopP = modelConf.top_p;
-                modelBtn.innerHTML = `<img src="${modelConf.icon}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+                // (Req 8) 调用辅助函数更新按钮
+                updateModelButtonLook(currentModelId, modelBtn);
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
-                modelPop.style.display = 'none';
+                modelPop.classList.remove('visible'); // (Req 9)
             });
         });
 
@@ -821,12 +1022,24 @@ async function sendQuestion() {
         setupSlider(topPPop, (val) => currentTopP = val, topPBtn, 'Top-P');
 
         document.addEventListener('click', () => {
-            document.querySelectorAll('.toolbar-popover').forEach(p => p.style.display = 'none');
+            // (Req 9) 改为 remove class
+            document.querySelectorAll('.toolbar-popover').forEach(p => p.classList.remove('visible'));
         });
 
         // 注入CSS
         const styles = `
-            .toolbar-popover { position: fixed; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; display: none; }
+            /* (Req 9) 设置菜单动画 */
+            .toolbar-popover { 
+                position: fixed; background: var(--panel); border: 1px solid var(--border); 
+                border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; 
+                visibility: hidden; opacity: 0; transform: scale(0.95) translateY(-10px);
+                transform-origin: top right;
+                transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+            }
+            .toolbar-popover.visible {
+                visibility: visible; opacity: 1; transform: scale(1) translateY(0);
+                transition: opacity .2s ease, transform .2s ease;
+            }
             .model-menu { display: flex; flex-direction: column; gap: 4px; }
             .model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
             .model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
@@ -836,6 +1049,8 @@ async function sendQuestion() {
             .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
             .param-range { width: 100%; accent-color: var(--accent); }
             .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+            /* (Req 7) 适配 Shoelace Action Sheet 内的 Slider */
+            sl-action-sheet .param-slider { padding: 16px; }
         `;
         const styleSheet = document.createElement("style");
         styleSheet.innerText = styles;
@@ -873,8 +1088,13 @@ if (sidebarVeil) {
     });
 }
 // 在窄屏导航到会话后自动关闭侧栏
-convsEl.addEventListener('click', () => {
-    if (window.innerWidth <= 960) {
+convsEl.addEventListener('click', (e) => {
+    // 确保点击的是 .conv 自身或其子元素，但不是菜单按钮
+    const convRow = e.target.closest('.conv');
+    const menuBtn = e.target.closest('.conv-menu');
+    const menuPop = e.target.closest('.conv-menu-pop');
+
+    if (convRow && !menuBtn && !menuPop && window.innerWidth <= 960) {
         appRoot?.classList.remove('sidebar-open');
     }
 });

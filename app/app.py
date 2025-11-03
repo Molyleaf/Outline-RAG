@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta  # 导入 timedelta
 
 import redis
 import requests
@@ -38,6 +38,8 @@ if config.OUTLINE_WEBHOOK_SIGN and not config.OUTLINE_WEBHOOK_SECRET:
 app.secret_key = config.SECRET_KEY
 app.config["JSON_AS_ASCII"] = False
 app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
+# (Req 2) 设置永久 Session 的生命周期为 7 天
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
 os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
 

@@ -62,7 +62,7 @@ def _get_jwks(jwks_uri):
         cached = redis_client.get(cache_key)
         if cached:
             return json.loads(cached)
-    
+
     try:
         session = _create_retry_session()
         resp = session.get(jwks_uri, timeout=10)
@@ -81,7 +81,7 @@ def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None)
         if not disc: raise ValueError("Could not fetch OIDC discovery document.")
         jwks = _get_jwks(disc["jwks_uri"])
         if not jwks: raise ValueError("Could not fetch JWKS.")
-        
+
         payload = jwt.decode(
             id_token, jwks, algorithms=["RS256"], audience=expected_aud,
             issuer=expected_iss, options={"require_exp": True}
@@ -113,7 +113,7 @@ def oidc_exchange_token(code, code_verifier):
         "client_id": config.GITLAB_CLIENT_ID, "client_secret": config.GITLAB_CLIENT_SECRET,
         "code_verifier": code_verifier,
     }
-    
+
     try:
         session = _create_retry_session()
         resp = session.post(disc["token_endpoint"], data=data, timeout=10)
@@ -145,7 +145,7 @@ def oidc_callback():
     token = oidc_exchange_token(code, session.get("code_verifier"))
     if not token or "id_token" not in token:
         return "Failed to exchange token", 400
-        
+
     try:
         idp = _verify_jwt_rs256(token["id_token"], config.GITLAB_URL, config.GITLAB_CLIENT_ID, state.split(".")[0])
     except ValueError as e:
@@ -160,6 +160,8 @@ def oidc_callback():
     avatar_url = idp.get("picture")
 
     session["user"] = {"id": user_id, "name": name, "avatar_url": avatar_url}
+    # (Req 2) 将 Session 标记为永久（使用 app.config 中设置的 7 天有效期）
+    session.permanent = True
 
     with engine.begin() as conn:
         conn.execute(text("""
