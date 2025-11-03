@@ -436,8 +436,8 @@ button { font: inherit; }
 
 /* 分组间距 */
 .msg + .msg { margin-top: 8px; }
-.msg.user + .msg.assistant,
-.msg.assistant + .msg.user { margin-top: 16px; }
+.msg.user + .msg.assistant { margin-top: 16px; }
+.msg.assistant + .msg.user { margin-top: 40px; }
 
 /* Markdown 展示 */
 .md-body {
