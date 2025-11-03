@@ -10,7 +10,11 @@ Outline-RAG 是一个基于 **检索增强生成 (Retrieval-Augmented Generation
 
 Outline-RAG is an application based on **Retrieval-Augmented Generation (RAG)** technology, designed specifically for the open-source knowledge base, Outline Wiki. It transforms all the documents and knowledge stored in your Outline instance into a conversational, intelligent knowledge base. Users can ask questions in natural language and receive accurate, reliable answers grounded in the content of their knowledge base.
 
-### 📦 Docker compose
+### Docker Hub: https://hub.docker.com/r/molyleaf/outline-rag
+
+### GitHub: https://github.com/molyleaf/outline-rag
+
+## 📦 Docker compose
 
 ```yaml
 # docker-compose.yml
@@ -168,7 +172,7 @@ networks:
     driver: bridge
 ```
 
-### 🛠️ 配置 Nginx
+## 🛠️ 配置 Nginx
 
 <!-- end list -->
 
