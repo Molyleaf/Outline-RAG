@@ -310,6 +310,17 @@ button { font: inherit; }
     overflow-y: scroll;
     padding: 24px 12%;
     padding-bottom: 160px;
+    /* (Req 2) 聊天区背景改为白色(light)或#131314(dark) */
+    background: var(--panel);
+}
+/* (Req 2) 深色模式适配 */
+:root[data-theme="dark"] .chat {
+    background: var(--bg); /* #131314 */
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] .chat {
+        background: var(--bg); /* #131314 */
+    }
 }
 @media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
 @media (max-width: 960px)  { .chat { padding-left: 16px; padding-right: 16px; } }
@@ -354,11 +365,28 @@ button { font: inherit; }
     max-width: 100%; /* (Req 2) 修复溢出 */
 }
 .msg.assistant {
-    grid-template-columns: 36px minmax(0,1fr);
+    /* grid-template-columns: 36px minmax(0,1fr); */
+
+    /* (Req 1, 3, 5) 新的 grid 布局 */
+    display: grid;
+    grid-template-columns: 30px 1fr; /* [Avatar] | [Meta] */
+    grid-template-rows: auto 1fr;    /* Header | Content */
+    grid-template-areas:
+        "avatar meta"
+        "content content";
+    row-gap: 8px; /* 头像/元数据 与 内容 之间的间距 */
+    column-gap: 12px; /* 头像与元数据之间的间距 */
+
+    /* (Req 3) AI 回复最大宽度并居中 */
+    max-width: 1280px;
+    margin-left: auto;
+    margin-right: auto;
 }
 .msg.assistant .bubble {
-    max-width: 95%;
+    max-width: 100%; /* (Req 3) 占满容器 */
     min-width: 0; /* (Req 1) 修复网格溢出 */
+    /* (Req 1, 3, 5) 将 .bubble-inner 和 .msg-meta 提升为 grid item */
+    display: contents;
 }
 .msg.user {
     grid-template-columns: minmax(0,1fr) 36px;
@@ -376,8 +404,15 @@ button { font: inherit; }
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
 }
+/* (Req 1, 5) 定位并缩小助手头像 */
+.msg.assistant .avatar {
+    grid-area: avatar;
+    width: 30px;
+    height: 30px;
+    align-self: center; /* (Req 1) 确保头像与元数据垂直居中 */
+}
 .msg .bubble-inner {
-    padding: 12px 16px;
+    padding: 12px; /* (Req 4) 用户气泡四边距统一 */
     border-radius: var(--radius-l);
     background: var(--bubble-assistant);
     color: var(--text);
@@ -394,8 +429,21 @@ button { font: inherit; }
     border: none; /* 用户气泡颜色足够区分，无需边框 */
 }
 .msg.assistant .bubble-inner {
-    background: var(--bubble-assistant);
+    /* (Req 3) 移除 AI 气泡样式并放置内容 */
+    grid-area: content;
+    background: transparent;
     border-top-left-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+}
+/* (Req 5) 定位并重设元数据样式 */
+.msg.assistant .bubble .msg-meta {
+    grid-area: meta;
+    align-self: center; /* 与头像垂直居中 */
+    font-size: 0.7rem; /* (Req 5) 进一步缩小字体 */
+    color: var(--muted);
+    margin-top: 0; /* 覆盖 script.js 注入的 margin-top: 8px */
 }
 
 /* 分组间距 */
