@@ -376,23 +376,18 @@ button { font: inherit; }
     display: contents;
 }
 .msg.user {
-    /* (Req 2) 移除头像列，改为单列 */
     grid-template-columns: minmax(0,1fr);
 }
 .msg.user .avatar {
-    /* (Req 2) 隐藏用户头像 */
     display: none;
 }
 .msg.user .bubble {
-    /* (Req 2) 移除 grid-column 属性 */
-    /* grid-column: 1; */
     justify-self: end;
     max-width: 95%;
     min-width: 0;
 }
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
-    /* (Req 1) 恢复消息头像的 cover 属性 */
     background-size: cover;
 }
 .msg.assistant .avatar {
@@ -400,7 +395,6 @@ button { font: inherit; }
     width: 30px;
     height: 30px;
     align-self: center;
-    /* (Req 1) 添加 padding 并设置 background-size 以显示 "稍大" 的白色背景 (在暗色模式下) */
     padding: 2px;
     box-sizing: border-box;
     background-size: 24px 24px;
@@ -474,18 +468,7 @@ button { font: inherit; }
 }
 .md-body pre code { background: transparent; padding: 0; }
 
-/* 移除闪烁光标
-@keyframes blink {
-    50% { opacity: 0; }
-}
-.md-body.streaming::after {
-    content: '▍';
-    display: inline-block;
-    animation: blink 1s step-end infinite;
-}
-*/
-
-/* 新增：Gemini 风格渐隐动画 */
+/* 渐隐动画 */
 @keyframes geminiFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -494,6 +477,57 @@ button { font: inherit; }
     display: inline;
     opacity: 0;
     animation: geminiFadeIn 0.5s ease forwards;
+}
+
+/* Markdown 表格样式 */
+.md-body table {
+    border-collapse: collapse;
+    margin: 1.2em auto; /* 居中并增加垂直间距 */
+    width: auto; /* 自动宽度 */
+    table-layout: auto; /* 自动列宽 */
+    border: 1px solid var(--border);
+    overflow: hidden; /* 配合圆角 */
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow-1);
+}
+.md-body th, .md-body td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+}
+.md-body th {
+    background: color-mix(in srgb, var(--panel) 65%, var(--bg));
+    font-weight: 600;
+}
+
+/* (新增) 修复：代码块深色模式 (Req 4) */
+:root[data-theme="dark"] .md-body code {
+    background: #2a2a2e; /* 一个明确的深色 */
+    color: #e0e0e0;
+}
+:root[data-theme="dark"] .md-body pre {
+    background: var(--panel); /* 匹配 panel */
+    border-color: var(--border);
+}
+:root[data-theme="dark"] .md-body pre code {
+    background: transparent;
+    color: inherit; /* 继承 pre 的颜色 */
+}
+
+/* (新增) 修复：代码块系统主题（暗色）(Req 4) */
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] .md-body code {
+        background: #2a2a2e;
+        color: #e0e0e0;
+    }
+    :root[data-theme="system"] .md-body pre {
+        background: var(--panel);
+        border-color: var(--border);
+    }
+    :root[data-theme="system"] .md-body pre code {
+        background: transparent;
+        color: inherit;
+    }
 }
 
 
