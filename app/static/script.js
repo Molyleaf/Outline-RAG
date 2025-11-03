@@ -7,7 +7,8 @@ const sendBtn = document.getElementById('send');
 const qEl = document.getElementById('q');
 const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
-const streamToggle = document.getElementById('streamToggle');
+// 修复 #1: 移除未使用的常量
+// const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
@@ -239,7 +240,7 @@ avatar.addEventListener('click', () => {
     document.documentElement.setAttribute('data-theme', (saved === 'light' || saved === 'dark') ? saved : 'system');
     applyActive();
     themeRadios.forEach(r => {
-        r.addEventListener('click', (e) => {
+        r.addEventListener('click', (e) => { // 'e' 在这里是无害的
             const t = r.dataset.theme;
             localStorage.setItem('theme', t);
             document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'system');
@@ -904,16 +905,19 @@ async function sendQuestion() {
         // (Req 8) 更新模型按钮外观的辅助函数
         function updateModelButtonLook(modelId, btnElement) {
             const modelConf = MODELS[modelId] || {};
-            let iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;padding: 3px;">`;
+            // 修复 #5: 移除冗余的初始值
+            let iconHtml;
+            // 修复 #6: 添加 alt 属性
+            const altText = `alt="${modelConf.name || 'Model'}"`;
 
             if (modelId.includes('moonshotai')) {
                 btnElement.classList.add('moonshot-dark');
-                // Kimi图标在黑色背景上不需要白色padding背景
-                iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
+                // 修复 #6: 添加 alt 属性
+                iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
             } else {
                 btnElement.classList.remove('moonshot-dark');
-                // 其他模型图标可能需要白色背景
-                iconHtml = `<img src="${modelConf.icon || ''}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+                // 修复 #6: 添加 alt 属性
+                iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
             }
             btnElement.innerHTML = iconHtml;
         }
@@ -954,8 +958,9 @@ async function sendQuestion() {
                 <div class="mobile-sheet-label">模型</div>
                 <div class="model-menu mobile">
                     ${Object.entries(MODELS).map(([id, m]) =>
+            // 修复 #6: 添加 alt 属性
             `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
-                            <img src="${m.icon}"><span>${m.name}</span>
+                            <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
                         </div>`).join('')}
                 </div>
             </div>
@@ -970,7 +975,8 @@ async function sendQuestion() {
         `;
 
         // 弹窗逻辑
-        function createPopover(btn, contentHtml, onOpen, mobileContentHtml = null, mobileLabel = '') {
+        // 修复 #7, #8: 移除未使用的参数 mobileContentHtml 和 mobileLabel
+        function createPopover(btn, contentHtml, onOpen) {
             const pop = document.createElement('div');
             pop.className = 'toolbar-popover';
             pop.innerHTML = contentHtml;
@@ -984,7 +990,7 @@ async function sendQuestion() {
 
                     // 统一使用模型按钮的弹窗
                     const fullMobileHtml = mobileModelMenuHtml();
-                    showMobileSheet(fullMobileHtml, '模型设置');
+                    showMobileSheet(fullMobileHtml, '模型设置'); // 硬编码 "模型设置"
 
                     // --- (Req 1) 动态绑定所有事件 ---
 
@@ -1058,8 +1064,9 @@ async function sendQuestion() {
         // (修复 #2) 此处调用 paramSliderHtml 现在是安全的
         const desktopModelMenuHtml = `
             <div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
+            // 修复 #6: 添加 alt 属性
             `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
-                    <img src="${m.icon}"><span>${m.name}</span>
+                    <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
                 </div>`).join('')}
             </div>
             <div class="popover-divider"></div>
@@ -1073,6 +1080,7 @@ async function sendQuestion() {
         topPBtn.style.display = 'none';
 
         // (Req 1) 修改 createPopover 调用
+        // 修复 #7, #8: 移除未使用的参数
         const modelPop = createPopover(modelBtn, desktopModelMenuHtml, (pop) => {
             // 确保打开时滑块状态同步
             // 修复 #1: 使用 querySelectorAll 和索引
