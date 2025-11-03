@@ -607,6 +607,14 @@ function appendMsg(role, text, metadata = {}) {
     if (role === 'assistant') {
         const avatarUrl = getAvatarUrlForModel(metadata.model);
         avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+
+        // (Req 1) Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
+        if (metadata.model && metadata.model.includes('moonshotai')) {
+            avatarEl.style.backgroundColor = 'black';
+        } else {
+            // 默认为白色，以确保在暗色模式下也可见 (覆盖CSS)
+            avatarEl.style.backgroundColor = 'white';
+        }
     } else {
         avatarEl.style.display = 'none';
     }
@@ -853,6 +861,12 @@ async function sendQuestion() {
                             const avatarEl = placeholderDiv.querySelector('.avatar');
                             if (avatarEl) {
                                 avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+
+                                if (j.model.includes('moonshotai')) {
+                                    avatarEl.style.backgroundColor = 'black';
+                                } else {
+                                    avatarEl.style.backgroundColor = 'white';
+                                }
                             }
                             modelDetected = true;
                         }
@@ -1164,127 +1178,6 @@ async function sendQuestion() {
             // (Req 9) 改为 remove class
             document.querySelectorAll('.toolbar-popover').forEach(p => p.classList.remove('visible'));
         });
-
-        // (Req 1) 注入新 CSS
-        const styles = `
-            /* (Req 9) 设置菜单动画 */
-            .toolbar-popover { 
-                position: fixed; background: var(--panel); border: 1px solid var(--border); 
-                border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; 
-                visibility: hidden; opacity: 0; transform: scale(0.95) translateY(-10px);
-                transform-origin: top right;
-                transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
-            }
-            .toolbar-popover.visible {
-                visibility: visible; opacity: 1; transform: scale(1) translateY(0);
-                transition: opacity .2s ease, transform .2s ease;
-            }
-            .model-menu { display: flex; flex-direction: column; gap: 4px; }
-            .model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
-            .model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
-            .model-item.active { 
-                background: color-mix(in srgb, var(--accent) 15%, var(--panel));
-                color: var(--accent);
-                font-weight: 600;
-            }
-            .model-item img { width: 24px; height: 24px; border-radius: 4px; }
-            .param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
-            .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
-            .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
-            .param-range { width: 100%; accent-color: var(--accent); }
-            /* .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; } */
-            
-            .popover-divider { height: 1px; background: var(--border); margin: 8px 0; }
-
-            /* --- (Req 1, 4) 自定义移动端弹窗样式 --- */
-            .mobile-sheet-overlay {
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,.35);
-                opacity: 0;
-                visibility: hidden;
-                transition: opacity .3s ease, visibility 0s .3s;
-                z-index: 100;
-            }
-            .mobile-sheet-overlay.visible {
-                opacity: 1;
-                visibility: visible;
-                transition: opacity .3s ease;
-            }
-            .mobile-sheet-panel {
-                position: fixed;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: var(--panel);
-                border-top: 1px solid var(--border);
-                border-radius: var(--radius-l) var(--radius-l) 0 0;
-                box-shadow: var(--shadow-2);
-                z-index: 101;
-                transform: translateY(100%);
-                transition: transform .3s ease;
-                max-height: 70vh;
-                display: flex;
-                flex-direction: column;
-            }
-            .mobile-sheet-panel.visible {
-                transform: translateY(0);
-            }
-            .mobile-sheet-header {
-                font-size: 14px;
-                font-weight: 600;
-                color: var(--muted);
-                padding: 16px 20px 12px;
-                border-bottom: 1px solid var(--border);
-                text-align: center;
-            }
-            .mobile-sheet-content {
-                overflow-y: auto;
-                padding: 8px;
-            }
-            .mobile-menu-item {
-                padding: 14px 20px;
-                font-size: 16px;
-                cursor: pointer;
-                border-radius: var(--radius-s);
-            }
-            .mobile-menu-item:hover {
-                background: color-mix(in srgb, var(--panel) 70%, var(--bg));
-            }
-            .mobile-menu-item.danger {
-                color: var(--sl-color-danger-600);
-            }
-            .mobile-sheet-group {
-                padding: 8px;
-                border-bottom: 1px solid var(--border);
-            }
-            .mobile-sheet-group:last-child {
-                border-bottom: none;
-            }
-            .mobile-sheet-label {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--muted);
-                padding: 8px 8px 4px;
-            }
-            .model-menu.mobile {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 8px;
-            }
-            /* 修复 #3: 移动端模型菜单样式 */
-            .model-menu.mobile .model-item {
-                padding: 8px;
-                flex-direction: row; /* 改为 row */
-                align-items: center; /* 垂直居中 */
-                gap: 8px; /* 增加间距 */
-            }
-            .model-menu.mobile .model-item img { width: 32px; height: 32px; }
-            .model-menu.mobile .model-item span { font-size: 14px; }
-        `;
-        const styleSheet = document.createElement("style");
-        styleSheet.innerText = styles;
-        document.head.appendChild(styleSheet);
     }
 
     setupTopbarActions();

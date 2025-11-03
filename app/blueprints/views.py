@@ -52,11 +52,11 @@ def chat_page_with_guid(conv_guid: str):
         return resp
     return chat_page()
 
-@views_bp.route("/static/style.css")
+@views_bp.route("/static/style.min.css")
 def chat_static_style():
-    return _serve_static_with_cache("style.css", "text/css", 3600)
+    return _serve_static_with_cache("style.min.css", "text/css", 3600)
 
-@views_bp.route("/static/script.js")
+@views_bp.route("/static/script.min.js")
 def chat_static_script():
     return _serve_static_with_cache("script.min.js", "application/javascript")
 
