@@ -123,7 +123,7 @@ button { font: inherit; }
     border-radius: 10px;
     cursor: pointer;
     color: var(--text);
-    font-size: 15px; /* (Req 4) 增大字号 */
+    font-size: 16px; /* (Req 4) 增大字号 */
 }
 .conv:hover { background: color-mix(in srgb, var(--panel) 60%, var(--bg)); }
 .conv.active { background: color-mix(in srgb, var(--panel) 75%, var(--bg)); }
@@ -410,7 +410,7 @@ button { font: inherit; }
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
-    font-size: 15px; /* (Req 4) 增大字号 */
+    font-size: 16px; /* (Req 4) 增大字号 */
 }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
 .md-body p { margin: .6em 0; }
@@ -555,18 +555,15 @@ sl-dialog::part(panel) {
     /* (Req 1) 移除固定定位，使其浮动居中 */
     max-width: 600px; /* 仍然给一个最大宽度 */
     width: calc(100vw - 48px); /* 移动端友好 */
+    /* (Req 1) 移除原有的 margin */
+    margin: 0;
 }
 @media (max-width: 960px) {
     sl-dialog::part(panel) {
-        /* (Req 1) 移除固定定位 */
-        /* margin-left: 16px; (移除) */
-        /* margin-right: 16px; (移除) */
-        /* width: auto; (移除) */
-        /* max-width: 100%; (移除) */
-
-        /* (Req 1) 使用与上方一致的宽度定义 */
+        /* (Req 1) 移除固定边距，使其在移动端也能居中 */
         width: calc(100vw - 48px);
         max-width: 600px;
+        margin: 0;
     }
 }
 
