@@ -58,7 +58,7 @@ def chat_static_style():
 
 @views_bp.route("/static/script.js")
 def chat_static_script():
-    return _serve_static_with_cache("script.js", "application/javascript")
+    return _serve_static_with_cache("script.min.js", "application/javascript")
 
 @views_bp.route("/static/img/DeepSeek.svg")
 def chat_static_deepseek_svg():

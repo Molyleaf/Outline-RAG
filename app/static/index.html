@@ -88,11 +88,11 @@
 </div>
 
 <!-- (Req 1) 添加 defer -->
-<script src="static/script.js" defer></script>
+<script src="static/script.min.js" defer></script>
 <script>
     (function(){
         // toast 函数此时可能未定义，但 index.html 原始代码就是这样
-        // 理想情况下，这个 script 应该在 script.js 加载 *之后* 或依赖 DOMContentLoaded
+        // 理想情况下，这个 script 应该在 script.min.js 加载 *之后* 或依赖 DOMContentLoaded
         // 但我们保持原始逻辑不变
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
         if (m) {

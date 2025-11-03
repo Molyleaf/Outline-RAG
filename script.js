@@ -7,7 +7,6 @@ const sendBtn = document.getElementById('send');
 const qEl = document.getElementById('q');
 const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
-// 修复 #1: 移除未使用的常量
 // const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
@@ -195,7 +194,7 @@ function renderMarkdown(md) {
         return pre;
     }
 
-    // 修复 #2: 检查 marked.parse (来自 marked.min.js) 或 marked.default.parse (来自 esm 模块的 default export)
+    // 检查 marked.parse (来自 marked.min.js) 或 marked.default.parse (来自 esm 模块的 default export)
     const parse = window.marked.parse || window.marked.default?.parse;
 
     if (typeof parse !== 'function') {
@@ -319,7 +318,7 @@ fileInput.addEventListener('change', async (e) => {
     e.target.value = '';
 });
 
-// 4. 修复重命名与删除（确保请求头与响应判定更稳健）
+// 重命名与删除（确保请求头与响应判定更稳健）
 async function api(path, opts) {
     const init = { credentials: 'include', ...(opts || {}) };
     init.headers = { 'Content-Type': 'application/json', ...(opts && opts.headers || {}) };
@@ -372,7 +371,7 @@ async function loadConvs() {
         const row = document.createElement('div');
         row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
         row.tabIndex = 0;
-        // (修复 #3) 为 pjax popstate 同步高亮添加 data-id
+        // 为 pjax popstate 同步高亮添加 data-id
         row.dataset.id = c.id;
         const titleEl = document.createElement('span');
         titleEl.className = 'conv-title';
@@ -711,10 +710,10 @@ window.addEventListener('popstate', () => {
     currentConvId = m ? m[1] : null;
     chatEl.innerHTML = '';
 
-    // (Req 3) 更新侧边栏高亮
+    // 更新侧边栏高亮
     document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
     if (currentConvId) {
-        // (修复 #3) 使用 data-id 选择器
+        // 使用 data-id 选择器
         const activeRow = Array.from(convsEl.querySelectorAll('.conv')).find(r => r.dataset.id === currentConvId);
         if (activeRow) activeRow.classList.add('active');
     }
@@ -786,8 +785,6 @@ async function sendQuestion() {
     let acc = '';
 
     const rerender = (isFinal = false) => {
-        // (Req 11) 移除 '▍'
-        // 修复 #2: 确保 parse 函数被正确找到
         const parse = window.marked.parse || window.marked.default?.parse;
         if (parse) {
             placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
@@ -883,7 +880,7 @@ async function sendQuestion() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;
 
-        // 修复 #2: 将 paramSliderHtml 移到 setupTopbarActions 顶部
+        // 将 paramSliderHtml 移到 setupTopbarActions 顶部
         const paramSliderHtml = (label, value, max, step) => `
             <div class="param-slider">
                 <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
