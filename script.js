@@ -16,7 +16,7 @@ let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 // 主题菜单项（系统/浅色/深色）
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
-// --- (Req 1) 新增：自定义移动端底部弹窗 ---
+// --- 自定义移动端底部弹窗 ---
 const mobileSheetOverlay = document.createElement('div');
 mobileSheetOverlay.className = 'mobile-sheet-overlay';
 const mobileSheetPanel = document.createElement('div');
@@ -28,7 +28,7 @@ mobileSheetContent.className = 'mobile-sheet-content';
 mobileSheetPanel.append(mobileSheetHeader, mobileSheetContent);
 document.body.append(mobileSheetOverlay, mobileSheetPanel);
 
-/** (Req 1) 显示自定义底部弹窗 */
+/** 显示自定义底部弹窗 */
 function showMobileSheet(contentHtml, label = '') {
     mobileSheetHeader.textContent = label;
     mobileSheetHeader.style.display = label ? 'block' : 'none';
@@ -36,14 +36,14 @@ function showMobileSheet(contentHtml, label = '') {
     mobileSheetOverlay.classList.add('visible');
     mobileSheetPanel.classList.add('visible');
 }
-/** (Req 1) 隐藏自定义底部弹窗 */
+/** 隐藏自定义底部弹窗 */
 function hideMobileSheet() {
     mobileSheetOverlay.classList.remove('visible');
     mobileSheetPanel.classList.remove('visible');
 }
-// (Req 3) 点击遮罩关闭
+// 点击遮罩关闭
 mobileSheetOverlay.addEventListener('click', hideMobileSheet);
-// --- 结束 (Req 1) ---
+// --- 结束 自定义移动端底部弹窗 ---
 
 
 // --- 新增：模型定义与状态管理 ---
@@ -223,8 +223,32 @@ function animateIn(el) {
     });
 }
 
+/**
+ * 辅助函数：将原始文本块作为 fade-in 动画 <span> 附加到容器
+ */
+function appendFadeInChunk(chunk, container) {
+    if (!chunk || !container) return;
+
+    const span = document.createElement('span');
+    span.className = 'fade-in-chunk';
+
+    // 将 \n 转换回 <br> 以在流式传输时保持换行
+    const fragments = chunk.split('\n');
+    fragments.forEach((fragment, index) => {
+        span.appendChild(document.createTextNode(fragment));
+        if (index < fragments.length - 1) {
+            span.appendChild(document.createElement('br'));
+        }
+    });
+
+    container.appendChild(span);
+    // 始终滚动到底部
+    chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+
 avatar.addEventListener('click', () => {
-    // (Req 9) 改为 toggle class
+    // 使用 toggle class 切换
     menu.classList.toggle('visible');
 });
 // 初始化主题菜单选中态 + 点击切换保存
@@ -245,7 +269,7 @@ avatar.addEventListener('click', () => {
             document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'system');
             applyActive();
             toast(`已切换为${t === 'system' ? '系统' : t === 'light' ? '浅色' : '深色'}主题`, 'success', 1800);
-            // (Req 9) 改为 remove class
+            // 点击后关闭菜单
             menu.classList.remove('visible');
         });
     });
@@ -276,7 +300,7 @@ avatar.addEventListener('click', () => {
 })();
 
 document.addEventListener('click', (e) => {
-    // (Req 9) 改为 remove class
+    // 点击菜单外区域关闭
     if (!avatar.contains(e.target) && !menu.contains(e.target)) menu.classList.remove('visible');
 });
 refreshAll.addEventListener('click', async (e) => {
@@ -388,7 +412,7 @@ async function loadConvs() {
         const del = document.createElement('div');
         del.textContent = '删除';
 
-        // (Req 3) 修改点击逻辑为 PJAX
+        // 修改点击逻辑为 PJAX (History API)
         row.addEventListener('click', (e) => {
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
 
@@ -424,14 +448,14 @@ async function loadConvs() {
 
         menuBtn.onclick = (e) => {
             e.stopPropagation();
-            // (Req 5, 9) 改为 toggle class
+            // 使用 toggle class 切换
             rowMenu.classList.toggle('visible');
         };
 
         rename.onclick = async (e) => {
             e.stopPropagation();
             const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
-            // (Req 5, 9) 改为 remove class
+            // 操作后关闭菜单
             if (val == null) { rowMenu.classList.remove('visible'); return; }
             const t = val.trim();
             if (!t) { toast('标题不能为空', 'warning'); return; }
@@ -447,13 +471,13 @@ async function loadConvs() {
             } else {
                 toast(res?.error || '重命名失败', 'danger');
             }
-            // (Req 5, 9) 改为 remove class
+            // 操作后关闭菜单
             rowMenu.classList.remove('visible');
         };
         del.onclick = async (e) => {
             e.stopPropagation();
             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
-            // (Req 5, 9) 改为 remove class
+            // 操作后关闭菜单
             if (!ok) { rowMenu.classList.remove('visible'); return; }
             // 改为使用 POST /chat/api/conversations/<id>/delete
             const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
@@ -471,7 +495,7 @@ async function loadConvs() {
             } else {
                 toast(res?.error || '删除失败', 'danger');
             }
-            // (Req 5, 9) 改为 remove class
+            // 操作后关闭菜单
             rowMenu.classList.remove('visible');
         };
 
@@ -485,7 +509,7 @@ async function loadConvs() {
                 pops.forEach(pop => {
                     const parent = pop.parentElement;
                     const btn = parent?.querySelector('.conv-menu');
-                    // (Req 5, 9) 改为检查 class 和 remove class
+                    // 检查 class 并移除
                     if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
                         pop.classList.remove('visible');
                     }
@@ -498,7 +522,7 @@ async function loadConvs() {
         row.appendChild(menuBtn);
         row.appendChild(rowMenu);
 
-        // --- (Req 6) 移动端长按支持 ---
+        // --- 移动端长按支持 ---
         let touchTimer = null;
         row.addEventListener('touchstart', (e) => {
             // 只在移动端（窄屏）且菜单按钮不可见时触发
@@ -509,7 +533,7 @@ async function loadConvs() {
                 // 确保 e.preventDefault() 只在定时器触发时调用，以允许默认的滚动
                 e.preventDefault(); // 阻止后续的 click 和滚动
 
-                // --- (Req 1) 替换 sl-action-sheet ---
+                // --- 使用自定义底部弹窗 ---
                 const menuHtml = `
                     <div class="mobile-menu-item" data-action="rename">重命名</div>
                     <div class="mobile-menu-item danger" data-action="delete">删除对话</div>
@@ -533,7 +557,7 @@ async function loadConvs() {
                         del.onclick(new Event('click', { bubbles: false }));
                     };
                 }
-                // --- 结束 (Req 1) 替换 ---
+                // --- 结束 移动端菜单 ---
 
             }, 500); // 500ms 长按
         }, { passive: false }); // 需要 ability to preventDefault
@@ -544,7 +568,7 @@ async function loadConvs() {
         };
         row.addEventListener('touchend', clearLongPress);
         row.addEventListener('touchmove', clearLongPress);
-        // --- 结束 (Req 6) ---
+        // --- 结束 移动端长按支持 ---
 
         convsEl.appendChild(row);
         animateIn(row);
@@ -553,7 +577,7 @@ async function loadConvs() {
 
 async function loadMessages() {
     chatEl.innerHTML = '';
-    // (Req 3) 确保问候语被移除
+    // 确保问候语被移除
     document.getElementById('greeting')?.remove();
 
     if (!currentConvId) {
@@ -608,7 +632,7 @@ function appendMsg(role, text, metadata = {}) {
         const avatarUrl = getAvatarUrlForModel(metadata.model);
         avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
 
-        // (Req 1) Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
+        // Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
         if (metadata.model && metadata.model.includes('moonshotai')) {
             avatarEl.style.backgroundColor = 'black';
         } else {
@@ -647,8 +671,7 @@ function appendMsg(role, text, metadata = {}) {
     }
 
     if (role === 'user') {
-        /* (Req 2) 移除占位 div */
-        /* div.appendChild(document.createElement('div')); */
+        // (用户消息不需要占位 div)
         div.appendChild(bubble);
     } else {
         div.appendChild(avatarEl);
@@ -703,7 +726,7 @@ newConvBtn.addEventListener('click', async (e) => {
     // 使用 History API 保持在 /chat
     try { history.pushState(null, '', '/chat'); } catch (_) { location.href = '/chat'; return; }
 
-    // (Req 3) 更新侧边栏高亮
+    // 更新侧边栏高亮
     document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
 
     // 窄屏下新建完成后自动关闭侧边栏
@@ -773,78 +796,61 @@ async function sendQuestion() {
     appendMsg('user', text);
     qEl.value = '';
 
+    // --- 启动流式响应 ---
+
     const placeholderDiv = appendMsg('assistant', '', {
         model: currentModelId,
         temperature: currentTemperature,
         top_p: currentTopP
     });
-    let placeholderContentRef = placeholderDiv.querySelector('.md-body');
-    if (!placeholderContentRef) {
+
+    // 1. 获取 .md-body 作为主容器
+    let messageContainer = placeholderDiv.querySelector('.md-body');
+    if (!messageContainer) {
         const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv.querySelector('.bubble') || placeholderDiv;
         const newBody = document.createElement('div');
         newBody.className = 'md-body';
         bubbleInner.appendChild(newBody);
-        placeholderContentRef = newBody;
+        messageContainer = newBody;
     }
-    // (Req 11) 初始为空，并添加 streaming class
-    placeholderContentRef.innerHTML = '';
-    placeholderContentRef.classList.add('streaming');
+    messageContainer.innerHTML = ''; // 清空（appendMsg 可能会创建带空 <p> 的）
+    messageContainer.classList.add('streaming');
 
-    let acc = '';
+    // 2. 定义变量
+    let currentStreamingDiv = document.createElement('div'); // 第一个用于流式输出的 div
+    messageContainer.appendChild(currentStreamingDiv);
 
-    // --- (重写) rerender 函数 ---
-    // 接收 (chunk, isFinal)
-    // isFinal = true: 使用 'acc' 变量通过 marked.parse 渲染最终 Markdown
-    // isFinal = false: 仅将 'chunk' 作为带动画的文本节点追加
-    const rerender = (chunk, isFinal = false) => {
+    let currentStreamingBuffer = ''; // 用于当前 div 的原始 Markdown 累积
+    // 仅在 \n\n (一个或多个新行) 处触发渲染
+    const triggerRegex = /(\n\n+)/;
+    const parseFn = window.marked.parse || window.marked.default?.parse;
 
-        if (isFinal) {
-            // --- 最终渲染 ---
-            // 流结束。使用 'acc' 中累积的完整原始文本
-            // 并用 marked.parse 渲染最终的 HTML
-            placeholderContentRef.classList.remove('streaming');
-
-            const parse = window.marked.parse || window.marked.default?.parse;
-            if (parse) {
-                placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
-            } else {
-                placeholderContentRef.textContent = acc; // 回退
-            }
-
-            // 应用代码高亮
-            if (window.hljs) {
-                placeholderContentRef.querySelectorAll('pre code').forEach(block => {
-                    try {
-                        window.hljs.highlightElement(block);
-                    } catch (e) { console.error("Highlight.js error:", e); }
-                });
-            }
-
-        } else if (chunk) {
-            // --- 流式渲染 ---
-            // 正在流式传输。仅将新的 'chunk' 文本
-            // 包裹在带动画的 <span> 中并追加
-
-            const span = document.createElement('span');
-            span.className = 'fade-in-chunk';
-
-            // 将 \n 转换回 <br> 以在流式传输时保持换行
-            const fragments = chunk.split('\n');
-            fragments.forEach((fragment, index) => {
-                span.appendChild(document.createTextNode(fragment));
-                if (index < fragments.length - 1) {
-                    span.appendChild(document.createElement('br'));
+    // 3. 定义一个在流结束时（或出错时）调用的最终化函数
+    const finalizeStream = () => {
+        messageContainer.classList.remove('streaming');
+        // 最终解析*最后*一个流式 div 的内容
+        if (parseFn && currentStreamingBuffer.trim() !== '') {
+            try {
+                const finalParsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
+                currentStreamingDiv.innerHTML = finalParsedHtml;
+                if (window.hljs) {
+                    currentStreamingDiv.querySelectorAll('pre code').forEach(block => {
+                        try { window.hljs.highlightElement(block); } catch(e){}
+                    });
                 }
-            });
-
-            placeholderContentRef.appendChild(span);
+            } catch(e) {
+                console.error("Final markdown parse error:", e);
+                currentStreamingDiv.textContent = currentStreamingBuffer; // 回退
+            }
+        } else if (currentStreamingBuffer.trim() === '') {
+            // 如果最后一个缓冲区为空，移除空的 div
+            currentStreamingDiv.remove();
         }
-
-        // 始终滚动到底部
-        chatEl.scrollTop = chatEl.scrollHeight;
     };
-    // --- (重写结束) ---
 
+    // 4. (rerender 函数已被移除)
+
+    // 5. fetch 和 SSE 处理循环
     const res = await fetch('/chat/api/ask', {
         method: 'POST',
         body: JSON.stringify({
@@ -859,8 +865,8 @@ async function sendQuestion() {
     });
 
     if (!res.ok) {
-        placeholderContentRef.textContent = '请求失败';
-        placeholderContentRef.classList.remove('streaming'); // (Req 11) 失败时移除
+        messageContainer.textContent = '请求失败'; // 替换
+        messageContainer.classList.remove('streaming');
         toast('请求失败', 'danger');
         return;
     }
@@ -882,7 +888,7 @@ async function sendQuestion() {
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        rerender(null, true); // (修改) 触发最终渲染
+                        finalizeStream(); // 调用最终化函数
                         return;
                     }
                     try {
@@ -902,22 +908,79 @@ async function sendQuestion() {
                             modelDetected = true;
                         }
 
+                        // --- 流式处理核心逻辑 ---
                         const delta = j.choices?.[0]?.delta?.content;
                         if (typeof delta === 'string' && delta.length > 0) {
-                            acc += delta; // 累积原始文本
-                            rerender(delta, false); // (修改) 传递 delta 进行流式追加
+
+                            // 使用一个小的回看缓冲区来检查跨 delta 的触发器
+                            const lookbehind = currentStreamingBuffer.slice(-5); // 5 字符回看
+                            const testBuffer = lookbehind + delta;
+                            const match = testBuffer.match(triggerRegex);
+
+                            if (match && parseFn) {
+                                // 触发器命中！
+                                // 确定触发器在 delta 中的开始位置
+                                const triggerStartInDelta = match.index - lookbehind.length;
+
+                                let textBeforeTrigger, triggerAndRest;
+
+                                if (triggerStartInDelta < 0) {
+                                    // 触发器在 lookbehind 中开始
+                                    // 整个 delta 都属于新块
+                                    textBeforeTrigger = "";
+                                    triggerAndRest = delta;
+                                } else {
+                                    // 触发器在 delta 内部开始
+                                    // 分割 delta
+                                    textBeforeTrigger = delta.substring(0, triggerStartInDelta);
+                                    triggerAndRest = delta.substring(triggerStartInDelta);
+                                }
+
+                                // A: 处理触发器之前的文本
+                                if (textBeforeTrigger) {
+                                    currentStreamingBuffer += textBeforeTrigger;
+                                    appendFadeInChunk(textBeforeTrigger, currentStreamingDiv);
+                                }
+
+                                // B: 解析当前 div 的*完整*缓冲区并替换其内容
+                                if (currentStreamingBuffer.trim() !== '') {
+                                    const parsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
+                                    currentStreamingDiv.innerHTML = parsedHtml;
+                                    if (window.hljs) currentStreamingDiv.querySelectorAll('pre code').forEach(block => {
+                                        try { window.hljs.highlightElement(block); } catch(e){}
+                                    });
+                                } else {
+                                    currentStreamingDiv.remove(); // 移除空的 div
+                                }
+
+                                // C: 创建一个新的 div 用于后续流式传输
+                                currentStreamingDiv = document.createElement('div');
+                                messageContainer.appendChild(currentStreamingDiv);
+
+                                // D: 使用触发器和剩余文本开始新的缓冲区
+                                currentStreamingBuffer = triggerAndRest;
+                                appendFadeInChunk(triggerAndRest, currentStreamingDiv);
+
+                            } else {
+                                // 没有命中触发器，继续在当前 div 中流式传输
+                                currentStreamingBuffer += delta;
+                                appendFadeInChunk(delta, currentStreamingDiv);
+                            }
                         }
+                        // --- 流式处理核心逻辑结束 ---
+
                     } catch {}
                 }
             }
         }
-        rerender(null, true); // (修改) 触发最终渲染（如果流在 [DONE] 之前结束）
+        finalizeStream(); // 处理流在 [DONE] 之前结束的情况
     } catch (e) {
         console.error("Stream processing error:", e);
-        rerender(null, true); // (修改) 异常时也触发最终渲染
+        finalizeStream(); // 异常时也尝试最终化
         toast('连接中断', 'warning');
     }
 }
+// --- 响应结束 ---
 
 (async function init() {
     // --- 适配新HTML：设置顶部操作栏 ---
@@ -945,21 +1008,17 @@ async function sendQuestion() {
             uploadSpan.style.justifyContent = 'center';
         }
 
-        // (Req 8) 更新模型按钮外观的辅助函数
+        // 更新模型按钮外观的辅助函数
         function updateModelButtonLook(modelId, btnElement) {
             const modelConf = MODELS[modelId] || {};
-            // 修复 #5: 移除冗余的初始值
             let iconHtml;
-            // 修复 #6: 添加 alt 属性
             const altText = `alt="${modelConf.name || 'Model'}"`;
 
             if (modelId.includes('moonshotai')) {
                 btnElement.classList.add('moonshot-dark');
-                // 修复 #6: 添加 alt 属性
                 iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
             } else {
                 btnElement.classList.remove('moonshot-dark');
-                // 修复 #6: 添加 alt 属性
                 iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
             }
             btnElement.innerHTML = iconHtml;
@@ -968,7 +1027,7 @@ async function sendQuestion() {
         // 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        // (Req 8) 调用辅助函数设置初始外观
+        // 调用辅助函数设置初始外观
         updateModelButtonLook(currentModelId, modelBtn);
 
         const tempBtn = document.createElement('button');
@@ -995,13 +1054,12 @@ async function sendQuestion() {
             actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
 
-        // (Req 1) 组合移动端模型菜单的 HTML
+        // 组合移动端模型菜单的 HTML
         const mobileModelMenuHtml = () => `
             <div class="mobile-sheet-group">
                 <div class="mobile-sheet-label">模型</div>
                 <div class="model-menu mobile">
                     ${Object.entries(MODELS).map(([id, m]) =>
-            // 修复 #6: 添加 alt 属性
             `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
                             <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
                         </div>`).join('')}
@@ -1016,7 +1074,6 @@ async function sendQuestion() {
         `;
 
         // 弹窗逻辑
-        // 修复 #7, #8: 移除未使用的参数 mobileContentHtml 和 mobileLabel
         function createPopover(btn, contentHtml, onOpen) {
             const pop = document.createElement('div');
             pop.className = 'toolbar-popover';
@@ -1026,14 +1083,14 @@ async function sendQuestion() {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
 
-                // (Req 1, 7) 替换为自定义移动端底部弹出
+                // 移动端使用自定义底部弹出
                 if (window.innerWidth <= 768 && (btn === tempBtn || btn === topPBtn || btn === modelBtn)) {
 
                     // 统一使用模型按钮的弹窗
                     const fullMobileHtml = mobileModelMenuHtml();
                     showMobileSheet(fullMobileHtml, '模型设置'); // 硬编码 "模型设置"
 
-                    // --- (Req 1) 动态绑定所有事件 ---
+                    // --- 动态绑定所有事件 ---
 
                     // 1. 绑定模型切换
                     mobileSheetContent.querySelectorAll('.model-item').forEach(item => {
@@ -1053,28 +1110,18 @@ async function sendQuestion() {
                     });
 
                     // 2. 绑定 Temp slider
-                    // 修复 #1: 使用更精确的选择器
                     const tempSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(2) .param-slider');
                     if (tempSliderBox) {
-                        /* (Req 4) 移除 labelEl */
-                        /* const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(2)'); */
                         setupSlider(tempSliderBox, (val) => {
                             currentTemperature = val;
-                            /* (Req 4) 移除 labelEl 更新 */
-                            /* if (labelEl) labelEl.textContent = \`Temperature: ${val.toFixed(2)}\`; */
                         }, tempBtn, 'Temperature');
                     }
 
                     // 3. 绑定 Top-P slider
-                    // 修复 #1: 使用更精确的选择器
                     const topPSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(3) .param-slider');
                     if (topPSliderBox) {
-                        /* (Req 4) 移除 labelEl */
-                        /* const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(3)'); */
                         setupSlider(topPSliderBox, (val) => {
                             currentTopP = val;
-                            /* (Req 4) 移除 labelEl 更新 */
-                            /* if (labelEl) labelEl.textContent = \`Top-P: ${val.toFixed(2)}\`; */
                         }, topPBtn, 'Top-P');
                     }
 
@@ -1083,11 +1130,11 @@ async function sendQuestion() {
 
                 // --- 桌面端 popover 逻辑 ---
                 const allPops = document.querySelectorAll('.toolbar-popover');
-                // (Req 9) 改为检查 class
+                // 检查 class
                 const wasOpen = pop.classList.contains('visible');
 
                 // 先隐藏所有弹窗
-                allPops.forEach(p => { p.classList.remove('visible'); }); // (Req 9)
+                allPops.forEach(p => { p.classList.remove('visible'); });
 
                 // 如果当前弹窗不是打开状态，则显示它
                 if (!wasOpen) {
@@ -1098,18 +1145,16 @@ async function sendQuestion() {
                     pop.style.right = `${window.innerWidth - rect.right}px`;
                     pop.style.transform = ''; // 确保没有遗留的 transform
 
-                    pop.classList.add('visible'); // (Req 9)
+                    pop.classList.add('visible'); // 使用 classList
                     if (onOpen) onOpen(pop);
                 }
             });
             return pop;
         }
 
-        // (Req 1) 合并桌面端弹窗内容
-        // (修复 #2) 此处调用 paramSliderHtml 现在是安全的
+        // 合并桌面端弹窗内容
         const desktopModelMenuHtml = `
             <div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
-            // 修复 #6: 添加 alt 属性
             `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
                     <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
                 </div>`).join('')}
@@ -1120,15 +1165,13 @@ async function sendQuestion() {
             ${paramSliderHtml('Top-P', currentTopP, 2, 0.05)}
         `;
 
-        // (Req 1) 移除独立的 Temp/TopP 按钮
+        // 移除独立的 Temp/TopP 按钮
         tempBtn.style.display = 'none';
         topPBtn.style.display = 'none';
 
-        // (Req 1) 修改 createPopover 调用
-        // 修复 #7, #8: 移除未使用的参数
+        // 修改 createPopover 调用
         const modelPop = createPopover(modelBtn, desktopModelMenuHtml, (pop) => {
             // 确保打开时滑块状态同步
-            // 修复 #1: 使用 querySelectorAll 和索引
             const sliders = pop.querySelectorAll('.param-slider');
             if (sliders.length >= 2) {
                 const tempInput = sliders[0].querySelector('.param-input');
@@ -1148,7 +1191,7 @@ async function sendQuestion() {
             });
         });
 
-        // (Req 1) 绑定桌面端模型切换
+        // 绑定桌面端模型切换
         modelPop.querySelectorAll('.model-item').forEach(item => {
             item.addEventListener('click', () => {
                 currentModelId = item.dataset.id;
@@ -1161,15 +1204,15 @@ async function sendQuestion() {
                 tempBtn.title = `Temperature: ${currentTemperature}`;
                 topPBtn.title = `Top-P: ${currentTopP}`;
 
-                // (Req 1) 更新 active 状态并关闭
+                // 更新 active 状态并关闭
                 modelPop.querySelectorAll('.model-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                modelPop.classList.remove('visible'); // (Req 9)
+                modelPop.classList.remove('visible'); // 使用 classList
             });
         });
 
         function setupSlider(pop, stateUpdater, btn, titlePrefix) {
-            // (修复 #2) 检查 pop 是否为 null
+            // 检查 pop 是否为 null
             if (!pop) {
                 console.error('setupSlider received null element. This might be a selector error.');
                 return;
@@ -1177,7 +1220,7 @@ async function sendQuestion() {
             const input = pop.querySelector('.param-input');
             const range = pop.querySelector('.param-range');
 
-            // (修复 #2) 检查 input 和 range 是否为 null
+            // 检查 input 和 range 是否为 null
             if (!input || !range) {
                 console.error('Slider input or range not found inside', pop);
                 return;
@@ -1196,8 +1239,7 @@ async function sendQuestion() {
             range.addEventListener('input', (e) => update(e.target.value));
         }
 
-        // (Req 1) 绑定桌面端 Slider
-        // 修复 #1: 使用 querySelectorAll 和索引
+        // 绑定桌面端 Slider
         const desktopSliders = modelPop.querySelectorAll('.param-slider');
         if (desktopSliders.length >= 2) {
             setupSlider(desktopSliders[0], (val) => currentTemperature = val, tempBtn, 'Temperature');
@@ -1206,7 +1248,7 @@ async function sendQuestion() {
 
 
         document.addEventListener('click', () => {
-            // (Req 9) 改为 remove class
+            // 使用 classList
             document.querySelectorAll('.toolbar-popover').forEach(p => p.classList.remove('visible'));
         });
     }
@@ -1228,7 +1270,7 @@ async function sendQuestion() {
     })();
 })();
 
-// 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
+// 移动端侧边栏开关逻辑
 if (hamburger) {
     hamburger.addEventListener('click', (e) => {
         e.preventDefault();
