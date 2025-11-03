@@ -474,6 +474,7 @@ button { font: inherit; }
 }
 .md-body pre code { background: transparent; padding: 0; }
 
+/* 移除闪烁光标
 @keyframes blink {
     50% { opacity: 0; }
 }
@@ -481,6 +482,18 @@ button { font: inherit; }
     content: '▍';
     display: inline-block;
     animation: blink 1s step-end infinite;
+}
+*/
+
+/* 新增：Gemini 风格渐隐动画 */
+@keyframes geminiFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.fade-in-chunk {
+    display: inline;
+    opacity: 0;
+    animation: geminiFadeIn 0.5s ease forwards;
 }
 
 

@@ -792,27 +792,58 @@ async function sendQuestion() {
 
     let acc = '';
 
-    const rerender = (isFinal = false) => {
-        const parse = window.marked.parse || window.marked.default?.parse;
-        if (parse) {
-            placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
-        } else {
-            placeholderContentRef.textContent = acc; // 回退
-        }
+    // --- (重写) rerender 函数 ---
+    // 接收 (chunk, isFinal)
+    // isFinal = true: 使用 'acc' 变量通过 marked.parse 渲染最终 Markdown
+    // isFinal = false: 仅将 'chunk' 作为带动画的文本节点追加
+    const rerender = (chunk, isFinal = false) => {
 
-        if (isFinal && window.hljs) {
-            // (Req 11) 移除 streaming class
+        if (isFinal) {
+            // --- 最终渲染 ---
+            // 流结束。使用 'acc' 中累积的完整原始文本
+            // 并用 marked.parse 渲染最终的 HTML
             placeholderContentRef.classList.remove('streaming');
-            placeholderContentRef.querySelectorAll('pre code').forEach(block => {
-                try {
-                    window.hljs.highlightElement(block);
-                } catch (e) {
-                    console.error("Highlight.js error:", e);
+
+            const parse = window.marked.parse || window.marked.default?.parse;
+            if (parse) {
+                placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
+            } else {
+                placeholderContentRef.textContent = acc; // 回退
+            }
+
+            // 应用代码高亮
+            if (window.hljs) {
+                placeholderContentRef.querySelectorAll('pre code').forEach(block => {
+                    try {
+                        window.hljs.highlightElement(block);
+                    } catch (e) { console.error("Highlight.js error:", e); }
+                });
+            }
+
+        } else if (chunk) {
+            // --- 流式渲染 ---
+            // 正在流式传输。仅将新的 'chunk' 文本
+            // 包裹在带动画的 <span> 中并追加
+
+            const span = document.createElement('span');
+            span.className = 'fade-in-chunk';
+
+            // 将 \n 转换回 <br> 以在流式传输时保持换行
+            const fragments = chunk.split('\n');
+            fragments.forEach((fragment, index) => {
+                span.appendChild(document.createTextNode(fragment));
+                if (index < fragments.length - 1) {
+                    span.appendChild(document.createElement('br'));
                 }
             });
+
+            placeholderContentRef.appendChild(span);
         }
+
+        // 始终滚动到底部
         chatEl.scrollTop = chatEl.scrollHeight;
     };
+    // --- (重写结束) ---
 
     const res = await fetch('/chat/api/ask', {
         method: 'POST',
@@ -851,7 +882,7 @@ async function sendQuestion() {
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        rerender(true);
+                        rerender(null, true); // (修改) 触发最终渲染
                         return;
                     }
                     try {
@@ -873,17 +904,17 @@ async function sendQuestion() {
 
                         const delta = j.choices?.[0]?.delta?.content;
                         if (typeof delta === 'string' && delta.length > 0) {
-                            acc += delta;
-                            rerender(false);
+                            acc += delta; // 累积原始文本
+                            rerender(delta, false); // (修改) 传递 delta 进行流式追加
                         }
                     } catch {}
                 }
             }
         }
-        rerender(true);
+        rerender(null, true); // (修改) 触发最终渲染（如果流在 [DONE] 之前结束）
     } catch (e) {
         console.error("Stream processing error:", e);
-        rerender(true); // (Req 11) 异常时也确保移除光标
+        rerender(null, true); // (修改) 异常时也触发最终渲染
         toast('连接中断', 'warning');
     }
 }
