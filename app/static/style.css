@@ -55,13 +55,16 @@
 
 /* 全局排版 */
 * { box-sizing: border-box; }
+html {
+    font-size: 16px; /* (Req 4) 增大字号 */
+}
 html, body { height: 100%; }
 html, body {
     margin: 0;
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: system-ui, -apple-system, sans-serif; /* (Req 4) 确认全局字体 */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     /* (Req 10) 增加全局行距 */
@@ -120,6 +123,7 @@ button { font: inherit; }
     border-radius: 10px;
     cursor: pointer;
     color: var(--text);
+    font-size: 15px; /* (Req 4) 增大字号 */
 }
 .conv:hover { background: color-mix(in srgb, var(--panel) 60%, var(--bg)); }
 .conv.active { background: color-mix(in srgb, var(--panel) 75%, var(--bg)); }
@@ -349,6 +353,7 @@ button { font: inherit; }
     display: grid;
     gap: 16px;
     align-items: flex-start;
+    max-width: 100%; /* (Req 2) 修复溢出 */
 }
 .msg.assistant {
     grid-template-columns: 36px minmax(0,1fr);
@@ -399,7 +404,14 @@ button { font: inherit; }
 
 /* Markdown 展示 */
 /* (Req 10) 增加 md-body 行距 */
-.md-body { line-height: 1.7; color: var(--text); white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.md-body {
+    line-height: 1.7;
+    color: var(--text);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: 15px; /* (Req 4) 增大字号 */
+}
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
 .md-body p { margin: .6em 0; }
 .md-body ul, .md-body ol { padding-left: 1.2em; margin: .4em 0; }
@@ -506,6 +518,10 @@ button { font: inherit; }
 :root[data-theme="dark"] sl-menu-item::part(base):hover { /* (Req 6) */
     background: color-mix(in srgb, var(--panel) 70%, var(--bg));
 }
+/* (Req 3) 移动端选单中选中项的样式 */
+:root[data-theme="dark"] sl-menu-item.sl-selected {
+    color: var(--accent);
+}
 
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] sl-dialog::part(panel),
@@ -524,23 +540,33 @@ button { font: inherit; }
     :root[data-theme="system"] sl-menu-item::part(base):hover { /* (Req 6) */
         background: color-mix(in srgb, var(--panel) 70%, var(--bg));
     }
+    /* (Req 3) 移动端选单中选中项的样式 */
+    :root[data-theme="system"] sl-menu-item.sl-selected {
+        color: var(--accent);
+    }
 }
 
 sl-dialog::part(overlay) {
-    justify-items: start;
-    align-items: start;
+    /* (Req 1) 弹窗居中 */
+    justify-items: center;
+    align-items: center;
 }
 sl-dialog::part(panel) {
-    margin-top: 80px; /* 56px topbar + 24px buffer */
-    margin-left: 304px; /* 280px sidebar + 24px buffer */
-    max-width: min(600px, calc(100vw - 320px));
+    /* (Req 1) 移除固定定位，使其浮动居中 */
+    max-width: 600px; /* 仍然给一个最大宽度 */
+    width: calc(100vw - 48px); /* 移动端友好 */
 }
 @media (max-width: 960px) {
     sl-dialog::part(panel) {
-        margin-left: 16px;
-        margin-right: 16px;
-        width: auto;
-        max-width: 100%;
+        /* (Req 1) 移除固定定位 */
+        /* margin-left: 16px; (移除) */
+        /* margin-right: 16px; (移除) */
+        /* width: auto; (移除) */
+        /* max-width: 100%; (移除) */
+
+        /* (Req 1) 使用与上方一致的宽度定义 */
+        width: calc(100vw - 48px);
+        max-width: 600px;
     }
 }
 
@@ -551,6 +577,14 @@ sl-action-sheet::part(base) {
 }
 sl-action-sheet::part(header) {
     border-bottom: 1px solid var(--border);
+}
+/* (Req 3) 移动端选单中选中项的样式 */
+sl-menu-item.sl-selected {
+    color: var(--accent);
+}
+sl-menu-item img,
+.model-item img {
+    width: 24px; height: 24px; border-radius: 4px; vertical-align: middle;
 }
 
 

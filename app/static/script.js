@@ -30,8 +30,9 @@ if (!MODELS[currentModelId]) { // 如果存储的模型ID无效，则重置
     currentModelId = Object.keys(MODELS)[0];
     localStorage.setItem('chat_model', currentModelId);
 }
-let currentTemperature = MODELS[currentModelId].temp;
-let currentTopP = MODELS[currentModelId].top_p;
+// (Req 3) 从 LocalStorage 或模型默认值加载T/P
+let currentTemperature = parseFloat(localStorage.getItem('chat_temp')) || MODELS[currentModelId].temp;
+let currentTopP = parseFloat(localStorage.getItem('chat_top_p')) || MODELS[currentModelId].top_p;
 
 
 // 根据模型名称返回头像 URL 的辅助函数 ---
@@ -835,7 +836,36 @@ async function sendQuestion() {
 }
 
 (async function init() {
-    // --- 适配新HTML：设置顶部操作栏 ---
+
+    // (Req 3) 抽离滑块 HTML 生成，增加 type 标识
+    const paramSliderHtml = (label, value, max, step, type) => `
+        <div class="param-slider" data-type="${type}">
+            <label><span>${label}</span><input type="number" class="param-input" value="${Number(value).toFixed(2)}" step="${step}" max="${max}"></label>
+            <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
+        </div>`;
+
+    // (Req 3) 修改 setupSlider，移除不再需要的 btn 和 titlePrefix，并增加保存
+    function setupSlider(container, stateUpdater, storageKey) {
+        const input = container.querySelector('.param-input');
+        const range = container.querySelector('.param-range');
+        if (!input || !range) return; // 防御
+
+        const update = (val) => {
+            const num = Math.min(Math.max(parseFloat(val), 0), 2); // 限制 0-2
+            if (!isNaN(num)) {
+                stateUpdater(num);
+                input.value = num.toFixed(2);
+                range.value = num;
+                if (storageKey) {
+                    localStorage.setItem(storageKey, num);
+                }
+            }
+        };
+        input.addEventListener('change', (e) => update(e.target.value)); // 'change' 优于 'input'
+        range.addEventListener('input', (e) => update(e.target.value));
+    }
+
+    // --- (Req 3) 适配新HTML：设置顶部操作栏 (重构) ---
     function setupTopbarActions() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;
@@ -843,7 +873,7 @@ async function sendQuestion() {
         const uploadLabel = actionsContainer.querySelector('label.upload');
         const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
         if (uploadSpan) {
-            uploadSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>`;
+            uploadSpan.innerHTML = `<svg xmlns="http://www.w.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>`;
             uploadSpan.style.width = '40px';
             uploadSpan.style.height = '40px';
             uploadSpan.style.borderRadius = '50%';
@@ -870,165 +900,147 @@ async function sendQuestion() {
             btnElement.innerHTML = iconHtml;
         }
 
-        // 创建新按钮和弹窗
+        // (Req 3) 创建 *唯一* 的模型与参数按钮
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        // (Req 8) 调用辅助函数设置初始外观
+        modelBtn.title = "模型与参数设置";
         updateModelButtonLook(currentModelId, modelBtn);
 
-        const tempBtn = document.createElement('button');
-        tempBtn.className = 'btn tonal';
-        tempBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>`;
-        tempBtn.title = `Temperature: ${currentTemperature}`;
+        modelBtn.style.width = '40px';
+        modelBtn.style.height = '40px';
+        modelBtn.style.borderRadius = '50%';
+        modelBtn.style.padding = '0';
 
-        const topPBtn = document.createElement('button');
-        topPBtn.className = 'btn tonal';
-        topPBtn.innerHTML = `<b>P</b>`;
-        topPBtn.title = `Top-P: ${currentTopP}`;
-
-        [modelBtn, tempBtn, topPBtn].forEach(btn => {
-            btn.style.width = '40px';
-            btn.style.height = '40px';
-            btn.style.borderRadius = '50%';
-            btn.style.padding = '0';
-        });
-
-        // 插入新按钮到上传按钮之前
+        // 插入按钮到上传按钮之前
         if (uploadLabel) {
             actionsContainer.insertBefore(modelBtn, uploadLabel);
-            actionsContainer.insertBefore(tempBtn, uploadLabel);
-            actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
 
-        const paramSliderHtml = (label, value, max, step) => `
-            <div class="param-slider">
-                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
-                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
-            </div>`;
+        // (Req 3) 桌面端弹窗
+        const pop = document.createElement('div');
+        pop.className = 'toolbar-popover';
+        document.body.appendChild(pop);
 
-        // 弹窗逻辑
-        function createPopover(btn, contentHtml, onOpen) {
-            const pop = document.createElement('div');
-            pop.className = 'toolbar-popover';
-            pop.innerHTML = contentHtml;
-            document.body.appendChild(pop);
+        function updateDesktopPopoverContent() {
+            pop.innerHTML = `
+                <div class="model-menu">
+                    ${Object.entries(MODELS).map(([id, m]) =>
+                `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
+                            <img src="${m.icon}"><span>${m.name}</span>
+                        </div>`).join('')}
+                    <div class="menu-divider"></div>
+                    ${paramSliderHtml('Temperature', currentTemperature, 2, 0.05, 'temp')}
+                    <div class="menu-divider"></div>
+                    ${paramSliderHtml('Top-P', currentTopP, 2, 0.05, 'topp')}
+                </div>`;
 
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            // 重新绑定模型点击
+            pop.querySelectorAll('.model-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    currentModelId = item.dataset.id;
+                    localStorage.setItem('chat_model', currentModelId);
 
-                // (Req 7) 移动端底部弹出
-                if (window.innerWidth <= 768 && (btn === tempBtn || btn === topPBtn)) {
-                    const sheet = document.createElement('sl-action-sheet');
-                    sheet.label = (btn === tempBtn) ? `Temperature: ${currentTemperature.toFixed(2)}` : `Top-P: ${currentTopP.toFixed(2)}`;
-                    sheet.innerHTML = paramSliderHtml(
-                        (btn === tempBtn) ? 'Temperature' : 'Top-P',
-                        (btn === tempBtn) ? currentTemperature : currentTopP,
-                        2, 0.05
-                    );
-                    document.body.appendChild(sheet);
+                    // (Req 3) 选择模型时，*仅*更新T/P为该模型的默认值
+                    const modelConf = MODELS[currentModelId];
+                    currentTemperature = modelConf.temp;
+                    currentTopP = modelConf.top_p;
+                    // (Req 3) 并更新LS
+                    localStorage.setItem('chat_temp', currentTemperature);
+                    localStorage.setItem('chat_top_p', currentTopP);
 
-                    customElements.whenDefined('sl-action-sheet').then(() => {
-                        sheet.show();
-                        // 动作面板里的 slider 逻辑
-                        if (btn === tempBtn) {
-                            setupSlider(sheet, (val) => currentTemperature = val, btn, 'Temperature');
-                            // 同步更新标签
-                            sheet.querySelector('.param-range').addEventListener('input', (ev) => {
-                                sheet.label = `Temperature: ${parseFloat(ev.target.value).toFixed(2)}`;
-                            });
-                        } else {
-                            setupSlider(sheet, (val) => currentTopP = val, btn, 'Top-P');
-                            sheet.querySelector('.param-range').addEventListener('input', (ev) => {
-                                sheet.label = `Top-P: ${parseFloat(ev.target.value).toFixed(2)}`;
-                            });
-                        }
+                    updateModelButtonLook(currentModelId, modelBtn);
+                    pop.classList.remove('visible'); // 关闭
+                    updateDesktopPopoverContent(); // 重绘以更新滑块值
+                });
+            });
 
-                        sheet.addEventListener('sl-after-hide', () => sheet.remove());
+            // 重新绑定滑块
+            setupSlider(pop.querySelector('[data-type="temp"]'), (val) => currentTemperature = val, 'chat_temp');
+            setupSlider(pop.querySelector('[data-type="topp"]'), (val) => currentTopP = val, 'chat_top_p');
+        }
+
+        updateDesktopPopoverContent(); // 初始填充
+
+        // (Req 3) 统一的按钮点击事件
+        modelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            // 移动端：使用 Action Sheet
+            if (window.innerWidth <= 768) {
+                const sheet = document.createElement('sl-action-sheet');
+                sheet.label = "模型与参数";
+                sheet.innerHTML = `
+                    ${Object.entries(MODELS).map(([id, m]) => `
+                        <sl-menu-item data-id="${id}" class="model-item-mobile ${id === currentModelId ? 'sl-selected' : ''}">
+                            <img src="${m.icon}" slot="prefix" style="background-color:white; padding: 1px;"> ${m.name}
+                        </sl-menu-item>
+                    `).join('')}
+                    <div class="menu-divider" style="margin: 8px 0;"></div>
+                    <div style="padding: 0 16px;">
+                        ${paramSliderHtml('Temperature', currentTemperature, 2, 0.05, 'temp')}
+                    </div>
+                    <div style="padding: 8px 16px 16px;">
+                        ${paramSliderHtml('Top-P', currentTopP, 2, 0.05, 'topp')}
+                    </div>
+                `;
+                document.body.appendChild(sheet);
+
+                customElements.whenDefined('sl-action-sheet').then(() => {
+                    sheet.show();
+
+                    // 绑定模型选择
+                    sheet.addEventListener('sl-select', (ev) => {
+                        const item = ev.detail.item;
+                        currentModelId = item.dataset.id;
+                        localStorage.setItem('chat_model', currentModelId);
+
+                        // (Req 3) 选择模型时，*仅*更新T/P为该模型的默认值
+                        const modelConf = MODELS[currentModelId];
+                        currentTemperature = modelConf.temp;
+                        currentTopP = modelConf.top_p;
+                        // (Req 3) 并更新LS
+                        localStorage.setItem('chat_temp', currentTemperature);
+                        localStorage.setItem('chat_top_p', currentTopP);
+
+                        updateModelButtonLook(currentModelId, modelBtn);
+                        sheet.hide(); // 选完自动关闭
                     });
-                    return; // 移动端逻辑结束
-                }
 
-                // --- 桌面端 popover 逻辑 ---
-                const allPops = document.querySelectorAll('.toolbar-popover');
-                // (Req 9) 改为检查 class
+                    // 绑定滑块
+                    setupSlider(sheet.querySelector('[data-type="temp"]'), (val) => currentTemperature = val, 'chat_temp');
+                    setupSlider(sheet.querySelector('[data-type="topp"]'), (val) => currentTopP = val, 'chat_top_p');
+
+                    sheet.addEventListener('sl-after-hide', () => sheet.remove());
+                });
+
+            } else {
+                // 桌面端：使用 Popover
                 const wasOpen = pop.classList.contains('visible');
 
-                // 先隐藏所有弹窗
-                allPops.forEach(p => { p.classList.remove('visible'); }); // (Req 9)
+                // 隐藏所有其他弹窗（如有）
+                document.querySelectorAll('.toolbar-popover.visible').forEach(p => p.classList.remove('visible'));
 
-                // 如果当前弹窗不是打开状态，则显示它
                 if (!wasOpen) {
-                    const rect = btn.getBoundingClientRect();
-                    // 定位在触发按钮的下方，并对齐右侧
+                    // (Req 3) 重绘内容以同步T/P值
+                    updateDesktopPopoverContent();
+                    const rect = modelBtn.getBoundingClientRect();
                     pop.style.top = rect.bottom + 8 + 'px';
                     pop.style.left = 'auto';
                     pop.style.right = `${window.innerWidth - rect.right}px`;
-                    pop.style.transform = ''; // 确保没有遗留的 transform
-
-                    pop.classList.add('visible'); // (Req 9)
-                    if (onOpen) onOpen(pop);
+                    pop.classList.add('visible');
                 }
-            });
-            return pop;
-        }
-
-        const modelMenuHtml = `<div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
-            `<div class="model-item" data-id="${id}">
-                <img src="${m.icon}"><span>${m.name}</span>
-            </div>`).join('')}</div>`;
-        const modelPop = createPopover(modelBtn, modelMenuHtml);
-
-        const tempPop = createPopover(tempBtn, paramSliderHtml('Temperature', currentTemperature, 2, 0.05), (pop) => {
-            pop.querySelector('.param-input').value = currentTemperature.toFixed(2);
-            pop.querySelector('.param-range').value = currentTemperature;
-        });
-        const topPPop = createPopover(topPBtn, paramSliderHtml('Top-P', currentTopP, 2, 0.05), (pop) => {
-            pop.querySelector('.param-input').value = currentTopP.toFixed(2);
-            pop.querySelector('.param-range').value = currentTopP;
+            }
         });
 
-        modelPop.querySelectorAll('.model-item').forEach(item => {
-            item.addEventListener('click', () => {
-                currentModelId = item.dataset.id;
-                localStorage.setItem('chat_model', currentModelId);
-                const modelConf = MODELS[currentModelId];
-                currentTemperature = modelConf.temp;
-                currentTopP = modelConf.top_p;
-                // (Req 8) 调用辅助函数更新按钮
-                updateModelButtonLook(currentModelId, modelBtn);
-                tempBtn.title = `Temperature: ${currentTemperature}`;
-                topPBtn.title = `Top-P: ${currentTopP}`;
-                modelPop.classList.remove('visible'); // (Req 9)
-            });
+        // 全局点击关闭
+        document.addEventListener('click', (e) => {
+            if (!pop.contains(e.target)) {
+                pop.classList.remove('visible');
+            }
         });
 
-        function setupSlider(pop, stateUpdater, btn, titlePrefix) {
-            const input = pop.querySelector('.param-input');
-            const range = pop.querySelector('.param-range');
-            const update = (val) => {
-                const num = parseFloat(val);
-                if (!isNaN(num)) {
-                    stateUpdater(num);
-                    input.value = num.toFixed(2);
-                    range.value = num;
-                    btn.title = `${titlePrefix}: ${num.toFixed(2)}`;
-                }
-            };
-            input.addEventListener('input', (e) => update(e.target.value));
-            range.addEventListener('input', (e) => update(e.target.value));
-        }
-
-        setupSlider(tempPop, (val) => currentTemperature = val, tempBtn, 'Temperature');
-        setupSlider(topPPop, (val) => currentTopP = val, topPBtn, 'Top-P');
-
-        document.addEventListener('click', () => {
-            // (Req 9) 改为 remove class
-            document.querySelectorAll('.toolbar-popover').forEach(p => p.classList.remove('visible'));
-        });
-
-        // 注入CSS
+        // (Req 3) 注入CSS
         const styles = `
-            /* (Req 9) 设置菜单动画 */
             .toolbar-popover { 
                 position: fixed; background: var(--panel); border: 1px solid var(--border); 
                 border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100; 
@@ -1043,14 +1055,17 @@ async function sendQuestion() {
             .model-menu { display: flex; flex-direction: column; gap: 4px; }
             .model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
             .model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+            .model-item.active { background: color-mix(in srgb, var(--panel) 75%, var(--bg)); font-weight: 600; }
             .model-item img { width: 24px; height: 24px; border-radius: 4px; }
             .param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
             .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
             .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
             .param-range { width: 100%; accent-color: var(--accent); }
             .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
-            /* (Req 7) 适配 Shoelace Action Sheet 内的 Slider */
-            sl-action-sheet .param-slider { padding: 16px; }
+            /* (Req 3) Action Sheet 内的样式 */
+            sl-action-sheet .param-slider { padding: 16px; width: auto; }
+            sl-action-sheet .menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
+            .model-menu .menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
         `;
         const styleSheet = document.createElement("style");
         styleSheet.innerText = styles;
@@ -1072,7 +1087,7 @@ async function sendQuestion() {
             try { await loadMessages(); } catch(_) {}
         }
     })();
-})();
+})(); // 立即执行的 init 函数结束
 
 // 3. 修复移动端点击按钮不打开侧边栏问题（显式注册开关与遮罩关闭）
 if (hamburger) {
