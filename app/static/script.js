@@ -640,7 +640,8 @@ function appendMsg(role, text, metadata = {}) {
     }
 
     if (role === 'user') {
-        div.appendChild(document.createElement('div')); // 占位
+        /* (Req 2) 移除占位 div */
+        /* div.appendChild(document.createElement('div')); */
         div.appendChild(bubble);
     } else {
         div.appendChild(avatarEl);
@@ -965,11 +966,9 @@ async function sendQuestion() {
                 </div>
             </div>
             <div class="mobile-sheet-group">
-                <div class="mobile-sheet-label">Temperature: ${currentTemperature.toFixed(2)}</div>
                 ${paramSliderHtml('Temperature', currentTemperature, 2, 0.05)}
             </div>
             <div class="mobile-sheet-group">
-                <div class="mobile-sheet-label">Top-P: ${currentTopP.toFixed(2)}</div>
                 ${paramSliderHtml('Top-P', currentTopP, 2, 0.05)}
             </div>
         `;
@@ -1015,10 +1014,12 @@ async function sendQuestion() {
                     // 修复 #1: 使用更精确的选择器
                     const tempSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(2) .param-slider');
                     if (tempSliderBox) {
-                        const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(2)'); // 第二个 label
+                        /* (Req 4) 移除 labelEl */
+                        /* const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(2)'); */
                         setupSlider(tempSliderBox, (val) => {
                             currentTemperature = val;
-                            if (labelEl) labelEl.textContent = `Temperature: ${val.toFixed(2)}`;
+                            /* (Req 4) 移除 labelEl 更新 */
+                            /* if (labelEl) labelEl.textContent = \`Temperature: ${val.toFixed(2)}\`; */
                         }, tempBtn, 'Temperature');
                     }
 
@@ -1026,10 +1027,12 @@ async function sendQuestion() {
                     // 修复 #1: 使用更精确的选择器
                     const topPSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(3) .param-slider');
                     if (topPSliderBox) {
-                        const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(3)'); // 第三个 label
+                        /* (Req 4) 移除 labelEl */
+                        /* const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(3)'); */
                         setupSlider(topPSliderBox, (val) => {
                             currentTopP = val;
-                            if (labelEl) labelEl.textContent = `Top-P: ${val.toFixed(2)}`;
+                            /* (Req 4) 移除 labelEl 更新 */
+                            /* if (labelEl) labelEl.textContent = \`Top-P: ${val.toFixed(2)}\`; */
                         }, topPBtn, 'Top-P');
                     }
 
@@ -1192,7 +1195,7 @@ async function sendQuestion() {
             .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
             .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
             .param-range { width: 100%; accent-color: var(--accent); }
-            .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+            /* .msg .bubble .msg-meta { font-size: 0.8rem; color: var(--muted); margin-top: 8px; } */
             
             .popover-divider { height: 1px; background: var(--border); margin: 8px 0; }
 
@@ -1328,4 +1331,3 @@ convsEl.addEventListener('click', (e) => {
         appRoot?.classList.remove('sidebar-open');
     }
 });
-

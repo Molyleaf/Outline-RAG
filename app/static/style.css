@@ -44,7 +44,7 @@
     --shadow-2: 0 8px 24px rgba(0,0,0,.6);
 }
 
-/* 为深色模式下的所有头像添加白色背景 */
+/* (Req 1) 为深色模式下的所有头像添加白色背景 (来自原始 style.css) */
 :root[data-theme="dark"] .avatar,
 :root[data-theme="system"] body .avatar {
     @media (prefers-color-scheme: dark) {
@@ -64,9 +64,8 @@ html, body {
     font-family: system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* (Req 10) 增加全局行距 */
     line-height: 1.5;
-    font-size: 16px; /* (Req 4) 基础字号 */
+    font-size: 16px;
 }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; }
@@ -121,24 +120,21 @@ button { font: inherit; }
     border-radius: 10px;
     cursor: pointer;
     color: var(--text);
-    font-size: 15px; /* (Req 4) 增大字号 */
+    font-size: 15px;
 }
 .conv:hover { background: color-mix(in srgb, var(--panel) 60%, var(--bg)); }
 .conv.active { background: color-mix(in srgb, var(--panel) 75%, var(--bg)); }
 .sidebar .conv { position: relative; }
-/* (Req 5) 按钮稍稍下移 */
 .sidebar .conv .conv-menu {
     visibility: hidden; border: none; background: transparent; cursor: pointer;
     font-size: 18px; padding: 2px 6px; color: var(--muted);
-    padding-top: 4px; /* 下移 */
+    padding-top: 4px;
 }
 .sidebar .conv:hover .conv-menu { visibility: visible; }
-/* (Req 5, 9) 弹出菜单动画 */
 .sidebar .conv .conv-menu-pop {
-    position: absolute; right: 6px; top: 35px; /* (Req 5) 略微下移 */
+    position: absolute; right: 6px; top: 35px;
     background: var(--bg); border: 1px solid var(--border);
     box-shadow: var(--shadow-2); z-index: 10; border-radius: var(--radius-s);
-    /* 动画属性 */
     visibility: hidden;
     opacity: 0;
     transform: scale(0.95) translate(-5px, -5px);
@@ -188,8 +184,6 @@ button { font: inherit; }
         opacity: 1;
         pointer-events: auto;
     }
-
-    /* (Req 6) 移动端隐藏三点按钮 */
     .sidebar .conv .conv-menu {
         display: none;
     }
@@ -241,11 +235,16 @@ button { font: inherit; }
 .avatar {
     width: 40px; height: 40px;
     border-radius: 50%;
-    background-size: cover; background-position: center;
+    /* (Req 1) background-size: cover; 移到下面更具体的规则中 */
+    background-position: center;
     cursor: pointer;
     box-shadow: var(--shadow-1);
 }
-/* (Req 9) 头像菜单动画 */
+/* (Req 1) 恢复右上角头像的 cover 属性 */
+#avatar.avatar {
+    background-size: cover;
+}
+
 .menu {
     position: absolute; right: 12px; top: 64px;
     background: var(--bg);
@@ -255,7 +254,6 @@ button { font: inherit; }
     border-radius: 12px;
     min-width: 220px;
     overflow: hidden;
-    /* 动画属性 */
     visibility: hidden;
     opacity: 0;
     transform: scale(0.95) translateY(-10px);
@@ -291,14 +289,12 @@ button { font: inherit; }
 .btn.tonal {
     background: color-mix(in srgb, var(--panel) 70%, var(--bg));
 }
-/* (Req 8) Moonshot 按钮黑色背景 */
 .btn.tonal.moonshot-dark {
     background-color: #000000;
 }
 .btn.tonal.moonshot-dark:hover {
     background-color: #222222;
 }
-/* (Req 8) Kimi 图标在黑色背景上不需要白底 */
 .btn.tonal.moonshot-dark img {
     background-color: transparent !important;
     padding: 0 !important;
@@ -310,16 +306,14 @@ button { font: inherit; }
     overflow-y: scroll;
     padding: 24px 12%;
     padding-bottom: 160px;
-    /* (Req 2) 聊天区背景改为白色(light)或#131314(dark) */
     background: var(--panel);
 }
-/* (Req 2) 深色模式适配 */
 :root[data-theme="dark"] .chat {
-    background: var(--bg); /* #131314 */
+    background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] .chat {
-        background: var(--bg); /* #131314 */
+        background: var(--bg);
     }
 }
 @media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
@@ -362,57 +356,60 @@ button { font: inherit; }
     display: grid;
     gap: 16px;
     align-items: flex-start;
-    max-width: 100%; /* (Req 2) 修复溢出 */
+    max-width: 100%;
 }
 .msg.assistant {
-    /* grid-template-columns: 36px minmax(0,1fr); */
-
-    /* (Req 1, 3, 5) 新的 grid 布局 */
     display: grid;
-    grid-template-columns: 30px 1fr; /* [Avatar] | [Meta] */
-    grid-template-rows: auto 1fr;    /* Header | Content */
+    grid-template-columns: 30px 1fr;
+    grid-template-rows: auto 1fr;
     grid-template-areas:
         "avatar meta"
         "content content";
-    row-gap: 8px; /* 头像/元数据 与 内容 之间的间距 */
-    column-gap: 12px; /* 头像与元数据之间的间距 */
-
-    /* (Req 3) AI 回复最大宽度并居中 */
+    row-gap: 8px;
+    column-gap: 12px;
     max-width: 1280px;
     margin-left: auto;
     margin-right: auto;
 }
 .msg.assistant .bubble {
-    max-width: 100%; /* (Req 3) 占满容器 */
-    min-width: 0; /* (Req 1) 修复网格溢出 */
-    /* (Req 1, 3, 5) 将 .bubble-inner 和 .msg-meta 提升为 grid item */
+    max-width: 100%;
+    min-width: 0;
     display: contents;
 }
 .msg.user {
-    grid-template-columns: minmax(0,1fr) 36px;
+    /* (Req 2) 移除头像列，改为单列 */
+    grid-template-columns: minmax(0,1fr);
 }
 .msg.user .avatar {
-    grid-column: 2;
+    /* (Req 2) 隐藏用户头像 */
+    display: none;
 }
 .msg.user .bubble {
-    grid-column: 1;
+    /* (Req 2) 移除 grid-column 属性 */
+    /* grid-column: 1; */
     justify-self: end;
-    /* (Req 4) 增加 max-width 使其与助手气泡对称 */
     max-width: 95%;
-    min-width: 0; /* (Req 1) 修复网格溢出 */
+    min-width: 0;
 }
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
+    /* (Req 1) 恢复消息头像的 cover 属性 */
+    background-size: cover;
 }
-/* (Req 1, 5) 定位并缩小助手头像 */
 .msg.assistant .avatar {
     grid-area: avatar;
     width: 30px;
     height: 30px;
-    align-self: center; /* (Req 1) 确保头像与元数据垂直居中 */
+    align-self: center;
+    /* (Req 1) 添加 padding 并设置 background-size 以显示 "稍大" 的白色背景 (在暗色模式下) */
+    padding: 2px;
+    box-sizing: border-box;
+    background-size: 24px 24px;
+    background-position: center;
+    background-repeat: no-repeat;
 }
 .msg .bubble-inner {
-    padding: 12px; /* (Req 4) 用户气泡四边距统一 */
+    padding: 8px 12px;
     border-radius: var(--radius-l);
     background: var(--bubble-assistant);
     color: var(--text);
@@ -420,16 +417,15 @@ button { font: inherit; }
     word-wrap: break-word;
     max-width: 100%;
     position: relative;
-    border: 1px solid var(--border); /* 为助手气泡增加边框，使其在白色背景上可见 */
-    min-width: 0; /* (Req 2) 修复溢出 */
+    border: 1px solid var(--border);
+    min-width: 0;
 }
 .msg.user .bubble-inner {
     background: var(--bubble-user);
     border-top-right-radius: 0;
-    border: none; /* 用户气泡颜色足够区分，无需边框 */
+    border: none;
 }
 .msg.assistant .bubble-inner {
-    /* (Req 3) 移除 AI 气泡样式并放置内容 */
     grid-area: content;
     background: transparent;
     border-top-left-radius: 0;
@@ -437,13 +433,12 @@ button { font: inherit; }
     box-shadow: none;
     border: none;
 }
-/* (Req 5) 定位并重设元数据样式 */
 .msg.assistant .bubble .msg-meta {
     grid-area: meta;
-    align-self: center; /* 与头像垂直居中 */
-    font-size: 0.7rem; /* (Req 5) 进一步缩小字体 */
+    align-self: center;
+    font-size: 0.75rem;
     color: var(--muted);
-    margin-top: 0; /* 覆盖 script.js 注入的 margin-top: 8px */
+    margin-top: 0;
 }
 
 /* 分组间距 */
@@ -452,17 +447,16 @@ button { font: inherit; }
 .msg.assistant + .msg.user { margin-top: 16px; }
 
 /* Markdown 展示 */
-/* (Req 10) 增加 md-body 行距 */
 .md-body {
     line-height: 1.7;
     color: var(--text);
     white-space: normal;
-    overflow-wrap: break-word; /* (Req 1) 修复溢出 */
+    overflow-wrap: break-word;
     word-break: break-word;
-    font-size: 16px; /* (Req 4) 增大字号 */
+    font-size: 16px;
 }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
-.md-body p { margin: .6em 0; }
+.md-body p { margin: 5px; }
 .md-body ul, .md-body ol { padding-left: 1.2em; margin: .4em 0; }
 .md-body code {
     background: color-mix(in srgb, var(--panel) 65%, var(--bg));
@@ -476,11 +470,10 @@ button { font: inherit; }
     border-radius: 12px;
     overflow: auto;
     border: 1px solid var(--border);
-    max-width: 100%; /* (Req 2) 修复溢出 */
+    max-width: 100%;
 }
 .md-body pre code { background: transparent; padding: 0; }
 
-/* (Req 11) 流式响应光标动画 */
 @keyframes blink {
     50% { opacity: 0; }
 }
@@ -498,11 +491,11 @@ button { font: inherit; }
     right: 0;
     bottom: 0;
     padding: 18px 12%;
-    background: linear-gradient(to top, color-mix(in srgb, var(--bg) 96%, transparent) 30%, transparent 100%);
+    background: linear-gradient(to top, color-mix(in srgb, var(--bg) 100%, transparent) 70%, transparent 100%);
     z-index: 10;
 }
 @media (max-width: 960px) {
-    .input { left: 0; padding: 14px 16px; }
+    .input { left: 0; padding: 24px 16px 14px 16px; }
 }
 .input-inner {
     display: flex;
@@ -563,13 +556,12 @@ button { font: inherit; }
 :root[data-theme="dark"] sl-dialog::part(header) { border-bottom-color: var(--border); }
 :root[data-theme="dark"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
 :root[data-theme="dark"] sl-input::part(input) { color: var(--text); }
-:root[data-theme="dark"] sl-menu-item::part(base):hover { /* (Req 6) */
+:root[data-theme="dark"] sl-menu-item::part(base):hover {
     background: color-mix(in srgb, var(--panel) 70%, var(--bg));
 }
-/* (Req 3) 移动端选单中选中项的样式 */
 :root[data-theme="dark"] sl-menu-item.sl-selected {
-    color: var(--accent); /* (Req 3) 设为高亮色 */
-    background: color-mix(in srgb, var(--accent) 25%, var(--panel)); /* (Req 3) 加深背景 */
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 25%, var(--panel));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -584,43 +576,36 @@ button { font: inherit; }
     :root[data-theme="system"] sl-dialog::part(header) { border-bottom-color: var(--border); }
     :root[data-theme="system"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
     :root[data-theme="system"] sl-input::part(input) { color: var(--text); }
-    :root[data-theme="system"] sl-menu-item::part(base):hover { /* (Req 6) */
+    :root[data-theme="system"] sl-menu-item::part(base):hover {
         background: color-mix(in srgb, var(--panel) 70%, var(--bg));
     }
-    /* (Req 3) 移动端选单中选中项的样式 */
     :root[data-theme="system"] sl-menu-item.sl-selected {
-        color: var(--accent); /* (Req 3) 设为高亮色 */
-        background: color-mix(in srgb, var(--accent) 25%, var(--panel)); /* (Req 3) 加深背景 */
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 25%, var(--panel));
     }
 }
 
 sl-dialog::part(overlay) {
-    justify-items: center; /* (Req 1) 居中 */
-    align-items: center; /* (Req 1) 居中 */
+    justify-items: center;
+    align-items: center;
 }
 sl-dialog::part(panel) {
-    margin: 0; /* (Req 1) 移除固定边距 */
-    max-width: min(600px, 90vw); /* (Req 1) 响应式宽度 */
+    margin: 0;
+    max-width: min(600px, 90vw);
 }
 @media (max-width: 960px) {
     sl-dialog::part(panel) {
-        margin: 0; /* (Req 1) 移除固定边距 */
+        margin: 0;
         width: 90vw;
         max-width: 90vw;
     }
 }
-
-/* (Req 1) 移除 sl-action-sheet 相关样式 */
-
 
 sl-menu-item img,
 .model-item img {
     vertical-align: middle;
     width: 24px; height: 24px; border-radius: 4px;
 }
-
-/* (Req 1) 此样式已移入 script.js 的 <style> 标签中 */
-
 
 /* 自定义聊天区和历史列表滚动条 */
 .chat, #convs {
