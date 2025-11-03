@@ -388,6 +388,7 @@ button { font: inherit; }
     max-width: 100%;
     position: relative;
     border: 1px solid var(--border); /* 为助手气泡增加边框，使其在白色背景上可见 */
+    min-width: 0; /* (Req 1) 修复网格溢出 */
 }
 .msg.user .bubble-inner {
     background: var(--bubble-user);
@@ -522,8 +523,8 @@ button { font: inherit; }
 }
 /* (Req 3) 移动端选单中选中项的样式 */
 :root[data-theme="dark"] sl-menu-item.sl-selected {
-    color: var(--text); /* (Req 3) 移除 accent 颜色 */
-    background: color-mix(in srgb, var(--panel) 85%, var(--bg)); /* (Req 3) 加深背景 */
+    color: var(--accent); /* (Req 3) 设为高亮色 */
+    background: color-mix(in srgb, var(--accent) 25%, var(--panel)); /* (Req 3) 加深背景 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -545,8 +546,8 @@ button { font: inherit; }
     }
     /* (Req 3) 移动端选单中选中项的样式 */
     :root[data-theme="system"] sl-menu-item.sl-selected {
-        color: var(--text); /* (Req 3) 移除 accent 颜色 */
-        background: color-mix(in srgb, var(--panel) 85%, var(--bg)); /* (Req 3) 加深背景 */
+        color: var(--accent); /* (Req 3) 设为高亮色 */
+        background: color-mix(in srgb, var(--accent) 25%, var(--panel)); /* (Req 3) 加深背景 */
     }
 }
 
@@ -572,18 +573,22 @@ sl-dialog::part(panel) {
 }
 
 /* (Req 6, 7) Action Sheet 底部弹出菜单 */
+sl-action-sheet::part(overlay) {
+    position: fixed; /* (Req 2) 确保遮罩层是 fixed */
+    z-index: 999; /* (Req 2) 确保遮罩层在 input(10) 之上 */
+}
 sl-action-sheet::part(base) {
     border-bottom: none;
     border-radius: var(--radius-l) var(--radius-l) 0 0;
-    z-index: 1000; /* (Req 2) 确保浮在最上层 */
+    z-index: 1000; /* (Req 2) 确保浮在最上层 (高于 overlay) */
 }
 sl-action-sheet::part(header) {
     border-bottom: 1px solid var(--border);
 }
 /* (Req 3) 移动端选单中选中项的样式 */
 sl-menu-item.sl-selected {
-    color: var(--text); /* (Req 3) 移除 accent 颜色 */
-    background: color-mix(in srgb, var(--panel) 85%, var(--bg)); /* (Req 3) 加深背景 */
+    color: var(--accent); /* (Req 3) 设为高亮色 */
+    background: color-mix(in srgb, var(--accent) 15%, var(--panel)); /* (Req 3) 加深背景 */
 }
 sl-menu-item img,
 .model-item img {
@@ -592,8 +597,9 @@ sl-menu-item img,
 
 /* (Req 3) 覆盖 script.js 注入的桌面端模型选择器样式 */
 .model-item.active {
-    background: color-mix(in srgb, var(--panel) 85%, var(--bg)) !important; /* (Req 3) 加深背景 */
-    font-weight: 400 !important; /* (Req 3) 取消加粗 */
+    background: color-mix(in srgb, var(--accent) 15%, var(--panel)) !important; /* (Req 3) 加深背景 */
+    font-weight: 600 !important; /* (Req 3) 保持加粗以示区分 */
+    color: var(--accent) !important; /* (Req 3) 设为高亮色 */
 }
 
 
