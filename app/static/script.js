@@ -193,18 +193,13 @@ function renderMarkdown(md) {
         pre.textContent = md || '';
         return pre;
     }
-    // 等待 marked 加载完成
-    if (typeof window.marked.parse !== 'function') {
-        const pre = document.createElement('pre');
-        pre.textContent = md || '(Markdown 渲染器加载中...)';
-        return pre;
-    }
-    // (修复 #1) 确保 marked.parse 存在 (它可能在 'marked' 对象上，而不是 'marked.default')
-    const parse = (typeof window.marked.parse === 'function') ? window.marked.parse : (window.marked.default?.parse);
+
+    // 修复 #2: 检查 marked.parse (来自 marked.min.js) 或 marked.default.parse (来自 esm 模块的 default export)
+    const parse = window.marked.parse || window.marked.default?.parse;
 
     if (typeof parse !== 'function') {
         const pre = document.createElement('pre');
-        pre.textContent = md || '(Markdown 渲染器异常)';
+        pre.textContent = md || '(Markdown 渲染器加载中...)';
         return pre;
     }
 
@@ -790,8 +785,8 @@ async function sendQuestion() {
 
     const rerender = (isFinal = false) => {
         // (Req 11) 移除 '▍'
-        // (修复 #1) 确保 marked.parse 存在
-        const parse = (typeof window.marked?.parse === 'function') ? window.marked.parse : (window.marked?.default?.parse);
+        // 修复 #2: 确保 parse 函数被正确找到
+        const parse = window.marked.parse || window.marked.default?.parse;
         if (parse) {
             placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
         } else {
@@ -1011,7 +1006,8 @@ async function sendQuestion() {
                     });
 
                     // 2. 绑定 Temp slider
-                    const tempSliderBox = mobileSheetContent.querySelector('.param-slider:nth-of-type(1)'); // 第一个 slider
+                    // 修复 #1: 使用更精确的选择器
+                    const tempSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(2) .param-slider');
                     if (tempSliderBox) {
                         const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(2)'); // 第二个 label
                         setupSlider(tempSliderBox, (val) => {
@@ -1021,7 +1017,8 @@ async function sendQuestion() {
                     }
 
                     // 3. 绑定 Top-P slider
-                    const topPSliderBox = mobileSheetContent.querySelector('.param-slider:nth-of-type(2)'); // 第二个 slider
+                    // 修复 #1: 使用更精确的选择器
+                    const topPSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(3) .param-slider');
                     if (topPSliderBox) {
                         const labelEl = mobileSheetContent.querySelector('.mobile-sheet-label:nth-of-type(3)'); // 第三个 label
                         setupSlider(topPSliderBox, (val) => {
@@ -1078,15 +1075,19 @@ async function sendQuestion() {
         // (Req 1) 修改 createPopover 调用
         const modelPop = createPopover(modelBtn, desktopModelMenuHtml, (pop) => {
             // 确保打开时滑块状态同步
-            const tempInput = pop.querySelector('.param-slider:nth-of-type(1) .param-input');
-            const tempRange = pop.querySelector('.param-slider:nth-of-type(1) .param-range');
-            const topPInput = pop.querySelector('.param-slider:nth-of-type(2) .param-input');
-            const topPRange = pop.querySelector('.param-slider:nth-of-type(2) .param-range');
+            // 修复 #1: 使用 querySelectorAll 和索引
+            const sliders = pop.querySelectorAll('.param-slider');
+            if (sliders.length >= 2) {
+                const tempInput = sliders[0].querySelector('.param-input');
+                const tempRange = sliders[0].querySelector('.param-range');
+                const topPInput = sliders[1].querySelector('.param-input');
+                const topPRange = sliders[1].querySelector('.param-range');
 
-            if (tempInput) tempInput.value = currentTemperature.toFixed(2);
-            if (tempRange) tempRange.value = currentTemperature;
-            if (topPInput) topPInput.value = currentTopP.toFixed(2);
-            if (topPRange) topPRange.value = currentTopP;
+                if (tempInput) tempInput.value = currentTemperature.toFixed(2);
+                if (tempRange) tempRange.value = currentTemperature;
+                if (topPInput) topPInput.value = currentTopP.toFixed(2);
+                if (topPRange) topPRange.value = currentTopP;
+            }
 
             // 更新 active 状态
             pop.querySelectorAll('.model-item').forEach(item => {
@@ -1143,9 +1144,12 @@ async function sendQuestion() {
         }
 
         // (Req 1) 绑定桌面端 Slider
-        // (修复 #2) 现在这些查询应该能正确找到元素
-        setupSlider(modelPop.querySelector('.param-slider:nth-of-type(1)'), (val) => currentTemperature = val, tempBtn, 'Temperature');
-        setupSlider(modelPop.querySelector('.param-slider:nth-of-type(2)'), (val) => currentTopP = val, topPBtn, 'Top-P');
+        // 修复 #1: 使用 querySelectorAll 和索引
+        const desktopSliders = modelPop.querySelectorAll('.param-slider');
+        if (desktopSliders.length >= 2) {
+            setupSlider(desktopSliders[0], (val) => currentTemperature = val, tempBtn, 'Temperature');
+            setupSlider(desktopSliders[1], (val) => currentTopP = val, topPBtn, 'Top-P');
+        }
 
 
         document.addEventListener('click', () => {
@@ -1260,11 +1264,12 @@ async function sendQuestion() {
                 grid-template-columns: 1fr 1fr;
                 gap: 8px;
             }
+            /* 修复 #3: 移动端模型菜单样式 */
             .model-menu.mobile .model-item {
                 padding: 8px;
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 4px;
+                flex-direction: row; /* 改为 row */
+                align-items: center; /* 垂直居中 */
+                gap: 8px; /* 增加间距 */
             }
             .model-menu.mobile .model-item img { width: 32px; height: 32px; }
             .model-menu.mobile .model-item span { font-size: 14px; }
@@ -1315,3 +1320,4 @@ convsEl.addEventListener('click', (e) => {
         appRoot?.classList.remove('sidebar-open');
     }
 });
+
