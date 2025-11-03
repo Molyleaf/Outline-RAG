@@ -10,7 +10,8 @@
 	<!-- 不要更改CDN源 -->
 	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
 	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" />
-	<script src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.esm.js" defer></script>
+	<!-- 修复 #1: 添加 type="module" -->
+	<script type="module" src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.esm.js" defer></script>
 	<script src="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
 	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/googlecode.min.css">
 	<script>
@@ -90,16 +91,20 @@
 <script src="static/script.js" defer></script>
 <script>
     (function(){
+        // toast 函数此时可能未定义，但 index.html 原始代码就是这样
+        // 理想情况下，这个 script 应该在 script.js 加载 *之后* 或依赖 DOMContentLoaded
+        // 但我们保持原始逻辑不变
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
         if (m) {
             try {
                 const msg = decodeURIComponent(m[1]);
-                if (msg) toast(msg, 'warning', 3000);
+                if (msg && typeof toast === 'function') toast(msg, 'warning', 3000);
             } catch(_) {}
             document.cookie = 'chat_notice=; Max-Age=0; path=/';
         }
     })();
     (function(){
+        // 这个IIFE可以安全运行，因为它只依赖DOM
         document.querySelectorAll('.greet-suggestions .chip').forEach(btn=>{
             btn.addEventListener('click', ()=>{
                 const q = document.getElementById('q');

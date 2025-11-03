@@ -199,7 +199,16 @@ function renderMarkdown(md) {
         pre.textContent = md || '(Markdown 渲染器加载中...)';
         return pre;
     }
-    const html = marked.parse(md || '', { breaks: true, gfm: true });
+    // (修复 #1) 确保 marked.parse 存在 (它可能在 'marked' 对象上，而不是 'marked.default')
+    const parse = (typeof window.marked.parse === 'function') ? window.marked.parse : (window.marked.default?.parse);
+
+    if (typeof parse !== 'function') {
+        const pre = document.createElement('pre');
+        pre.textContent = md || '(Markdown 渲染器异常)';
+        return pre;
+    }
+
+    const html = parse(md || '', { breaks: true, gfm: true });
     const wrapper = document.createElement('div');
     wrapper.className = 'md-body';
     // 由 CSS 统一管理换行与折行
@@ -367,6 +376,8 @@ async function loadConvs() {
         const row = document.createElement('div');
         row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
         row.tabIndex = 0;
+        // (修复 #3) 为 pjax popstate 同步高亮添加 data-id
+        row.dataset.id = c.id;
         const titleEl = document.createElement('span');
         titleEl.className = 'conv-title';
         titleEl.textContent = c.title || ('会话 ' + (c.id || '').slice(0,8));
@@ -706,7 +717,8 @@ window.addEventListener('popstate', () => {
     // (Req 3) 更新侧边栏高亮
     document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
     if (currentConvId) {
-        const activeRow = Array.from(convsEl.querySelectorAll('.conv')).find(r => r.dataset.id === currentConvId); // 假设 row 有 data-id
+        // (修复 #3) 使用 data-id 选择器
+        const activeRow = Array.from(convsEl.querySelectorAll('.conv')).find(r => r.dataset.id === currentConvId);
         if (activeRow) activeRow.classList.add('active');
     }
 
@@ -778,7 +790,14 @@ async function sendQuestion() {
 
     const rerender = (isFinal = false) => {
         // (Req 11) 移除 '▍'
-        placeholderContentRef.innerHTML = marked.parse(acc, { breaks: true, gfm: true });
+        // (修复 #1) 确保 marked.parse 存在
+        const parse = (typeof window.marked?.parse === 'function') ? window.marked.parse : (window.marked?.default?.parse);
+        if (parse) {
+            placeholderContentRef.innerHTML = parse(acc, { breaks: true, gfm: true });
+        } else {
+            placeholderContentRef.textContent = acc; // 回退
+        }
+
         if (isFinal && window.hljs) {
             // (Req 11) 移除 streaming class
             placeholderContentRef.classList.remove('streaming');
@@ -867,6 +886,13 @@ async function sendQuestion() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;
 
+        // 修复 #2: 将 paramSliderHtml 移到 setupTopbarActions 顶部
+        const paramSliderHtml = (label, value, max, step) => `
+            <div class="param-slider">
+                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
+                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
+            </div>`;
+
         const uploadLabel = actionsContainer.querySelector('label.upload');
         const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
         if (uploadSpan) {
@@ -926,12 +952,6 @@ async function sendQuestion() {
             actionsContainer.insertBefore(tempBtn, uploadLabel);
             actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
-
-        const paramSliderHtml = (label, value, max, step) => `
-            <div class="param-slider">
-                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
-                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
-            </div>`;
 
         // (Req 1) 组合移动端模型菜单的 HTML
         const mobileModelMenuHtml = () => `
@@ -1038,6 +1058,7 @@ async function sendQuestion() {
         }
 
         // (Req 1) 合并桌面端弹窗内容
+        // (修复 #2) 此处调用 paramSliderHtml 现在是安全的
         const desktopModelMenuHtml = `
             <div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
             `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
@@ -1057,10 +1078,15 @@ async function sendQuestion() {
         // (Req 1) 修改 createPopover 调用
         const modelPop = createPopover(modelBtn, desktopModelMenuHtml, (pop) => {
             // 确保打开时滑块状态同步
-            pop.querySelector('.param-slider:nth-of-type(1) .param-input').value = currentTemperature.toFixed(2);
-            pop.querySelector('.param-slider:nth-of-type(1) .param-range').value = currentTemperature;
-            pop.querySelector('.param-slider:nth-of-type(2) .param-input').value = currentTopP.toFixed(2);
-            pop.querySelector('.param-slider:nth-of-type(2) .param-range').value = currentTopP;
+            const tempInput = pop.querySelector('.param-slider:nth-of-type(1) .param-input');
+            const tempRange = pop.querySelector('.param-slider:nth-of-type(1) .param-range');
+            const topPInput = pop.querySelector('.param-slider:nth-of-type(2) .param-input');
+            const topPRange = pop.querySelector('.param-slider:nth-of-type(2) .param-range');
+
+            if (tempInput) tempInput.value = currentTemperature.toFixed(2);
+            if (tempRange) tempRange.value = currentTemperature;
+            if (topPInput) topPInput.value = currentTopP.toFixed(2);
+            if (topPRange) topPRange.value = currentTopP;
 
             // 更新 active 状态
             pop.querySelectorAll('.model-item').forEach(item => {
@@ -1089,8 +1115,20 @@ async function sendQuestion() {
         });
 
         function setupSlider(pop, stateUpdater, btn, titlePrefix) {
+            // (修复 #2) 检查 pop 是否为 null
+            if (!pop) {
+                console.error('setupSlider received null element. This might be a selector error.');
+                return;
+            }
             const input = pop.querySelector('.param-input');
             const range = pop.querySelector('.param-range');
+
+            // (修复 #2) 检查 input 和 range 是否为 null
+            if (!input || !range) {
+                console.error('Slider input or range not found inside', pop);
+                return;
+            }
+
             const update = (val) => {
                 const num = parseFloat(val);
                 if (!isNaN(num)) {
@@ -1105,6 +1143,7 @@ async function sendQuestion() {
         }
 
         // (Req 1) 绑定桌面端 Slider
+        // (修复 #2) 现在这些查询应该能正确找到元素
         setupSlider(modelPop.querySelector('.param-slider:nth-of-type(1)'), (val) => currentTemperature = val, tempBtn, 'Temperature');
         setupSlider(modelPop.querySelector('.param-slider:nth-of-type(2)'), (val) => currentTopP = val, topPBtn, 'Top-P');
 
