@@ -1,0 +1,278 @@
+/* 聊天区主体滚动 */
+.chat {
+    overflow-y: scroll;
+    padding: 24px 12%;
+    padding-bottom: 160px;
+    background: var(--panel);
+}
+:root[data-theme="dark"] .chat {
+    background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] .chat {
+        background: var(--bg);
+    }
+}
+@media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
+@media (max-width: 960px)  { .chat { padding-left: 16px; padding-right: 16px; } }
+
+/* 问候区 */
+.greeting {
+    max-width: 720px;
+    margin: 10vh auto 2vh;
+    color: var(--text);
+}
+.greet-title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: .2px;
+    margin-bottom: 10px;
+    background: linear-gradient(45deg, #4285f4, #9b72cb, #d96570, #f2a600);
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: hero-anim 2s linear infinite
+}
+.greet-sub { font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+.greet-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--panel) 60%, var(--bg));
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.chip:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+
+/* 对话项 */
+.msg {
+    margin: 12px 0;
+    display: grid;
+    gap: 16px;
+    align-items: flex-start;
+    max-width: 100%;
+}
+.msg.assistant {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+        "avatar meta"
+        "content content";
+    row-gap: 8px;
+    column-gap: 12px;
+    max-width: 1280px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.msg.assistant .bubble {
+    max-width: 100%;
+    min-width: 0;
+    display: contents;
+}
+.msg.user {
+    grid-template-columns: minmax(0,1fr);
+}
+.msg.user .avatar {
+    display: none;
+}
+.msg.user .bubble {
+    justify-self: end;
+    max-width: 95%;
+    min-width: 0;
+}
+.msg .avatar {
+    width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
+    background-size: cover;
+}
+.msg.assistant .avatar {
+    grid-area: avatar;
+    width: 30px;
+    height: 30px;
+    align-self: center;
+    padding: 2px;
+    box-sizing: border-box;
+    background-size: 24px 24px;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+.msg .bubble-inner {
+    padding: 8px 12px;
+    border-radius: var(--radius-l);
+    background: var(--bubble-assistant);
+    color: var(--text);
+    box-shadow: var(--shadow-1);
+    word-wrap: break-word;
+    max-width: 100%;
+    position: relative;
+    border: 1px solid var(--border);
+    min-width: 0;
+}
+.msg.user .bubble-inner {
+    background: var(--bubble-user);
+    border-top-right-radius: 0;
+    border: none;
+    line-height: 1.6; /* (Req 4) 确保用户气泡行距一致 */
+}
+.msg.assistant .bubble-inner {
+    grid-area: content;
+    background: transparent;
+    border-top-left-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+}
+.msg.assistant .bubble .msg-meta {
+    grid-area: meta;
+    align-self: center;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 0;
+}
+
+/* 分组间距 (Req 4) */
+.msg + .msg { margin-top: 12px; }
+.msg.user + .msg.assistant { margin-top: 24px; }
+.msg.assistant + .msg.user { margin-top: 40px; }
+
+/* Markdown 展示 */
+.md-body {
+    line-height: 1.7;
+    color: var(--text);
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    font-size: 16px;
+}
+.md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
+.md-body p { margin: 5px; }
+.msg.assistant .md-body > p { text-indent: 2em; }
+.md-body ul, .md-body ol { padding-left: 1.2em; margin: .4em 0; }
+.md-body code {
+    background: color-mix(in srgb, var(--panel) 65%, var(--bg));
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+.md-body pre {
+    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+    padding: 12px 12px;
+    border-radius: 12px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    max-width: 100%;
+}
+.md-body pre code { background: transparent; padding: 0; }
+
+.fade-in-chunk {
+    display: inline;
+    opacity: 0;
+    animation: geminiFadeIn 0.5s ease forwards;
+    /* 让浏览器处理换行 */
+    white-space: pre-wrap;
+}
+
+/* Markdown 表格样式 */
+.md-body table {
+    border-collapse: collapse;
+    margin: 1.2em auto; /* 居中并增加垂直间距 */
+    width: auto; /* 自动宽度 */
+    table-layout: auto; /* 自动列宽 */
+    border: 1px solid var(--border);
+    overflow: hidden; /* 配合圆角 */
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow-1);
+}
+.md-body th, .md-body td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+}
+.md-body th {
+    background: color-mix(in srgb, var(--panel) 65%, var(--bg));
+    font-weight: 600;
+}
+
+/* 代码块深色模式 */
+:root[data-theme="dark"] .md-body code {
+    background: #2a2a2e; /* 一个明确的深色 */
+    color: #e0e0e0;
+}
+:root[data-theme="dark"] .md-body pre {
+    background: var(--panel); /* 匹配 panel */
+    border-color: var(--border);
+}
+:root[data-theme="dark"] .md-body pre code {
+    background: transparent;
+    color: inherit; /* 继承 pre 的颜色 */
+}
+
+/* 代码块系统主题（暗色） */
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] .md-body code {
+        background: #2a2a2e;
+        color: #e0e0e0;
+    }
+    :root[data-theme="system"] .md-body pre {
+        background: var(--panel);
+        border-color: var(--border);
+    }
+    :root[data-theme="system"] .md-body pre code {
+        background: transparent;
+        color: inherit;
+    }
+}
+
+
+/* 输入区 */
+.input {
+    position: fixed;
+    left: 280px;
+    right: 0;
+    bottom: 0;
+    padding: 18px 12%;
+    background: linear-gradient(to top, color-mix(in srgb, var(--bg) 100%, transparent) 70%, transparent 100%);
+    z-index: 10;
+}
+@media (max-width: 960px) {
+    .input { left: 0; padding: 24px 16px 14px 16px; }
+}
+.input-inner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 56px;
+    border-radius: 28px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    padding: 10px 10px 10px 16px;
+}
+.input textarea {
+    flex: 1;
+    height: 26px;
+    max-height: 260px;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    line-height: 26px;
+    font-size: 16px;
+    font-family: inherit;
+}
+#send {
+    width: 40px; height: 40px;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex; align-items: center; justify-content: center;
+    border: none;
+    background: var(--accent) !important;
+    color: white;
+    box-shadow: none !important;
+}
+#send:hover { filter: brightness(1.1); }
+.upload { cursor: pointer; }

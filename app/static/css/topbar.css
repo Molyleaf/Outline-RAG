@@ -1,0 +1,109 @@
+/* 顶栏（右侧） */
+.topbar {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 0 12px;
+    border-bottom: none;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 80%, transparent) 0%, transparent 100%);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.topbar .actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.topbar .hamburger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+}
+@media (max-width: 960px) {
+    .topbar .hamburger { display: inline-flex; margin-right: auto; }
+}
+
+/* 头像与菜单 */
+.avatar {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background-position: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-1);
+}
+/* 恢复右上角头像的 cover 属性 */
+#avatar.avatar {
+    background-size: cover;
+}
+
+.menu {
+    position: absolute; right: 12px; top: 64px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    z-index: 10;
+    border-radius: 12px;
+    min-width: 220px;
+    overflow: hidden;
+    visibility: hidden;
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+    transform-origin: top right;
+    transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+}
+.menu.visible {
+    visibility: visible;
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    transition: opacity .2s ease, transform .2s ease;
+}
+.menu a, .menu .menu-radio { display: block; padding: 10px 12px; color: var(--text); }
+.menu a:hover, .menu .menu-radio:hover { background: color-mix(in srgb, var(--panel) 55%, var(--bg)); }
+.menu .menu-section { padding: 8px 0 0; }
+.menu .menu-label { padding: 0 12px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.menu .menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.menu .menu-radio.active { font-weight: 700; }
+
+/* 模型图标背景 */
+.model-item img {
+    background-color: white;
+    padding: 2px;
+    box-sizing: border-box;
+    border-radius: 4px;
+}
+
+/* 设置菜单动画 */
+.toolbar-popover {
+    position: fixed; background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100;
+    visibility: hidden; opacity: 0; transform: scale(0.95) translateY(-10px);
+    transform-origin: top right;
+    transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+}
+.toolbar-popover.visible {
+    visibility: visible; opacity: 1; transform: scale(1) translateY(0);
+    transition: opacity .2s ease, transform .2s ease;
+}
+.model-menu { display: flex; flex-direction: column; gap: 4px; }
+.model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
+.model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+.model-item.active {
+    background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+    color: var(--accent);
+    font-weight: 600;
+}
+.model-item img { width: 24px; height: 24px; border-radius: 4px; }
+.param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
+.param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
+.param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
+.param-range { width: 100%; accent-color: var(--accent); }
+
+.popover-divider { height: 1px; background: var(--border); margin: 8px 0; }
