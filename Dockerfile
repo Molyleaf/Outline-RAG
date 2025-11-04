@@ -94,7 +94,7 @@ COPY --from=builder --chown=1001:1001 /app /app/
 
 # (*** 已修改 ***)
 # 关键步骤：移除原始的 JS 和 CSS 源文件
-RUN rm -rf /app/static/js /app/static/css
+RUN rm -rf /app/static/js /app/static/css /app/static/.webassets-cache
 
 # (*** 已修改 ***)
 # 创建可持久化目录并授权

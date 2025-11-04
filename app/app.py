@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timezone, timedelta  # 导入 timedelta
+from datetime import datetime, timezone, timedelta
 
 import redis
 import requests
@@ -19,7 +19,11 @@ app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
 
 # --- Flask-Assets 配置 ---
 # (这一部分是“轻量级”的，可以在全局安全定义)
-assets = Environment(app)
+
+# (*** 修复1 ***) 不在此时传入 app，推迟初始化
+assets = Environment()
+# assets = Environment(app) # <--- 旧代码
+
 app.config['ASSETS_AUTO_BUILD'] = app.config.get('DEBUG', False)
 app.config['ASSETS_DEBUG'] = app.config.get('DEBUG', False)
 
@@ -50,6 +54,8 @@ assets.register('css_all', css_bundle)
 
 
 # --- 函数定义 (安全) ---
+# ( ... _startup_self_check, register_blueprints, ... 等函数保持不变 ... )
+# ( ... healthz, task_worker, webhook_watcher ... 等函数保持不变 ... )
 
 def _startup_self_check():
     """在运行时执行的启动自检"""
@@ -213,11 +219,23 @@ def _init_runtime_app(app_instance):
     os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
     os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
 
+    # (*** 修复1 ***)
+    # 在所有 app.config 设置 *之后* 再初始化 assets
+    assets.init_app(app_instance)
+
     # 5. 在运行时注册蓝图
     register_blueprints(app_instance)
 
     # 6. 在运行时初始化数据库和任务
     try:
+        # (*** 修复2 ***)
+        # 导入并应用 ProxyFix 中间件来解决 HTTPS 代理后的 mixed content
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        # 信任来自上游代理 (x_for=1) 的标头
+        app_instance.wsgi_app = ProxyFix(
+            app_instance.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
+        )
+
         from database import db_init, redis_client
 
         should_initialize = True
@@ -277,6 +295,7 @@ else:
         _init_runtime_app(app)
     else:
         # 是 'flask assets build' 命令：
-        # 我们在文件顶部定义的 app 和 assets 已经足够了
-        # 不需要初始化数据库、蓝图或后台任务
-        pass
+        # (*** 修复1 ***)
+        # 'flask assets build' 命令也需要一个初始化的 assets 环境
+        app.config['DEBUG'] = False # 确保 build 在 prod 模式下运行
+        assets.init_app(app) # <--- 在此为 build 命令初始化

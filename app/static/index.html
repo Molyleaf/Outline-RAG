@@ -6,11 +6,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<link rel="icon" href="static/img/favicon.svg" type="image/svg+xml" />
 	<link rel="icon" href="static/img/favicon.ico" type="image/x-icon"/>
-
-	{% assets "css_all" %}
-	<link rel="stylesheet" href="{{ ASSET_URL }}" />
-	{% endassets %}
-
+	<link rel="stylesheet" href="static/style.min.css" />
 	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
 	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" />
 	<script type="module" src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.umd.js" defer></script>
@@ -89,14 +85,11 @@
 </div>
 
 {% assets "js_all" %}
-<script src="{{ ASSET_URL }}" defer></script>
+<script src="static/script.min.js" defer></script>
 {% endassets %}
 
 <script>
     (function(){
-        // toast 函数此时可能未定义，但 index.html 原始代码就是这样
-        // 理想情况下，这个 script 应该在 script.min.js 加载 *之后* 或依赖 DOMContentLoaded
-        // 但我们保持原始逻辑不变
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
         if (m) {
             try {
@@ -107,7 +100,6 @@
         }
     })();
     (function(){
-        // 这个IIFE可以安全运行，因为它只依赖DOM
         document.querySelectorAll('.greet-suggestions .chip').forEach(btn=>{
             btn.addEventListener('click', ()=>{
                 const q = document.getElementById('q');
