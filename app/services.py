@@ -26,7 +26,7 @@ def _create_retry_session():
 
 def http_post_json(url, payload, token, stream=False):
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    timeout = (5, 60) if not stream else (5, 300)
+    timeout = (5, 180) if not stream else (5, 300)
     session_req = _create_retry_session()
     try:
         resp = session_req.post(url, json=payload, headers=headers, timeout=timeout, stream=stream)
@@ -80,7 +80,8 @@ def rerank(query, passages, top_k=5):
     res = http_post_json(f"{config.RERANKER_API_URL}/v1/rerank", payload, config.RERANKER_API_TOKEN)
     if not res: return []
     items = res.get("results") or res.get("data") or []
-    sorted_items = sorted(items, key=lambda x: x.get("score", 0), reverse=True)
+    # 使用 'relevance_score' (来自 SiliconFlow 文档) 而不是 'score'
+    sorted_items = sorted(items, key=lambda x: x.get("relevance_score", 0), reverse=True)
     if redis_client and sorted_items:
         redis_client.set(cache_key, json.dumps(sorted_items), ex=604800)
     return sorted_items
