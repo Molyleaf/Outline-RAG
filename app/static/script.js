@@ -98,13 +98,18 @@ function toast(message, variant = 'primary', timeout = 3000) {
     el.variant = variant; // 'primary' | 'success' | 'neutral' | 'warning' | 'danger'
     el.closable = true;
     el.innerHTML = `<sl-icon name="${variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle'}" slot="icon"></sl-icon>${message}`;
-    document.body.appendChild(el);
-    // 兼容：若 Shoelace 组件尚未注册，降级为直接打开
+
+    // (Req 3) 兼容：若 Shoelace 组件尚未注册，降级为直接打开
     if (typeof el.toast === 'function') {
+        // (Req 3) toast() 方法会自动处理附加和移除
         el.toast();
     } else {
+        // (Req 3) 降级时才附加到 DOM，并应用定位样式
         el.setAttribute('open', '');
+        el.classList.add('toast-fallback'); // 添加一个类以便 CSS 定位
+        document.body.appendChild(el);
     }
+
     if (timeout) {
         setTimeout(() => {
             if (typeof el.hide === 'function') el.hide(); else el.remove();
@@ -933,6 +938,12 @@ async function sendQuestion() {
     messageContainer.innerHTML = ''; // 清空（appendMsg 可能会创建带空 <p> 的）
     messageContainer.classList.add('streaming');
 
+    // (Req 1) 添加加载动画
+    const loaderEl = document.createElement('div');
+    loaderEl.className = 'loading-dots';
+    loaderEl.innerHTML = '<span></span><span></span><span></span>';
+    messageContainer.appendChild(loaderEl);
+
     // 2. 定义变量
     let currentStreamingDiv = document.createElement('div'); // 第一个用于流式输出的 div
     messageContainer.appendChild(currentStreamingDiv);
@@ -944,6 +955,10 @@ async function sendQuestion() {
 
     // 3. 定义一个在流结束时（或出错时）调用的最终化函数
     const finalizeStream = () => {
+        // (Req 1) 确保加载器在最终化时被移除
+        const loader = messageContainer.querySelector('.loading-dots');
+        if (loader) loader.remove();
+
         messageContainer.classList.remove('streaming');
         // 最终解析*最后*一个流式 div 的内容
         if (parseFn && currentStreamingBuffer.trim() !== '') {
@@ -982,7 +997,7 @@ async function sendQuestion() {
     });
 
     if (!res.ok) {
-        messageContainer.textContent = '请求失败'; // 替换
+        messageContainer.textContent = '请求失败'; // 替换 (这也会移除加载器)
         messageContainer.classList.remove('streaming');
         toast('请求失败', 'danger');
         return;
@@ -1005,9 +1020,12 @@ async function sendQuestion() {
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        finalizeStream(); // 调用最终化函数
-                        return;
+                        // finalizeStream(); // 将在循环外调用
+                        // return; // 不要在这里 return，让循环自然结束
+                        break; // 跳出 while (idx) 循环
                     }
+                    if (data === '[DONE]') break; // (修正) 应该跳出外层 while (true) 循环，但 finalizeStream 在外部处理
+
                     try {
                         const j = JSON.parse(data);
                         if (!modelDetected && j.model) {
@@ -1027,6 +1045,13 @@ async function sendQuestion() {
 
                         // --- 流式处理核心逻辑 ---
                         const delta = j.choices?.[0]?.delta?.content;
+
+                        // (Req 1) 收到第一个数据块时，移除加载动画
+                        const loader = messageContainer.querySelector('.loading-dots');
+                        if (loader && (typeof delta === 'string' && delta.length > 0)) {
+                            loader.remove();
+                        }
+
                         if (typeof delta === 'string' && delta.length > 0) {
 
                             // 使用一个小的回看缓冲区来检查跨 delta 的触发器
@@ -1088,7 +1113,10 @@ async function sendQuestion() {
 
                     } catch {}
                 }
+                // (修正) 如果是 [DONE]，跳出外层循环
+                if (chunk.includes('data: [DONE]')) break;
             }
+            if (chunk.includes('data: [DONE]')) break;
         }
         finalizeStream(); // 处理流在 [DONE] 之前结束的情况
     } catch (e) {

@@ -63,7 +63,7 @@ html, body {
     font-family: system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    line-height: 1.5;
+    line-height: 1.6; /* (Req 4) 增大全局行距 */
     font-size: 16px;
 }
 a { color: inherit; text-decoration: none; }
@@ -473,6 +473,7 @@ button { font: inherit; }
     background: var(--bubble-user);
     border-top-right-radius: 0;
     border: none;
+    line-height: 1.6; /* (Req 4) 确保用户气泡行距一致 */
 }
 .msg.assistant .bubble-inner {
     grid-area: content;
@@ -490,9 +491,33 @@ button { font: inherit; }
     margin-top: 0;
 }
 
-/* 分组间距 */
-.msg + .msg { margin-top: 8px; }
-.msg.user + .msg.assistant { margin-top: 16px; }
+/* (Req 1) 加载动画 */
+.loading-dots {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    /* AI 气泡的 .md-body 没有 padding，在这里添加一些内边距 */
+    padding: 10px 5px;
+}
+.loading-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--muted);
+    animation: loading-pulse 1.4s infinite ease-in-out both;
+}
+.loading-dots span:nth-of-type(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-of-type(2) { animation-delay: -0.16s; }
+
+@keyframes loading-pulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+    40% { transform: scale(1.0); opacity: 1; }
+}
+
+
+/* 分组间距 (Req 4) */
+.msg + .msg { margin-top: 12px; }
+.msg.user + .msg.assistant { margin-top: 24px; }
 .msg.assistant + .msg.user { margin-top: 40px; }
 
 /* Markdown 展示 */
@@ -902,4 +927,37 @@ sl-menu-item img,
     :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
         background-color: rgba(255, 255, 255, 0.4);
     }
+}
+
+/* --- (Req 2 & 3) Shoelace Overrides --- */
+
+/* (Req 3) 修复 Shoelace 弹窗降级时的定位 */
+sl-alert.toast-fallback[open] {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 200;
+    max-width: 400px;
+    width: auto;
+}
+
+/* (Req 2) 统一 Shoelace 圆角 */
+sl-alert::part(base) {
+    border-radius: var(--radius-m, 16px);
+    box-shadow: var(--shadow-2); /* (Req 3) 添加阴影以匹配其他弹窗 */
+}
+
+sl-dialog::part(panel) {
+    border-radius: var(--radius-l, 24px);
+}
+
+sl-input::part(base) {
+    border-radius: var(--radius-s, 8px);
+}
+sl-input::part(input) {
+    border-radius: var(--radius-s, 8px);
+}
+
+sl-button::part(base) {
+    border-radius: var(--radius-m, 16px);
 }
