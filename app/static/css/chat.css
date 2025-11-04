@@ -115,7 +115,7 @@
     background: var(--bubble-user);
     border-top-right-radius: 0;
     border: none;
-    line-height: 1.6; /* (Req 4) 确保用户气泡行距一致 */
+    line-height: 1.65; /* [MODIFIED] (Req 3, 4) 确保用户气泡行距一致 (from 1.6) */
 }
 .msg.assistant .bubble-inner {
     grid-area: content;
@@ -140,7 +140,7 @@
 
 /* Markdown 展示 */
 .md-body {
-    line-height: 1.7;
+    line-height: 1.75; /* [MODIFIED] (Req 3) (from 1.7) */
     color: var(--text);
     white-space: normal;
     overflow-wrap: break-word;
@@ -148,9 +148,9 @@
     font-size: 16px;
 }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
-.md-body p { margin: 5px; }
+.md-body p { margin: 8px 5px; } /* [MODIFIED] (Req 3) (from 5px) */
 .msg.assistant .md-body > p { text-indent: 2em; }
-.md-body ul, .md-body ol { padding-left: 1.2em; margin: .4em 0; }
+.md-body ul, .md-body ol { padding-left: 1.2em; margin: .6em 0; } /* [MODIFIED] (Req 3) (from .4em) */
 .md-body code {
     background: color-mix(in srgb, var(--panel) 65%, var(--bg));
     padding: 2px 6px;

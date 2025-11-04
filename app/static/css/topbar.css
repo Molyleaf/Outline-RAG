@@ -7,7 +7,8 @@
     gap: 10px;
     padding: 0 12px;
     border-bottom: none;
-    background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 80%, transparent) 0%, transparent 100%);
+    /* [MODIFIED] (Req 4) 调整渐变以匹配 input 区域的逻辑（顶部 70% 实心，然后渐变） */
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 100%, transparent) 70%, transparent 100%);
     position: sticky;
     top: 0;
     z-index: 5;
