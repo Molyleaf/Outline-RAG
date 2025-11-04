@@ -8,84 +8,60 @@ from datetime import datetime, timezone, timedelta  # 导入 timedelta
 
 import redis
 import requests
+import sys
 from flask import Flask
 # (新) 导入 Flask-Assets
 from flask_assets import Environment, Bundle
 
-import config
-import rag
-from blueprints.api import api_bp
-from blueprints.auth import auth_bp
-from blueprints.views import views_bp
-from database import db_init, engine, redis_client
-
-# --- 日志配置 ---
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
-)
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
-logger = logging.getLogger("app")
-
-# --- 应用初始化与配置 ---
+# --- 应用初始化 (轻量级) ---
+# 这一部分是 `flask assets build` 唯一会导入和执行的部分
 app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
 
-if not config.SECRET_KEY:
-    logger.critical("SECRET_KEY 未设置，拒绝启动。")
-    raise SystemExit(1)
-if config.OUTLINE_WEBHOOK_SIGN and not config.OUTLINE_WEBHOOK_SECRET:
-    logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
-    raise SystemExit(1)
-
-app.secret_key = config.SECRET_KEY
-app.config["JSON_AS_ASCII"] = False
-app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
-# (Req 2) 设置永久 Session 的生命周期为 7 天
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
-os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
-
-# --- (新) Flask-Assets 配置 ---
+# --- Flask-Assets 配置 ---
+# (这一部分是“轻量级”的，可以在全局安全定义)
 assets = Environment(app)
-# 在非 DEBUG 模式下 (如 Gunicorn 运行时)，禁用自动构建
 app.config['ASSETS_AUTO_BUILD'] = app.config.get('DEBUG', False)
-# 在 DEBUG 模式下，不合并文件，以便于调试
 app.config['ASSETS_DEBUG'] = app.config.get('DEBUG', False)
 
-# 1. 定义 JS 包 (注意：顺序至关重要！)
 js_bundle = Bundle(
     'js/core.js',
     'js/app.js',
     'js/main.js',
-    filters='jsmin',       # 使用 jsmin 压缩
-    output='script.min.js' # 输出文件名
+    filters='jsmin',
+    output='script.min.js'
 )
-
-# 2. 定义 CSS 包
 css_bundle = Bundle(
     'css/main.css',
     'css/sidebar.css',
     'css/topbar.css',
     'css/chat.css',
     'css/modals.css',
-    filters='cssmin',      # 使用 cssmin 压缩
-    output='style.min.css' # 输出文件名
+    filters='cssmin',
+    output='style.min.css'
 )
-
-# 3. 注册包
 assets.register('js_all', js_bundle)
 assets.register('css_all', css_bundle)
 # --- Assets 配置结束 ---
 
+# --- (*** 注意 ***) ---
+# 所有依赖 `config.py` 的代码都已移到下面的运行时函数中
+# `flask assets build` 将在此处停止导入
+# --- (*** 注意 ***) ---
 
-# --- 启动自检 ---
+
+# --- 函数定义 (安全) ---
+
 def _startup_self_check():
+    """在运行时执行的启动自检"""
+    # 在函数内部导入 config
+    import config
     services = [
         {"name": "Embedding", "url": config.EMBEDDING_API_URL, "token": config.EMBEDDING_API_TOKEN, "endpoint": "/v1/embeddings", "payload": {"model": config.EMBEDDING_MODEL, "input": ["ping"]}},
         {"name": "Reranker", "url": config.RERANKER_API_URL, "token": config.RERANKER_API_TOKEN, "endpoint": "/v1/rerank", "payload": {"model": config.RERANKER_MODEL, "query": "ping", "documents": ["a", "b"]}},
         {"name": "Chat", "url": config.CHAT_API_URL, "token": config.CHAT_API_TOKEN, "endpoint": "/v1/chat/completions", "payload": {"model": config.CHAT_MODEL, "messages": [{"role": "user", "content": "ping"}]}}
     ]
     errors = []
+    logger = logging.getLogger("app") # 获取在 _init_runtime_app 中配置的 logger
     for s in services:
         if not s["url"] or not s["token"]:
             errors.append(f"缺少 {s['name']} 服务的 API_URL 或 API_TOKEN")
@@ -102,16 +78,24 @@ def _startup_self_check():
         logger.info("[启动自检] 所有外部服务连通性检查通过。")
 
 
-# --- 蓝图注册 ---
-app.register_blueprint(views_bp, url_prefix='/chat')
-app.register_blueprint(auth_bp, url_prefix='/chat')
-app.register_blueprint(api_bp, url_prefix='/chat')
+def register_blueprints(app_instance):
+    """在运行时注册蓝图的辅助函数"""
+    from blueprints.api import api_bp
+    from blueprints.auth import auth_bp
+    from blueprints.views import views_bp
+
+    app_instance.register_blueprint(views_bp, url_prefix='/chat')
+    app_instance.register_blueprint(auth_bp, url_prefix='/chat')
+    app_instance.register_blueprint(api_bp, url_prefix='/chat')
 
 
-# --- 健康检查与后台任务 ---
 def archive_old_messages_task(days=90, batch_size=2000):
     """归档旧消息的任务，由后台工作线程执行。"""
+    import config
+    from database import engine
     from sqlalchemy import text
+    logger = logging.getLogger("app")
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     logger.info("开始归档 %s 天前的旧消息...", days)
     processed_count = 0
@@ -131,20 +115,25 @@ def archive_old_messages_task(days=90, batch_size=2000):
 @app.route("/healthz")
 def healthz():
     """健康检查，并周期性地将归档任务加入队列。"""
+    from database import redis_client
+    logger = logging.getLogger("app")
+
     if redis_client:
-        # 每小时触发一次归档任务
         if redis_client.set("archive:lock", "1", ex=3600, nx=True):
             logger.info("将归档任务加入队列。")
             redis_client.lpush("task_queue", json.dumps({"task": "archive_old_messages"}))
     return "ok"
 
-# --- 后台工作线程 ---
+
 def task_worker():
     """后台任务处理器，从 Redis 队列中消费任务。"""
+    import rag
+    from database import redis_client
+    logger = logging.getLogger("app")
+
     logger.info("后台任务处理器已启动。")
     while True:
         try:
-            # 使用阻塞式弹出，高效等待任务
             _queue, task_json = redis_client.brpop("task_queue", timeout=0)
             task_data = json.loads(task_json)
             task_name = task_data.get("task")
@@ -159,11 +148,10 @@ def task_worker():
             else:
                 logger.warning("未知任务类型: %s", task_name)
 
-        # 修复：从 redis 模块而不是 redis_client 实例中引用异常
         except redis.exceptions.ConnectionError as e:
             logger.error("Redis 连接错误，任务处理器暂停5秒: %s", e)
             time.sleep(5)
-        except TypeError: # brpop 在超时时返回 None
+        except TypeError:
             continue
         except Exception as e:
             logger.exception("任务处理器发生未知错误: %s", e)
@@ -171,6 +159,9 @@ def task_worker():
 
 def webhook_watcher():
     """后台 Webhook 计时器监视器。"""
+    from database import redis_client
+    logger = logging.getLogger("app")
+
     logger.info("Webhook 监视器已启动。")
     while True:
         try:
@@ -179,52 +170,68 @@ def webhook_watcher():
                 due_time = int(due_time_str)
                 if time.time() > due_time:
                     logger.info("Webhook 计时器到期，触发优雅刷新。")
-                    # 使用锁确保只有一个 worker 实例能触发
                     if redis_client.set("webhook:trigger_lock", "1", ex=60, nx=True):
                         redis_client.delete("webhook:refresh_timer_due")
-                        # 触发一个优雅刷新任务
                         redis_client.lpush("task_queue", json.dumps({"task": "refresh_all"}))
 
-        # 修复：从 redis 模块而不是 redis_client 实例中引用异常
         except redis.exceptions.ConnectionError as e:
             logger.error("Redis 连接错误，Webhook 监视器暂停5秒: %s", e)
             time.sleep(5)
         except Exception as e:
             logger.exception("Webhook 监视器发生未知错误: %s", e)
 
-        time.sleep(5) # 每5秒检查一次
+        time.sleep(5)
 
-# --- 应用启动 ---
-if __name__ == "__main__":
-    logger.info("This app is intended to be run with gunicorn, e.g.: gunicorn -w 2 -k gthread -b 0.0.0.0:%s app:app", config.PORT)
-    # (新) 在本地开发时启用 DEBUG 模式，这将触发 Flask-Assets 的自动重载
-    app.config['DEBUG'] = True
-    app.config['ASSETS_DEBUG'] = True
-    app.config['ASSETS_AUTO_BUILD'] = True
-    app.run(host="0.0.0.0", port=config.PORT, use_reloader=True) # use_reloader=True
-else:
-    # 修复 #2：在 gunicorn 启动模式下执行初始化。
-    # gunicorn 会为每个 worker 进程执行一次此代码块。为避免重复执行初始化任务和产生重复日志，
-    # 我们使用 Redis 锁来确保只有一个 worker 执行 `db_init` 和 `_startup_self_check`。
+# --- 应用启动 (运行时) ---
+def _init_runtime_app(app_instance):
+    """辅助函数：在运行时加载配置、初始化数据库和后台任务"""
+
+    # 1. 在运行时导入 config
+    import config
+
+    # 2. 在运行时配置日志
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+    )
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    logger = logging.getLogger("app") # Get logger *after* config
+
+    # 3. 在运行时执行配置检查
+    if not config.SECRET_KEY:
+        logger.critical("SECRET_KEY 未设置，拒绝启动。")
+        raise SystemExit(1)
+    if config.OUTLINE_WEBHOOK_SIGN and not config.OUTLINE_WEBHOOK_SECRET:
+        logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
+        raise SystemExit(1)
+
+    # 4. 在运行时设置 app 配置
+    app_instance.secret_key = config.SECRET_KEY
+    app_instance.config["JSON_AS_ASCII"] = False
+    app_instance.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
+    app_instance.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+    os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
+    os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
+
+    # 5. 在运行时注册蓝图
+    register_blueprints(app_instance)
+
+    # 6. 在运行时初始化数据库和任务
     try:
+        from database import db_init, redis_client
+
         should_initialize = True
         if redis_client:
-            # 尝试获取一个短时锁。如果成功，此 worker 负责初始化。
-            # nx=True 确保只有第一个进程可以设置成功。
             if not redis_client.set("app:startup:lock", "1", ex=60, nx=True):
                 should_initialize = False
 
         if should_initialize:
-            # 此 worker 获取了锁（或无 Redis），执行一次性初始化。
             db_init()
             _startup_self_check()
         else:
-            # 其他 worker 等待几秒钟，以确保第一个 worker 完成了数据库等初始化。
             logger.info(f"Worker (pid: {os.getpid()}) 等待主初始化完成...")
             time.sleep(5)
 
-        # 所有 worker 都需要启动自己的后台任务线程，形成一个健壮的、多进程的消费者池。
-        # 任务队列 (Redis) 和任务级锁 (Redis) 会确保任务不会被重复处理。
         if redis_client:
             threading.Thread(target=task_worker, daemon=True).start()
             threading.Thread(target=webhook_watcher, daemon=True).start()
@@ -234,3 +241,42 @@ else:
     except Exception as e:
         logger.exception("应用启动时初始化失败: %s", e)
         raise SystemExit(1)
+
+if __name__ == "__main__":
+    # 临时的 logger，因为配置尚未加载
+    temp_logger = logging.getLogger("pre-init")
+    temp_logger.setLevel(logging.INFO)
+    temp_logger.info("This app is intended to be run with gunicorn...")
+
+    app.config['DEBUG'] = True
+    app.config['ASSETS_DEBUG'] = True
+    app.config['ASSETS_AUTO_BUILD'] = True
+
+    # 在本地运行时初始化所有配置和服务
+    _init_runtime_app(app)
+
+    # 使用在 _init_runtime_app 中配置的 logger
+    logging.getLogger("app").info(f"Starting local server...")
+    # (*** 已修改 ***) 从 config 导入 PORT，因为 config 此时已被加载
+    import config
+    app.run(host="0.0.0.0", port=config.PORT, use_reloader=True)
+else:
+    # Gunicorn 或 'flask' 命令导入时
+
+    # (*** 关键修复 ***)
+    # 检查我们是否在 'flask assets' 命令上下文中
+    # 'flask' 命令会将 'flask' 作为 sys.argv[0] 的一部分
+    # 并且子命令 (如 'assets') 会在 sys.argv[1]
+    is_assets_command = False
+    if 'flask' in sys.argv[0] and len(sys.argv) > 1 and sys.argv[1] == 'assets':
+        is_assets_command = True
+
+    # 仅当 *不是* 'assets' 命令时（即 Gunicorn 启动时）
+    # 才执行完整的运行时初始化
+    if not is_assets_command:
+        _init_runtime_app(app)
+    else:
+        # 是 'flask assets build' 命令：
+        # 我们在文件顶部定义的 app 和 assets 已经足够了
+        # 不需要初始化数据库、蓝图或后台任务
+        pass

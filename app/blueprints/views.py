@@ -52,14 +52,6 @@ def chat_page_with_guid(conv_guid: str):
         return resp
     return chat_page()
 
-# --- (已移除) /static/style.min.css 路由 ---
-# Flask-Assets 会自动处理这个路由
-
-# --- (已移除) /static/script.min.js 路由 ---
-# Flask-Assets 会自动处理这个路由
-
-# --- (保留) 所有图片和 Favicon 路由 ---
-
 @views_bp.route("/static/img/DeepSeek.svg")
 def chat_static_deepseek_svg():
     return _serve_static_with_cache("img/DeepSeek.svg", "image/svg+xml")
@@ -88,10 +80,10 @@ def chat_static_openai_svg():
 def chat_static_thudm_svg():
     return _serve_static_with_cache("img/thudm.svg", "image/svg+xml")
 
-@views_bp.route("/static/favicon.ico")
+@views_bp.route("/static/img/favicon.ico")
 def chat_static_favicon_ico():
-    return _serve_static_with_cache("favicon.ico", "image/x-icon")
+    return _serve_static_with_cache("img/favicon.ico", "image/x-icon")
 
-@views_bp.route("/static/favicon.svg")
+@views_bp.route("/static/img/favicon.svg")
 def chat_static_favicon_svg():
-    return _serve_static_with_cache("favicon.svg", "image/svg+xml")
+    return _serve_static_with_cache("img/favicon.svg", "image/svg+xml")
