@@ -208,14 +208,16 @@ qEl.addEventListener('keydown', (e) => {
         function updateModelButtonLook(modelId, btnElement) {
             const modelConf = MODELS[modelId] || {};
             let iconHtml;
-            const altText = `alt="${modelConf.name || 'Model'}"`;
+
+            // 修复：不要将 alt 属性单独定义为模板字符串
+            const altTextValue = modelConf.name || 'Model'; // 直接获取 alt 属性的值
 
             if (modelId.includes('moonshotai')) {
                 btnElement.classList.add('moonshot-dark');
-                iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
+                iconHtml = `<img src="${modelConf.icon || ''}" alt="${altTextValue}" style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
             } else {
                 btnElement.classList.remove('moonshot-dark');
-                iconHtml = `<img src="${modelConf.icon || ''}" ${altText} style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+                iconHtml = `<img src="${modelConf.icon || ''}" alt="${altTextValue}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
             }
             btnElement.innerHTML = iconHtml;
         }
