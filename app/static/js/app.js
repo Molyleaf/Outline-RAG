@@ -3,13 +3,15 @@ async function loadUser() {
     if (!u) return;
     userInfo = u;
     // 主界面右上角仍显示用户头像
-    avatar.style.backgroundImage = `url('${u.avatar_url || ''}')`;
+    // 修复：使用字符串拼接
+    avatar.style.backgroundImage = 'url(\'' + (u.avatar_url || '') + '\')';
 
     // 仅显示“你好”或“你好，{用户名}！”
     const greetTitle = document.querySelector('#greeting .greet-title');
     if (greetTitle) {
         const name = (u.name || u.username || '').trim();
-        greetTitle.textContent = name ? `你好，${name}！` : '你好！';
+        // 修复：使用字符串拼接
+        greetTitle.textContent = name ? '你好，' + name + '！' : '你好！';
     }
 }
 
@@ -119,14 +121,15 @@ async function loadConvs() {
         rename.onclick = async (e) => {
             e.stopPropagation();
             const oldTitle = titleEl.textContent;
-            rowMenu.innerHTML = `
-                <div class="conv-pop-input-group">
-                    <input type="text" value="${oldTitle.replace(/"/g, '&quot;')}">
-                    <div class="conv-pop-actions">
-                        <button class="cancel">取消</button>
-                        <button class="primary ok">确定</button>
-                    </div>
-                </div>`;
+            // 修复：使用字符串拼接
+            rowMenu.innerHTML =
+                '<div class="conv-pop-input-group">' +
+                '<input type="text" value="' + oldTitle.replace(/"/g, '&quot;') + '">' +
+                '<div class="conv-pop-actions">' +
+                '<button class="cancel">取消</button>' +
+                '<button class="primary ok">确定</button>' +
+                '</div>' +
+                '</div>';
 
             const input = rowMenu.querySelector('input');
             input.focus();
@@ -169,12 +172,13 @@ async function loadConvs() {
         del.onclick = async (e) => {
             e.stopPropagation();
 
-            rowMenu.innerHTML = `
-                <div class="conv-pop-confirm-text">确定删除该会话？</div>
-                <div class="conv-pop-actions">
-                    <button class="cancel">取消</button>
-                    <button class="primary delete">删除</button>
-                </div>`;
+            // 修复：使用字符串拼接
+            rowMenu.innerHTML =
+                '<div class="conv-pop-confirm-text">确定删除该会话？</div>' +
+                '<div class="conv-pop-actions">' +
+                '<button class="cancel">取消</button>' +
+                '<button class="primary delete">删除</button>' +
+                '</div>';
 
             rowMenu.querySelector('.cancel').onclick = (e) => {
                 e.stopPropagation();
@@ -252,10 +256,11 @@ async function loadConvs() {
                 e.preventDefault(); // 阻止后续的 click 和滚动
 
                 // --- 使用自定义底部弹窗 ---
-                const menuHtml = `
-                    <div class="mobile-menu-item" data-action="rename">重命名</div>
-                    <div class="mobile-menu-item danger" data-action="delete">删除对话</div>
-                `;
+                // 修复：使用字符串拼接
+                const menuHtml =
+                    '<div class="mobile-menu-item" data-action="rename">重命名</div>' +
+                    '<div class="mobile-menu-item danger" data-action="delete">删除对话</div>';
+
                 showMobileSheet(menuHtml, '对话选项');
 
                 // 动态绑定点击事件
@@ -340,15 +345,15 @@ async function loadMessages() {
             greet = document.createElement('div');
             greet.id = 'greeting';
             greet.className = 'greeting';
-            greet.innerHTML = `
-                 <div class="greet-title">你好！</div>
-                 <div class="greet-sub">随时提问，或从以下示例开始</div>
-                 <div class="greet-suggestions">
-                     <button class="chip">总结新手教程</button>
-                     <button class="chip">拉汶帝国完蛋了吗</button>
-                     <button class="chip">开发组的烂摊子怎么样了</button>
-                 </div>
-             `;
+            // 修复：使用字符串拼接
+            greet.innerHTML =
+                '<div class="greet-title">你好！</div>' +
+                '<div class="greet-sub">随时提问，或从以下示例开始</div>' +
+                '<div class="greet-suggestions">' +
+                '<button class="chip">总结新手教程</button>' +
+                '<button class="chip">拉汶帝国完蛋了吗</button>' +
+                '<button class="chip">开发组的烂摊子怎么样了</button>' +
+                '</div>';
             chatEl.appendChild(greet);
             // 绑定示例 chip 点击
             greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
@@ -362,7 +367,8 @@ async function loadMessages() {
         const greetTitle = greet.querySelector('.greet-title');
         if (greetTitle) {
             const name = (userInfo?.name || userInfo?.username || '').trim();
-            greetTitle.textContent = name ? `你好，${name}！` : '你好！';
+            // 修复：使用字符串拼接
+            greetTitle.textContent = name ? '你好，' + name + '！' : '你好！';
         }
         greet.style.display = 'block';
         return;
@@ -383,7 +389,8 @@ function appendMsg(role, text, metadata = {}) {
     avatarEl.className = 'avatar';
     if (role === 'assistant') {
         const avatarUrl = getAvatarUrlForModel(metadata.model);
-        avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+        // 修复：使用字符串拼接
+        avatarEl.style.backgroundImage = 'url(\'' + avatarUrl + '\')';
 
         // Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
         if (metadata.model && metadata.model.includes('moonshotai')) {
@@ -415,8 +422,9 @@ function appendMsg(role, text, metadata = {}) {
         const topP = typeof metadata.top_p === 'number' ? metadata.top_p.toFixed(2) : 'N/A';
         const time = metadata.created_at ? new Date(metadata.created_at).toLocaleString() : '';
 
-        let metaText = `模型: ${modelName} · Temp: ${temp} · Top-P: ${topP}`;
-        if (time) metaText += ` · ${time}`;
+        // 修复：使用字符串拼接
+        let metaText = '模型: ' + modelName + ' · Temp: ' + temp + ' · Top-P: ' + topP;
+        if (time) metaText += ' · ' + time;
 
         metaEl.textContent = metaText;
         // 放在 bubble-inner 外部，气泡的下方
@@ -578,7 +586,8 @@ async function sendQuestion() {
                             const avatarUrl = getAvatarUrlForModel(j.model);
                             const avatarEl = placeholderDiv.querySelector('.avatar');
                             if (avatarEl) {
-                                avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+                                // 修复：使用字符串拼接
+                                avatarEl.style.backgroundImage = 'url(\'' + avatarUrl + '\')';
 
                                 if (j.model.includes('moonshotai')) {
                                     avatarEl.style.backgroundColor = 'black';
@@ -671,4 +680,3 @@ async function sendQuestion() {
         toast('连接中断', 'warning');
     }
 }
-// --- 响应结束 ---

@@ -98,7 +98,8 @@ function toast(message, variant = 'primary', timeout = 3000) {
     const el = document.createElement('sl-alert');
     el.variant = variant; // 'primary' | 'success' | 'neutral' | 'warning' | 'danger'
     el.closable = true;
-    el.innerHTML = `<sl-icon name="${variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle'}" slot="icon"></sl-icon>${message}`;
+    // 修复：使用字符串拼接
+    el.innerHTML = '<sl-icon name="' + (variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle') + '" slot="icon"></sl-icon>' + message;
 
     // (Req 3) 兼容：若 Shoelace 组件尚未注册，降级为直接打开
     if (typeof el.toast === 'function') {
@@ -123,11 +124,12 @@ function confirmDialog(message, { okText = '确定', cancelText = '取消' } = {
     return new Promise(resolve => {
         const dlg = document.createElement('sl-dialog');
         dlg.label = '请确认';
-        dlg.innerHTML = `<div style="line-height:1.6">${message}</div>
-        <div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">
-            <sl-button class="cancel" variant="neutral">${cancelText}</sl-button>
-            <sl-button class="ok" variant="primary">${okText}</sl-button>
-        </div>`;
+        // 修复：使用字符串拼接
+        dlg.innerHTML = '<div style="line-height:1.6">' + message + '</div>' +
+            '<div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">' +
+            '<sl-button class="cancel" variant="neutral">' + cancelText + '</sl-button>' +
+            '<sl-button class="ok" variant="primary">' + okText + '</sl-button>' +
+            '</div>';
         document.body.appendChild(dlg);
 
         // 创建一个健壮的隐藏对话框的辅助函数
@@ -156,12 +158,13 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
     return new Promise(resolve => {
         const dlg = document.createElement('sl-dialog');
         dlg.label = title || '输入';
-        dlg.innerHTML = `
-          <sl-input value="${defaultValue.replace(/"/g, '&quot;')}" placeholder="${placeholder.replace(/"/g, '&quot;')}"></sl-input>
-          <div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">
-            <sl-button class="cancel" variant="neutral">${cancelText}</sl-button>
-            <sl-button class="ok" variant="primary">${okText}</sl-button>
-          </div>`;
+        // 修复：使用字符串拼接
+        dlg.innerHTML =
+            '<sl-input value="' + defaultValue.replace(/"/g, '&quot;') + '" placeholder="' + placeholder.replace(/"/g, '&quot;') + '"></sl-input>' +
+            '<div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">' +
+            '<sl-button class="cancel" variant="neutral">' + cancelText + '</sl-button>' +
+            '<sl-button class="ok" variant="primary">' + okText + '</sl-button>' +
+            '</div>';
         document.body.appendChild(dlg);
         const input = dlg.querySelector('sl-input');
 
@@ -269,5 +272,6 @@ function toSameOriginUrl(c) {
             }
         } catch (_) {}
     }
-    return c?.id ? `${location.origin}/chat/${c.id}` : null;
+    // 修复：使用字符串拼接
+    return c?.id ? location.origin + '/chat/' + c.id : null;
 }

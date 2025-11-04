@@ -19,7 +19,8 @@ avatar.addEventListener('click', () => {
             localStorage.setItem('theme', t);
             document.documentElement.setAttribute('data-theme', (t === 'light' || t === 'dark') ? t : 'system');
             applyActive();
-            toast(`已切换为${t === 'system' ? '系统' : t === 'light' ? '浅色' : '深色'}主题`, 'success', 1800);
+            // 修复：使用字符串拼接
+            toast('已切换为' + (t === 'system' ? '系统' : t === 'light' ? '浅色' : '深色') + '主题', 'success', 1800);
             // 点击后关闭菜单
             menu.classList.remove('visible');
         });
@@ -105,15 +106,15 @@ newConvBtn.addEventListener('click', async (e) => {
         greet = document.createElement('div');
         greet.id = 'greeting';
         greet.className = 'greeting';
-        greet.innerHTML = `
-            <div class="greet-title">你好！</div>
-            <div class="greet-sub">随时提问，或从以下示例开始</div>
-            <div class="greet-suggestions">
-                <button class="chip">总结新手教程</button>
-                <button class="chip">拉汶帝国完蛋了吗</button>
-                <button class="chip">开发组的烂摊子怎么样了</button>
-            </div>
-        `;
+        // 修复：使用字符串拼接
+        greet.innerHTML =
+            '<div class="greet-title">你好！</div>' +
+            '<div class="greet-sub">随时提问，或从以下示例开始</div>' +
+            '<div class="greet-suggestions">' +
+            '<button class="chip">总结新手教程</button>' +
+            '<button class="chip">拉汶帝国完蛋了吗</button>' +
+            '<button class="chip">开发组的烂摊子怎么样了</button>' +
+            '</div>';
         chatEl.appendChild(greet);
         // 绑定示例 chip 点击
         greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
@@ -127,7 +128,8 @@ newConvBtn.addEventListener('click', async (e) => {
     const greetTitle = greet.querySelector('.greet-title');
     if (greetTitle) {
         const name = (userInfo?.name || userInfo?.username || '').trim();
-        greetTitle.textContent = name ? `你好，${name}！` : '你好！';
+        // 修复：使用字符串拼接
+        greetTitle.textContent = name ? '你好，' + name + '！' : '你好！';
     }
     greet.style.display = 'block';
 
@@ -180,21 +182,23 @@ qEl.addEventListener('keydown', (e) => {
 
 (async function init() {
     // --- 适配新HTML：设置顶部操作栏 ---
+    // 修复：整个函数替换为使用 (+) 和 (') 的版本
     function setupTopbarActions() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;
 
-        // 将 paramSliderHtml 移到 setupTopbarActions 顶部
-        const paramSliderHtml = (label, value, max, step) => `
-            <div class="param-slider">
-                <label><span>${label}</span><input type="number" class="param-input" value="${value}" step="${step}" max="${max}"></label>
-                <input type="range" class="param-range" value="${value}" min="0" max="${max}" step="${step}">
-            </div>`;
+        // 修复：使用字符串拼接 (+) 替换所有模板字符串 (`)
+        const paramSliderHtml = (label, value, max, step) =>
+            '<div class="param-slider">' +
+            '<label><span>' + label + '</span><input type="number" class="param-input" value="' + value + '" step="' + step + '" max="' + max + '"></label>' +
+            '<input type="range" class="param-range" value="' + value + '" min="0" max="' + max + '" step="' + step + '">' +
+            '</div>';
 
         const uploadLabel = actionsContainer.querySelector('label.upload');
         const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
         if (uploadSpan) {
-            uploadSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>`;
+            // 修复：使用常规字符串 (') 替换模板字符串 (`)
+            uploadSpan.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>';
             uploadSpan.style.width = '40px';
             uploadSpan.style.height = '40px';
             uploadSpan.style.borderRadius = '50%';
@@ -204,20 +208,19 @@ qEl.addEventListener('keydown', (e) => {
             uploadSpan.style.justifyContent = 'center';
         }
 
-        // 更新模型按钮外观的辅助函数
+        // 更新模型按钮外观的辅助函数 (已在之前修复为使用 +)
         function updateModelButtonLook(modelId, btnElement) {
             const modelConf = MODELS[modelId] || {};
             let iconHtml;
-
-            // 修复：不要将 alt 属性单独定义为模板字符串
-            const altTextValue = modelConf.name || 'Model'; // 直接获取 alt 属性的值
+            const altTextValue = modelConf.name || 'Model';
+            const iconSrc = modelConf.icon || '';
 
             if (modelId.includes('moonshotai')) {
                 btnElement.classList.add('moonshot-dark');
-                iconHtml = `<img src="${modelConf.icon || ''}" alt="${altTextValue}" style="width:38px;height:38px;border-radius:50%;padding: 0;">`;
+                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:38px;height:38px;border-radius:50%;padding: 0;">';
             } else {
                 btnElement.classList.remove('moonshot-dark');
-                iconHtml = `<img src="${modelConf.icon || ''}" alt="${altTextValue}" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">`;
+                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">';
             }
             btnElement.innerHTML = iconHtml;
         }
@@ -225,18 +228,21 @@ qEl.addEventListener('keydown', (e) => {
         // 创建新按钮和弹窗
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
-        // 调用辅助函数设置初始外观
         updateModelButtonLook(currentModelId, modelBtn);
 
         const tempBtn = document.createElement('button');
         tempBtn.className = 'btn tonal';
-        tempBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>`;
-        tempBtn.title = `Temperature: ${currentTemperature}`;
+        // 修复：使用常规字符串 (') 替换模板字符串 (`)
+        tempBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>';
+        // 修复：使用字符串拼接 (+) 替换模板字符串 (`) (这是导致新错误的地方)
+        tempBtn.title = 'Temperature: ' + currentTemperature;
 
         const topPBtn = document.createElement('button');
         topPBtn.className = 'btn tonal';
-        topPBtn.innerHTML = `<b>P</b>`;
-        topPBtn.title = `Top-P: ${currentTopP}`;
+        // 修复：使用常规字符串 (') 替换模板字符串 (`)
+        topPBtn.innerHTML = '<b>P</b>';
+        // 修复：使用字符串拼接 (+) 替换模板字符串 (`)
+        topPBtn.title = 'Top-P: ' + currentTopP;
 
         [modelBtn, tempBtn, topPBtn].forEach(btn => {
             btn.style.width = '40px';
@@ -253,23 +259,25 @@ qEl.addEventListener('keydown', (e) => {
         }
 
         // 组合移动端模型菜单的 HTML
-        const mobileModelMenuHtml = () => `
-            <div class="mobile-sheet-group">
-                <div class="mobile-sheet-label">模型</div>
-                <div class="model-menu mobile">
-                    ${Object.entries(MODELS).map(([id, m]) =>
-            `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
-                            <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
-                        </div>`).join('')}
-                </div>
-            </div>
-            <div class="mobile-sheet-group">
-                ${paramSliderHtml('Temperature', currentTemperature, 2, 0.05)}
-            </div>
-            <div class="mobile-sheet-group">
-                ${paramSliderHtml('Top-P', currentTopP, 2, 0.05)}
-            </div>
-        `;
+        // 修复：使用字符串拼接 (+) 替换所有模板字符串 (`)
+        const mobileModelMenuHtml = () =>
+            '<div class="mobile-sheet-group">' +
+            '<div class="mobile-sheet-label">模型</div>' +
+            '<div class="model-menu mobile">' +
+            Object.entries(MODELS).map(([id, m]) =>
+                // 修复：内部 map 也使用 +
+                '<div class="model-item ' + (id === currentModelId ? 'active' : '') + '" data-id="' + id + '">' +
+                '<img src="' + m.icon + '" alt="' + m.name + '"><span>' + m.name + '</span>' +
+                '</div>'
+            ).join('') +
+            '</div>' +
+            '</div>' +
+            '<div class="mobile-sheet-group">' +
+            paramSliderHtml('Temperature', currentTemperature, 2, 0.05) + // 已修复
+            '</div>' +
+            '<div class="mobile-sheet-group">' +
+            paramSliderHtml('Top-P', currentTopP, 2, 0.05) + // 已修复
+            '</div>';
 
         // 弹窗逻辑
         function createPopover(btn, contentHtml, onOpen) {
@@ -284,9 +292,8 @@ qEl.addEventListener('keydown', (e) => {
                 // 移动端使用自定义底部弹出
                 if (window.innerWidth <= 768 && (btn === tempBtn || btn === topPBtn || btn === modelBtn)) {
 
-                    // 统一使用模型按钮的弹窗
-                    const fullMobileHtml = mobileModelMenuHtml();
-                    showMobileSheet(fullMobileHtml, '模型设置'); // 硬编码 "模型设置"
+                    const fullMobileHtml = mobileModelMenuHtml(); // 已修复
+                    showMobileSheet(fullMobileHtml, '模型设置');
 
                     // --- 动态绑定所有事件 ---
 
@@ -300,8 +307,9 @@ qEl.addEventListener('keydown', (e) => {
                             currentTopP = modelConf.top_p;
 
                             updateModelButtonLook(currentModelId, modelBtn);
-                            tempBtn.title = `Temperature: ${currentTemperature}`;
-                            topPBtn.title = `Top-P: ${currentTopP}`;
+                            // 修复：使用字符串拼接 (+)
+                            tempBtn.title = 'Temperature: ' + currentTemperature;
+                            topPBtn.title = 'Top-P: ' + currentTopP;
 
                             hideMobileSheet(); // 点击后关闭
                         });
@@ -340,7 +348,8 @@ qEl.addEventListener('keydown', (e) => {
                     // 定位在触发按钮的下方，并对齐右侧
                     pop.style.top = rect.bottom + 8 + 'px';
                     pop.style.left = 'auto';
-                    pop.style.right = `${window.innerWidth - rect.right}px`;
+                    // 修复：使用字符串拼接 (+)
+                    pop.style.right = (window.innerWidth - rect.right) + 'px';
                     pop.style.transform = ''; // 确保没有遗留的 transform
 
                     pop.classList.add('visible'); // 使用 classList
@@ -350,18 +359,19 @@ qEl.addEventListener('keydown', (e) => {
             return pop;
         }
 
-        // 合并桌面端弹窗内容
-        const desktopModelMenuHtml = `
-            <div class="model-menu">${Object.entries(MODELS).map(([id, m]) =>
-            `<div class="model-item ${id === currentModelId ? 'active' : ''}" data-id="${id}">
-                    <img src="${m.icon}" alt="${m.name}"><span>${m.name}</span>
-                </div>`).join('')}
-            </div>
-            <div class="popover-divider"></div>
-            ${paramSliderHtml('Temperature', currentTemperature, 2, 0.05)}
-            <div class="popover-divider"></div>
-            ${paramSliderHtml('Top-P', currentTopP, 2, 0.05)}
-        `;
+        // 修复：使用字符串拼接 (+) 替换所有模板字符串 (`)
+        const desktopModelMenuHtml =
+            '<div class="model-menu">' + Object.entries(MODELS).map(([id, m]) =>
+                // 修复：内部 map 也使用 +
+                '<div class="model-item ' + (id === currentModelId ? 'active' : '') + '" data-id="' + id + '">' +
+                '<img src="' + m.icon + '" alt="' + m.name + '"><span>' + m.name + '</span>' +
+                '</div>'
+            ).join('') +
+            '</div>' +
+            '<div class="popover-divider"></div>' +
+            paramSliderHtml('Temperature', currentTemperature, 2, 0.05) + // 已修复
+            '<div class="popover-divider"></div>' +
+            paramSliderHtml('Top-P', currentTopP, 2, 0.05); // 已修复
 
         // 移除独立的 Temp/TopP 按钮
         tempBtn.style.display = 'none';
@@ -399,8 +409,9 @@ qEl.addEventListener('keydown', (e) => {
                 currentTopP = modelConf.top_p;
 
                 updateModelButtonLook(currentModelId, modelBtn);
-                tempBtn.title = `Temperature: ${currentTemperature}`;
-                topPBtn.title = `Top-P: ${currentTopP}`;
+                // 修复：使用字符串拼接 (+)
+                tempBtn.title = 'Temperature: ' + currentTemperature;
+                topPBtn.title = 'Top-P: ' + currentTopP;
 
                 // 更新 active 状态并关闭
                 modelPop.querySelectorAll('.model-item').forEach(i => i.classList.remove('active'));
@@ -430,7 +441,8 @@ qEl.addEventListener('keydown', (e) => {
                     stateUpdater(num);
                     input.value = num.toFixed(2);
                     range.value = num;
-                    btn.title = `${titlePrefix}: ${num.toFixed(2)}`;
+                    // 修复：使用字符串拼接 (+)
+                    btn.title = titlePrefix + ': ' + num.toFixed(2);
                 }
             };
             input.addEventListener('input', (e) => update(e.target.value));
