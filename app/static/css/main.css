@@ -54,7 +54,7 @@
 
 /* 全局排版 */
 * { box-sizing: border-box; }
-/* [MODIFIED] 合并规则，添加 overflow: hidden 修复全局滚动条 (Req 1, 2) */
+/* [MODIFIED] 移除了 'overflow: hidden' */
 html, body {
     height: 100%;
     margin: 0;
@@ -64,24 +64,23 @@ html, body {
     font-family: system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    line-height: 1.65; /* [MODIFIED] (Req 3) 增大全局行距 (from 1.6) */
+    line-height: 1.65; /* (Req 3) 增大全局行距 (from 1.6) */
     font-size: 16px;
-    overflow: hidden; /* [ADDED] (Req 1, 2) 禁止根元素滚动 */
 }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; }
 
 /* 布局 */
 .app {
-    height: 100%; /* [MODIFIED] (Req 1, 2) (from 100vh) */
+    height: 100%; /* (Req 1, 2) (from 100vh) */
     display: grid;
     grid-template-columns: 280px 1fr;
-    overflow: hidden;
+    overflow: hidden; /* 保留这里的 hidden 是正确的，防止 app 溢出 */
 }
 
 /* 主区 */
 .main {
-    height: 100%; /* [MODIFIED] (Req 1, 2) (from 100vh) */
+    height: 100%; /* (Req 1, 2) (from 100vh) */
     display: grid;
     grid-template-rows: auto 1fr auto;
     background: var(--bg);
