@@ -5,13 +5,15 @@
 	<title>Outline RAG Chat</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<link rel="icon" href="static/favicon.svg" type="image/svg+xml" />
-	<link rel="stylesheet" href="static/css/main.css" />
-	<link rel="stylesheet" href="static/css/sidebar.css" />
-	<link rel="stylesheet" href="static/css/topbar.css" />
-	<link rel="stylesheet" href="static/css/chat.css" />
-	<link rel="stylesheet" href="static/css/modals.css" />
+	<link rel="icon" href="static/favicon.ico" />
+
+	{% assets "css_all" %}
+	<link rel="stylesheet" href="{{ ASSET_URL }}" />
+	{% endassets %}
+
 	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
-	<link rel="stylesheet" href="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.umd.js" defer></script>
+	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" />
+	<script type="module" src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.umd.js" defer></script>
 	<script src="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
 	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/googlecode.min.css">
 	<script>
@@ -58,7 +60,6 @@
 				</div>
 				<div class="menu-divider"></div>
 				<a href="/chat/logout">退出登录</a>
-				<a href="/home">打开 Wiki</a>
 				<a id="refreshAll" href="#">手动刷新数据库</a>
 			</div>
 			<div class="avatar" id="avatar" title="菜单"></div>
@@ -87,12 +88,15 @@
 	</div>
 </div>
 
-<script src="static/js/core.js" defer></script>
-<script src="static/js/app.js" defer></script>
-<script src="static/js/main.js" defer></script>
+{% assets "js_all" %}
+<script src="{{ ASSET_URL }}" defer></script>
+{% endassets %}
 
 <script>
     (function(){
+        // toast 函数此时可能未定义，但 index.html 原始代码就是这样
+        // 理想情况下，这个 script 应该在 script.min.js 加载 *之后* 或依赖 DOMContentLoaded
+        // 但我们保持原始逻辑不变
         const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
         if (m) {
             try {
@@ -103,6 +107,7 @@
         }
     })();
     (function(){
+        // 这个IIFE可以安全运行，因为它只依赖DOM
         document.querySelectorAll('.greet-suggestions .chip').forEach(btn=>{
             btn.addEventListener('click', ()=>{
                 const q = document.getElementById('q');

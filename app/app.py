@@ -9,6 +9,8 @@ from datetime import datetime, timezone, timedelta  # 导入 timedelta
 import redis
 import requests
 from flask import Flask
+# (新) 导入 Flask-Assets
+from flask_assets import Environment, Bundle
 
 import config
 import rag
@@ -42,6 +44,38 @@ app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
 os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
+
+# --- (新) Flask-Assets 配置 ---
+assets = Environment(app)
+# 在非 DEBUG 模式下 (如 Gunicorn 运行时)，禁用自动构建
+app.config['ASSETS_AUTO_BUILD'] = app.config.get('DEBUG', False)
+# 在 DEBUG 模式下，不合并文件，以便于调试
+app.config['ASSETS_DEBUG'] = app.config.get('DEBUG', False)
+
+# 1. 定义 JS 包 (注意：顺序至关重要！)
+js_bundle = Bundle(
+    'js/core.js',
+    'js/app.js',
+    'js/main.js',
+    filters='jsmin',       # 使用 jsmin 压缩
+    output='script.min.js' # 输出文件名
+)
+
+# 2. 定义 CSS 包
+css_bundle = Bundle(
+    'css/main.css',
+    'css/sidebar.css',
+    'css/topbar.css',
+    'css/chat.css',
+    'css/modals.css',
+    filters='cssmin',      # 使用 cssmin 压缩
+    output='style.min.css' # 输出文件名
+)
+
+# 3. 注册包
+assets.register('js_all', js_bundle)
+assets.register('css_all', css_bundle)
+# --- Assets 配置结束 ---
 
 
 # --- 启动自检 ---
@@ -163,7 +197,11 @@ def webhook_watcher():
 # --- 应用启动 ---
 if __name__ == "__main__":
     logger.info("This app is intended to be run with gunicorn, e.g.: gunicorn -w 2 -k gthread -b 0.0.0.0:%s app:app", config.PORT)
-    app.run(host="0.0.0.0", port=config.PORT, use_reloader=False)
+    # (新) 在本地开发时启用 DEBUG 模式，这将触发 Flask-Assets 的自动重载
+    app.config['DEBUG'] = True
+    app.config['ASSETS_DEBUG'] = True
+    app.config['ASSETS_AUTO_BUILD'] = True
+    app.run(host="0.0.0.0", port=config.PORT, use_reloader=True) # use_reloader=True
 else:
     # 修复 #2：在 gunicorn 启动模式下执行初始化。
     # gunicorn 会为每个 worker 进程执行一次此代码块。为避免重复执行初始化任务和产生重复日志，

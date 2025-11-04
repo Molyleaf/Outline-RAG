@@ -52,37 +52,13 @@ def chat_page_with_guid(conv_guid: str):
         return resp
     return chat_page()
 
-@views_bp.route("/static/css/main.css")
-def chat_static_css_main():
-    return _serve_static_with_cache("css/main.css", "text/css", 3600)
+# --- (已移除) /static/style.min.css 路由 ---
+# Flask-Assets 会自动处理这个路由
 
-@views_bp.route("/static/css/sidebar.css")
-def chat_static_css_sidebar():
-    return _serve_static_with_cache("css/sidebar.css", "text/css", 3600)
+# --- (已移除) /static/script.min.js 路由 ---
+# Flask-Assets 会自动处理这个路由
 
-@views_bp.route("/static/css/topbar.css")
-def chat_static_css_topbar():
-    return _serve_static_with_cache("css/topbar.css", "text/css", 3600)
-
-@views_bp.route("/static/css/chat.css")
-def chat_static_css_chat():
-    return _serve_static_with_cache("css/chat.css", "text/css", 3600)
-
-@views_bp.route("/static/css/modals.css")
-def chat_static_css_modals():
-    return _serve_static_with_cache("css/modals.css", "text/css", 3600)
-
-@views_bp.route("/static/js/core.js")
-def chat_static_js_core():
-    return _serve_static_with_cache("js/core.js", "application/javascript")
-
-@views_bp.route("/static/js/app.js")
-def chat_static_js_app():
-    return _serve_static_with_cache("js/app.js", "application/javascript")
-
-@views_bp.route("/static/js/main.js")
-def chat_static_js_main():
-    return _serve_static_with_cache("js/main.js", "application/javascript")
+# --- (保留) 所有图片和 Favicon 路由 ---
 
 @views_bp.route("/static/img/DeepSeek.svg")
 def chat_static_deepseek_svg():
