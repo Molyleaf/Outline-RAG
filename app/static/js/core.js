@@ -109,6 +109,16 @@ function toast(message, variant = 'primary', timeout = 3000) {
         // (Req 3) 降级时才附加到 DOM，并应用定位样式
         el.setAttribute('open', '');
         el.classList.add('toast-fallback'); // 添加一个类以便 CSS 定位
+
+        // [MODIFIED] 修复：内联样式确保在 CSS 加载前 toast 也是 fixed，
+        // 防止在 Shoelace 库加载完成前点击时，
+        // 元素（作为 'display: block' 或 'inline'）占位并导致滚动条。
+        el.style.position = 'fixed';
+        el.style.top = '24px';
+        el.style.right = '24px';
+        el.style.zIndex = '200';
+        el.style.maxWidth = '400px'; // 额外添加一个最大宽度
+
         document.body.appendChild(el);
     }
 

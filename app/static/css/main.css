@@ -54,7 +54,7 @@
 
 /* 全局排版 */
 * { box-sizing: border-box; }
-/* [MODIFIED] 移除了 'overflow: hidden' */
+/* [MODIFIED] 按照用户要求，添加 overflow: hidden */
 html, body {
     height: 100%;
     margin: 0;
@@ -64,26 +64,29 @@ html, body {
     font-family: system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    line-height: 1.65; /* (Req 3) 增大全局行距 (from 1.6) */
+    line-height: 1.65; /* (Req 3) 增大全局行距 */
     font-size: 16px;
+    overflow: hidden; /* [ADDED] 按照用户要求，禁止根元素滚动 */
 }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; }
 
 /* 布局 */
 .app {
-    height: 100%; /* (Req 1, 2) (from 100vh) */
+    height: 100%;
     display: grid;
     grid-template-columns: 280px 1fr;
-    overflow: hidden; /* 保留这里的 hidden 是正确的，防止 app 溢出 */
+    overflow: hidden;
 }
 
 /* 主区 */
+/* [MODIFIED] 按照用户要求，添加 overflow-y: auto */
 .main {
-    height: 100%; /* (Req 1, 2) (from 100vh) */
+    height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
     background: var(--bg);
+    overflow-y: auto; /* [ADDED] 使 .main 成为滚动容器 */
 }
 
 /* 按钮 */
@@ -154,22 +157,27 @@ button { font: inherit; }
 
 
 /* 统一滚动条样式 */
-.chat, #convs, .input textarea, .md-body pre, .mobile-sheet-content {
+.chat, #convs, .input textarea, .md-body pre, .mobile-sheet-content,
+.main { /* [ADDED] 将 .main 也加入滚动条样式 */
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
 }
-.chat::-webkit-scrollbar, #convs::-webkit-scrollbar, .input textarea::-webkit-scrollbar, .md-body pre::-webkit-scrollbar, .mobile-sheet-content::-webkit-scrollbar {
+.chat::-webkit-scrollbar, #convs::-webkit-scrollbar, .input textarea::-webkit-scrollbar, .md-body pre::-webkit-scrollbar, .mobile-sheet-content::-webkit-scrollbar,
+.main::-webkit-scrollbar { /* [ADDED] 将 .main 也加入滚动条样式 */
     width: 8px;
     height: 8px; /* 增加高度以适应水平滚动条（如 pre） */
 }
-.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track, .input textarea::-webkit-scrollbar-track, .md-body pre::-webkit-scrollbar-track, .mobile-sheet-content::-webkit-scrollbar-track {
+.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track, .input textarea::-webkit-scrollbar-track, .md-body pre::-webkit-scrollbar-track, .mobile-sheet-content::-webkit-scrollbar-track,
+.main::-webkit-scrollbar-track { /* [ADDED] 将 .main 也加入滚动条样式 */
     background: transparent;
 }
-.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb, .input textarea::-webkit-scrollbar-thumb, .md-body pre::-webkit-scrollbar-thumb, .mobile-sheet-content::-webkit-scrollbar-thumb {
+.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb, .input textarea::-webkit-scrollbar-thumb, .md-body pre::-webkit-scrollbar-thumb, .mobile-sheet-content::-webkit-scrollbar-thumb,
+.main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
     background-color: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
-.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover, .input textarea::-webkit-scrollbar-thumb:hover, .md-body pre::-webkit-scrollbar-thumb:hover, .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
+.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover, .input textarea::-webkit-scrollbar-thumb:hover, .md-body pre::-webkit-scrollbar-thumb:hover, .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
+.main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
     background-color: rgba(0, 0, 0, 0.4);
 }
 
@@ -178,21 +186,24 @@ button { font: inherit; }
 :root[data-theme="dark"] #convs,
 :root[data-theme="dark"] .input textarea,
 :root[data-theme="dark"] .md-body pre,
-:root[data-theme="dark"] .mobile-sheet-content {
+:root[data-theme="dark"] .mobile-sheet-content,
+:root[data-theme="dark"] .main { /* [ADDED] 将 .main 也加入滚动条样式 */
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb,
 :root[data-theme="dark"] #convs::-webkit-scrollbar-thumb,
 :root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb,
 :root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb,
-:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb {
+:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
     background-color: rgba(255, 255, 255, 0.2);
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb:hover,
 :root[data-theme="dark"] #convs::-webkit-scrollbar-thumb:hover,
 :root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb:hover,
 :root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb:hover,
-:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
+:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"] .main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
     background-color: rgba(255, 255, 255, 0.4);
 }
 
@@ -201,21 +212,24 @@ button { font: inherit; }
     :root[data-theme="system"] #convs,
     :root[data-theme="system"] .input textarea,
     :root[data-theme="system"] .md-body pre,
-    :root[data-theme="system"] .mobile-sheet-content {
+    :root[data-theme="system"] .mobile-sheet-content,
+    :root[data-theme="system"] .main { /* [ADDED] 将 .main 也加入滚动条样式 */
         scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
     :root[data-theme="system"] .chat::-webkit-scrollbar-thumb,
     :root[data-theme="system"] #convs::-webkit-scrollbar-thumb,
     :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb,
     :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb,
-    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb {
+    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb,
+    :root[data-theme="system"] .main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
         background-color: rgba(255, 255, 255, 0.2);
     }
     :root[data-theme="system"] .chat::-webkit-scrollbar-thumb:hover,
     :root[data-theme="system"] #convs::-webkit-scrollbar-thumb:hover,
     :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb:hover,
     :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
-background-color: rgba(255, 255, 255, 0.4);
-}
+    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
+    :root[data-theme="system"] .main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
+        background-color: rgba(255, 255, 255, 0.4);
+    }
 }
