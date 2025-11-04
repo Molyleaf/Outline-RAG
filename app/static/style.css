@@ -139,6 +139,7 @@ button { font: inherit; }
     transform: scale(0.95) translate(-5px, -5px);
     transform-origin: top left;
     transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+    min-width: 160px; /* 确保有足够宽度 */
 }
 .sidebar .conv .conv-menu-pop.visible {
     visibility: visible;
@@ -148,6 +149,63 @@ button { font: inherit; }
 }
 .sidebar .conv .conv-menu-pop > div { padding: 8px 12px; cursor: pointer; white-space: nowrap; }
 .sidebar .conv .conv-menu-pop > div:hover { background: color-mix(in srgb, var(--panel) 50%, var(--bg)); }
+
+/* 侧栏重命名/删除 弹窗样式 */
+.sidebar .conv .conv-menu-pop .conv-pop-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+}
+.sidebar .conv .conv-menu-pop input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+    box-sizing: border-box; /* 确保 padding 不会撑破 */
+}
+.sidebar .conv .conv-menu-pop .conv-pop-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.sidebar .conv .conv-menu-pop .conv-pop-actions button {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    box-shadow: var(--shadow-1);
+}
+.sidebar .conv .conv-menu-pop .conv-pop-actions button.primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+:root[data-theme="dark"] .sidebar .conv .conv-menu-pop .conv-pop-actions button.primary {
+    color: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] .sidebar .conv .conv-menu-pop .conv-pop-actions button.primary {
+        color: var(--bg);
+    }
+}
+.sidebar .conv .conv-menu-pop .conv-pop-actions button:hover {
+    filter: brightness(1.1);
+}
+.sidebar .conv .conv-menu-pop .conv-pop-confirm-text {
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: normal;
+}
+
 
 /* 移动端侧栏 */
 .app .sidebar-veil { display: none; }
@@ -204,9 +262,8 @@ button { font: inherit; }
     justify-content: flex-end;
     gap: 10px;
     padding: 0 12px;
-    border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--panel) 92%, transparent);
-    backdrop-filter: blur(8px) saturate(120%);
+    border-bottom: none;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 80%, transparent) 0%, transparent 100%);
     position: sticky;
     top: 0;
     z-index: 5;
@@ -234,12 +291,11 @@ button { font: inherit; }
 .avatar {
     width: 40px; height: 40px;
     border-radius: 50%;
-    /* (Req 1) background-size: cover; 移到下面更具体的规则中 */
     background-position: center;
     cursor: pointer;
     box-shadow: var(--shadow-1);
 }
-/* (Req 1) 恢复右上角头像的 cover 属性 */
+/* 恢复右上角头像的 cover 属性 */
 #avatar.avatar {
     background-size: cover;
 }
@@ -477,6 +533,8 @@ button { font: inherit; }
     display: inline;
     opacity: 0;
     animation: geminiFadeIn 0.5s ease forwards;
+    /* 让浏览器处理换行 */
+    white-space: pre-wrap;
 }
 
 /* Markdown 表格样式 */
@@ -500,7 +558,7 @@ button { font: inherit; }
     font-weight: 600;
 }
 
-/* (新增) 修复：代码块深色模式 (Req 4) */
+/* 代码块深色模式 */
 :root[data-theme="dark"] .md-body code {
     background: #2a2a2e; /* 一个明确的深色 */
     color: #e0e0e0;
@@ -514,7 +572,7 @@ button { font: inherit; }
     color: inherit; /* 继承 pre 的颜色 */
 }
 
-/* (新增) 修复：代码块系统主题（暗色）(Req 4) */
+/* 代码块系统主题（暗色） */
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] .md-body code {
         background: #2a2a2e;
@@ -768,50 +826,80 @@ sl-menu-item img,
     width: 24px; height: 24px; border-radius: 4px;
 }
 
-/* 自定义聊天区和历史列表滚动条 */
-.chat, #convs {
+/* 禁止选择非文本区域 */
+.avatar, .btn, .hamburger, .model-item, .chip, .menu-radio,
+.sidebar .conv .conv-menu, sl-menu-item, .mobile-menu-item,
+.menu a, .menu .menu-radio, .sidebar .conv .conv-menu-pop > div {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+
+/* 统一滚动条样式 */
+.chat, #convs, .input textarea, .md-body pre, .mobile-sheet-content {
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
 }
-.chat::-webkit-scrollbar, #convs::-webkit-scrollbar {
+.chat::-webkit-scrollbar, #convs::-webkit-scrollbar, .input textarea::-webkit-scrollbar, .md-body pre::-webkit-scrollbar, .mobile-sheet-content::-webkit-scrollbar {
     width: 8px;
+    height: 8px; /* 增加高度以适应水平滚动条（如 pre） */
 }
-.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track {
+.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track, .input textarea::-webkit-scrollbar-track, .md-body pre::-webkit-scrollbar-track, .mobile-sheet-content::-webkit-scrollbar-track {
     background: transparent;
 }
-.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb {
+.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb, .input textarea::-webkit-scrollbar-thumb, .md-body pre::-webkit-scrollbar-thumb, .mobile-sheet-content::-webkit-scrollbar-thumb {
     background-color: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
-.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover {
+.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover, .input textarea::-webkit-scrollbar-thumb:hover, .md-body pre::-webkit-scrollbar-thumb:hover, .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
     background-color: rgba(0, 0, 0, 0.4);
 }
 
 /* 深色模式滚动条 */
 :root[data-theme="dark"] .chat,
-:root[data-theme="dark"] #convs {
+:root[data-theme="dark"] #convs,
+:root[data-theme="dark"] .input textarea,
+:root[data-theme="dark"] .md-body pre,
+:root[data-theme="dark"] .mobile-sheet-content {
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb,
-:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb {
+:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb,
+:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, 0.2);
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb:hover,
-:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb:hover {
+:root[data-theme="dark"] #convs::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] .chat,
-    :root[data-theme="system"] #convs {
+    :root[data-theme="system"] #convs,
+    :root[data-theme="system"] .input textarea,
+    :root[data-theme="system"] .md-body pre,
+    :root[data-theme="system"] .mobile-sheet-content {
         scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
     :root[data-theme="system"] .chat::-webkit-scrollbar-thumb,
-    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb {
+    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb,
+    :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb,
+    :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb,
+    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb {
         background-color: rgba(255, 255, 255, 0.2);
     }
     :root[data-theme="system"] .chat::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb:hover {
+    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb:hover,
+    :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb:hover,
+    :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb:hover,
+    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover {
         background-color: rgba(255, 255, 255, 0.4);
     }
 }

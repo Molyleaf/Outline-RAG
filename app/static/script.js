@@ -7,7 +7,6 @@ const sendBtn = document.getElementById('send');
 const qEl = document.getElementById('q');
 const refreshAll = document.getElementById('refreshAll');
 const fileInput = document.getElementById('fileInput');
-// const streamToggle = document.getElementById('streamToggle');
 const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
@@ -43,15 +42,14 @@ function hideMobileSheet() {
 }
 // 点击遮罩关闭
 mobileSheetOverlay.addEventListener('click', hideMobileSheet);
-// --- 结束 自定义移动端底部弹窗 ---
 
-
-// --- 新增：模型定义与状态管理 ---
+// --- 模型定义与状态管理 ---
 const MODELS = {
     'deepseek-ai/DeepSeek-V3.2-Exp': { name: 'Deepseek', icon: '/chat/static/img/DeepSeek.svg', temp: 0.7, top_p: 0.7 },
     'moonshotai/Kimi-K2-Instruct-0905': { name: 'Kimi K2', icon: '/chat/static/img/moonshotai_new.png', temp: 0.6, top_p: 0.7 },
     'zai-org/GLM-4.6': { name: 'ChatGLM', icon: '/chat/static/img/thudm.svg', temp: 0.6, top_p: 0.95 },
     'Qwen/Qwen3-Next-80B-A3B-Instruct': { name: 'Qwen3-Next', icon: '/chat/static/img/Tongyi.svg', temp: 0.6, top_p: 0.95 },
+    'Qwen/Qwen3-235B-A22B-Thinking-2507': { name: 'Qwen3-Thinking', icon: '/chat/static/img/Tongyi.svg', temp: 0.6, top_p: 0.95 },
     'inclusionAI/Ling-1T': { name:'Ling-1T', icon: '/chat/static/img/ling.png', temp: 0.6, top_p: 0.7 }
 };
 // 默认模型为列表第一个，或从 LocalStorage 读取
@@ -232,14 +230,10 @@ function appendFadeInChunk(chunk, container) {
     const span = document.createElement('span');
     span.className = 'fade-in-chunk';
 
-    // 将 \n 转换回 <br> 以在流式传输时保持换行
-    const fragments = chunk.split('\n');
-    fragments.forEach((fragment, index) => {
-        span.appendChild(document.createTextNode(fragment));
-        if (index < fragments.length - 1) {
-            span.appendChild(document.createElement('br'));
-        }
-    });
+    // (Req 1) 修复：不再将 \n 转换 B-R，直接附加文本节点。
+    // Markdown 解析器 (parseFn) 会在 finalizeStream 或块分割时处理换行。
+    // CSS 中的 white-space: pre-wrap; 会处理显示。
+    span.appendChild(document.createTextNode(chunk));
 
     container.appendChild(span);
     // 始终滚动到底部
@@ -412,6 +406,10 @@ async function loadConvs() {
         const del = document.createElement('div');
         del.textContent = '删除';
 
+        // (Req 4) 将标准菜单项附加到 rowMenu，以便后续重置
+        rowMenu.appendChild(rename);
+        rowMenu.appendChild(del);
+
         // 修改点击逻辑为 PJAX (History API)
         row.addEventListener('click', (e) => {
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
@@ -446,61 +444,136 @@ async function loadConvs() {
 
         // titleEl.onclick = (e) => { e.stopPropagation(); go(); }; // 已被 row click 替代
 
+        // (Req 4) 重构菜单点击逻辑
         menuBtn.onclick = (e) => {
             e.stopPropagation();
-            // 使用 toggle class 切换
-            rowMenu.classList.toggle('visible');
+
+            const wasOpen = rowMenu.classList.contains('visible');
+            const isCustomState = rowMenu.querySelector('.conv-pop-input-group') || rowMenu.querySelector('.conv-pop-confirm-text');
+
+            // 总是先隐藏所有其他弹窗
+            document.querySelectorAll('.conv-menu-pop.visible').forEach(p => {
+                if (p !== rowMenu) {
+                    p.classList.remove('visible');
+                    // (Req 4) 重置其他已打开的弹窗
+                    const otherRename = p.querySelector('[data-action="rename"]');
+                    const otherDel = p.querySelector('[data-action="delete"]');
+                    if (otherRename && otherDel) {
+                        p.innerHTML = '';
+                        p.appendChild(otherRename);
+                        p.appendChild(otherDel);
+                    }
+                }
+            });
+
+            // (Req 4) 总是重置当前菜单内容
+            rowMenu.innerHTML = '';
+            rowMenu.appendChild(rename);
+            rowMenu.appendChild(del);
+
+            // 切换
+            if (!wasOpen || isCustomState) {
+                rowMenu.classList.add('visible');
+            } else {
+                rowMenu.classList.remove('visible');
+            }
         };
 
+        // (Req 4) 重构重命名逻辑，使用内联表单
         rename.onclick = async (e) => {
             e.stopPropagation();
-            const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
-            // 操作后关闭菜单
-            if (val == null) { rowMenu.classList.remove('visible'); return; }
-            const t = val.trim();
-            if (!t) { toast('标题不能为空', 'warning'); return; }
-            // 改为使用 POST /chat/api/conversations/<id>/rename
-            const res = await api(`/chat/api/conversations/${c.id}/rename`, {
-                method: 'POST',
-                body: JSON.stringify({ title: t })
-            });
-            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
-            if (success) {
-                await loadConvs(); // 重新加载列表以更新标题
-                toast('已重命名', 'success');
-            } else {
-                toast(res?.error || '重命名失败', 'danger');
-            }
-            // 操作后关闭菜单
-            rowMenu.classList.remove('visible');
-        };
-        del.onclick = async (e) => {
-            e.stopPropagation();
-            const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
-            // 操作后关闭菜单
-            if (!ok) { rowMenu.classList.remove('visible'); return; }
-            // 改为使用 POST /chat/api/conversations/<id>/delete
-            const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
-            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
-            if (success) {
-                if (String(currentConvId) === String(c.id)) {
-                    currentConvId = null; chatEl.innerHTML = '';
-                    try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
-                    // 删除后显示问候语
-                    document.getElementById('greeting')?.remove();
-                    loadMessages(); // loadMessages 内部会处理 greeting 显示
+            const oldTitle = titleEl.textContent;
+            rowMenu.innerHTML = `
+                <div class="conv-pop-input-group">
+                    <input type="text" value="${oldTitle.replace(/"/g, '&quot;')}">
+                    <div class="conv-pop-actions">
+                        <button class="cancel">取消</button>
+                        <button class="primary ok">确定</button>
+                    </div>
+                </div>`;
+
+            const input = rowMenu.querySelector('input');
+            input.focus();
+            input.select();
+
+            rowMenu.querySelector('.cancel').onclick = (e) => {
+                e.stopPropagation();
+                rowMenu.classList.remove('visible');
+            };
+
+            const handleRename = async () => {
+                const val = input.value;
+                const t = val.trim();
+                if (!t) { toast('标题不能为空', 'warning'); return; }
+                if (t === oldTitle) { // 标题未变，直接关闭
+                    rowMenu.classList.remove('visible');
+                    return;
                 }
-                await loadConvs(); // 重新加载列表
-                toast('已删除', 'success');
-            } else {
-                toast(res?.error || '删除失败', 'danger');
-            }
-            // 操作后关闭菜单
-            rowMenu.classList.remove('visible');
+
+                // API 调用
+                const res = await api(`/chat/api/conversations/${c.id}/rename`, {
+                    method: 'POST',
+                    body: JSON.stringify({ title: t })
+                });
+                const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
+                if (success) {
+                    await loadConvs(); // 重新加载列表以更新标题
+                    toast('已重命名', 'success');
+                } else {
+                    toast(res?.error || '重命名失败', 'danger');
+                }
+                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+            };
+
+            rowMenu.querySelector('.ok').onclick = (e) => { e.stopPropagation(); handleRename(); };
+            input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleRename(); } };
         };
 
-        rowMenu.appendChild(rename);
-        rowMenu.appendChild(del);
+        // (Req 4) 重构删除逻辑，使用内联确认
+        del.onclick = async (e) => {
+            e.stopPropagation();
+
+            rowMenu.innerHTML = `
+                <div class="conv-pop-confirm-text">确定删除该会话？</div>
+                <div class="conv-pop-actions">
+                    <button class="cancel">取消</button>
+                    <button class="primary delete">删除</button>
+                </div>`;
+
+            rowMenu.querySelector('.cancel').onclick = (e) => {
+                e.stopPropagation();
+                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+            };
+
+            rowMenu.querySelector('.delete').onclick = async (e) => {
+                e.stopPropagation();
+
+                // API 调用
+                const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
+                const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
+                if (success) {
+                    if (String(currentConvId) === String(c.id)) {
+                        currentConvId = null; chatEl.innerHTML = '';
+                        try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
+                        // 删除后显示问候语
+                        document.getElementById('greeting')?.remove();
+                        loadMessages(); // loadMessages 内部会处理 greeting 显示
+                    }
+                    await loadConvs(); // 重新加载列表
+                    toast('已删除', 'success');
+                } else {
+                    toast(res?.error || '删除失败', 'danger');
+                }
+                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+            };
+        };
+
+        // (Req 4) 原始的 rename 和 del div 现在作为模板，保存其引用
+        rename.dataset.action = 'rename';
+        del.dataset.action = 'delete';
+
+        // rowMenu.appendChild(rename); // 已在顶部添加
+        // rowMenu.appendChild(del); // 已在顶部添加
         // rowMenu.style.display = 'none'; // 由 CSS 控制
 
         if (!document.__convMenuCloserBound__) {
@@ -512,6 +585,15 @@ async function loadConvs() {
                     // 检查 class 并移除
                     if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
                         pop.classList.remove('visible');
+
+                        // (Req 4) 点击外部时重置菜单内容
+                        const renameTpl = pop.querySelector('[data-action="rename"]');
+                        const delTpl = pop.querySelector('[data-action="delete"]');
+                        if(renameTpl && delTpl) {
+                            pop.innerHTML = '';
+                            pop.appendChild(renameTpl);
+                            pop.appendChild(delTpl);
+                        }
                     }
                 });
             });
@@ -547,14 +629,49 @@ async function loadConvs() {
                 if (renameBtn) {
                     renameBtn.onclick = () => {
                         hideMobileSheet();
-                        // 模拟一个事件对象以复用现有逻辑
-                        rename.onclick(new Event('click', { bubbles: false }));
+                        // (Req 4) 移动端触发 Shoelace promptDialog
+                        // (注意：移动端弹窗未要求修改，保持原 Shoelace 逻辑)
+                        (async () => {
+                            const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
+                            if (val == null) return;
+                            const t = val.trim();
+                            if (!t) { toast('标题不能为空', 'warning'); return; }
+                            const res = await api(`/chat/api/conversations/${c.id}/rename`, {
+                                method: 'POST',
+                                body: JSON.stringify({ title: t })
+                            });
+                            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
+                            if (success) {
+                                await loadConvs();
+                                toast('已重命名', 'success');
+                            } else {
+                                toast(res?.error || '重命名失败', 'danger');
+                            }
+                        })();
                     };
                 }
                 if (deleteBtn) {
                     deleteBtn.onclick = () => {
                         hideMobileSheet();
-                        del.onclick(new Event('click', { bubbles: false }));
+                        // (Req 4) 移动端触发 Shoelace confirmDialog
+                        (async () => {
+                            const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
+                            if (!ok) return;
+                            const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
+                            const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
+                            if (success) {
+                                if (String(currentConvId) === String(c.id)) {
+                                    currentConvId = null; chatEl.innerHTML = '';
+                                    try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
+                                    document.getElementById('greeting')?.remove();
+                                    loadMessages();
+                                }
+                                await loadConvs();
+                                toast('已删除', 'success');
+                            } else {
+                                toast(res?.error || '删除失败', 'danger');
+                            }
+                        })();
                     };
                 }
                 // --- 结束 移动端菜单 ---
