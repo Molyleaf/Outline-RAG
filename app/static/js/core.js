@@ -44,11 +44,16 @@ function hideMobileSheet() {
 // 点击遮罩关闭
 mobileSheetOverlay.addEventListener('click', hideMobileSheet);
 
-// --- (新) 模型定义与状态管理 (由 app.js/loadUser 填充) ---
+// --- 模型定义与状态管理 ---
+// (新) MODELS 现在从 API 动态加载
 let MODELS = {};
-let currentModelId = null;
-let currentTemperature = 0.7; // 默认值
-let currentTopP = 0.7; // 默认值
+
+// 默认模型为列表第一个，或从 LocalStorage 读取
+let currentModelId = localStorage.getItem('chat_model'); // (新) 只读取
+// (新) 验证和设置默认值的逻辑移至 app.js/loadUser
+
+let currentTemperature = 0.7; // (新) 临时默认值
+let currentTopP = 0.7; // (新) 临时默认值
 
 
 // 根据模型名称返回头像 URL 的辅助函数 ---
@@ -56,14 +61,16 @@ function getAvatarUrlForModel(m) {
     const defaultAvatar = '/chat/static/img/openai.svg';
     if (!m) return defaultAvatar;
 
-    // (新) 优先从 MODELS 配置中获取
-    if (MODELS[m] && MODELS[m].icon) {
-        return MODELS[m].icon;
+    // (新) 尝试从 MODELS 获取配置
+    const modelConf = MODELS[m] || {};
+    // (新) 优先使用 icon，其次解析 id
+    const provider = modelConf.icon ? (m.split('/')[0] || '').toLowerCase() : (m.split('/')[0] || '').toLowerCase();
+
+    if (modelConf.icon) {
+        return modelConf.icon;
     }
 
-    // (旧) 回退到按 provider 判断
-    const provider = (m.split('/')[0] || '').toLowerCase();
-
+    // (新) 回退逻辑（如果 icon 字段不存在）
     if (provider === 'deepseek-ai') {
         return '/chat/static/img/DeepSeek.svg';
     } else if (provider === 'qwen') {
@@ -89,8 +96,9 @@ let userInfo = null;
 
 /** Material 风格弹窗与通知（替换 alert/confirm/prompt） */
 function toast(message, variant = 'primary', timeout = 3000) {
+    // 友好提示替换 alert
     const el = document.createElement('sl-alert');
-    el.variant = variant;
+    el.variant = variant; // 'primary' | 'success' | 'neutral' | 'warning' | 'danger'
     el.closable = true;
     el.innerHTML = '<sl-icon name="' + (variant === 'success' ? 'check2-circle' : variant === 'warning' ? 'exclamation-triangle' : variant === 'danger' ? 'x-octagon' : 'info-circle') + '" slot="icon"></sl-icon>' + message;
 
@@ -99,11 +107,13 @@ function toast(message, variant = 'primary', timeout = 3000) {
     } else {
         el.setAttribute('open', '');
         el.classList.add('toast-fallback');
+
         el.style.position = 'fixed';
         el.style.top = '24px';
         el.style.right = '24px';
         el.style.zIndex = '200';
-        el.style.maxWidth = '400px';
+        el.style.maxWidth = '400px'; // 额外添加一个最大宽度
+
         document.body.appendChild(el);
     }
 
@@ -126,6 +136,7 @@ function confirmDialog(message, { okText = '确定', cancelText = '取消' } = {
             '</div>';
         document.body.appendChild(dlg);
 
+        // 创建一个健壮的隐藏对话框的辅助函数
         const hideDialog = () => {
             if (typeof dlg.hide === 'function') {
                 dlg.hide();
@@ -138,6 +149,7 @@ function confirmDialog(message, { okText = '确定', cancelText = '取消' } = {
         dlg.querySelector('.cancel').addEventListener('click', () => { hideDialog(); resolve(false); });
         dlg.querySelector('.ok').addEventListener('click', () => { hideDialog(); resolve(true); });
 
+        // 使用健壮的方式显示对话框
         if (typeof dlg.show === 'function') {
             dlg.show();
         } else {
@@ -159,6 +171,7 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
         document.body.appendChild(dlg);
         const input = dlg.querySelector('sl-input');
 
+        // 创建一个健壮的隐藏对话框的辅助函数
         const hideDialog = () => {
             if (typeof dlg.hide === 'function') {
                 dlg.hide();
@@ -173,6 +186,7 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
         dlg.querySelector('.ok').addEventListener('click', () => done(input.value.trim()));
         dlg.addEventListener('sl-initial-focus', () => input.focus());
 
+        // 使用健壮的方式显示对话框
         if (typeof dlg.show === 'function') {
             dlg.show();
         } else {
@@ -184,11 +198,13 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
 /** Markdown 渲染与代码高亮 */
 function renderMarkdown(md) {
     if (!window.marked) {
+        // 回退：纯文本
         const pre = document.createElement('pre');
         pre.textContent = md || '';
         return pre;
     }
 
+    // 检查 marked.parse (来自 marked.min.js) 或 marked.default.parse (来自 esm 模块的 default export)
     const parse = window.marked.parse || window.marked.default?.parse;
 
     if (typeof parse !== 'function') {
@@ -222,13 +238,29 @@ function animateIn(el) {
 function appendFadeInChunk(chunk, container) {
     if (!chunk || !container) return;
 
-    const span = document.createElement('span');
-    span.className = 'fade-in-chunk';
-    span.appendChild(document.createTextNode(chunk));
-    container.appendChild(span);
+    // (新) 适配 Thinking 块的换行
+    if (container.classList.contains('thinking-content')) {
+        chunk.split('\n').forEach((line, index) => {
+            if (index > 0) {
+                container.appendChild(document.createElement('br'));
+            }
+            const span = document.createElement('span');
+            span.className = 'fade-in-chunk';
+            span.appendChild(document.createTextNode(line));
+            container.appendChild(span);
+        });
+    } else {
+        const span = document.createElement('span');
+        span.className = 'fade-in-chunk';
+        span.appendChild(document.createTextNode(chunk));
+        container.appendChild(span);
+    }
+
+    // 始终滚动到底部
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+// 重命名与删除（确保请求头与响应判定更稳健）
 async function api(path, opts) {
     const init = { credentials: 'include', ...(opts || {}) };
     init.headers = { 'Content-Type': 'application/json', ...(opts && opts.headers || {}) };
@@ -237,10 +269,12 @@ async function api(path, opts) {
     if ((opts && opts.stream) || res.headers.get('content-type')?.includes('text/event-stream')) {
         return res;
     }
+    // 尝试解析 json；失败返回空对象，便于后续判定
     try { return await res.json(); } catch { return { httpOk: res.ok }; }
 }
 
 function toSameOriginUrl(c) {
+    // 优先后端提供的 url；若为绝对地址且同源则直接用，否则回退到 /chat/<id>
     if (c?.url) {
         try {
             const u = new URL(c.url, location.origin);

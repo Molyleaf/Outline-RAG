@@ -126,9 +126,16 @@ def process_doc_batch_task(doc_ids: list):
 
             if ids_to_delete:
                 logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
-                vector_store.delete(ids=ids_to_delete)
+                try:
+                    vector_store.delete(ids=ids_to_delete)
+                except Exception as e:
+                    logger.error(f"调用 vector_store.delete 删除 chunks: {ids_to_delete} 时失败: {e}。继续尝试添加...")
 
-            vector_store.add_documents(chunks)
+            try:
+                vector_store.add_documents(chunks)
+            except Exception as e:
+                logger.error(f"调用 vector_store.add_documents 添加 {len(chunks)} 个 chunks 时失败: {e}。")
+
 
     if redis_client:
         try:
@@ -254,7 +261,10 @@ def delete_doc(doc_id):
         return
 
     if ids_to_delete:
-        vector_store.delete(ids=ids_to_delete)
-        logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
+        try:
+            vector_store.delete(ids=ids_to_delete)
+            logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
+        except Exception as e:
+            logger.error(f"调用 vector_store.delete 删除 {doc_id} (chunks: {ids_to_delete}) 时失败: {e}")
     else:
         logger.info("在 PGVectorStore 中未找到要删除的文档: %s", doc_id)

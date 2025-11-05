@@ -83,6 +83,7 @@
     justify-self: end;
     max-width: 95%;
     min-width: 0;
+    position: relative; /* (新) 为按钮定位 */
 }
 .msg .avatar {
     width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
@@ -110,12 +111,13 @@
     position: relative;
     border: 1px solid var(--border);
     min-width: 0;
+    position: relative; /* (新) 为按钮定位 */
 }
 .msg.user .bubble-inner {
     background: var(--bubble-user);
     border-top-right-radius: 0;
     border: none;
-    line-height: 1.65; /* [MODIFIED] (Req 3, 4) 确保用户气泡行距一致 (from 1.6) */
+    line-height: 1.65;
 }
 .msg.assistant .bubble-inner {
     grid-area: content;
@@ -133,14 +135,99 @@
     margin-top: 0;
 }
 
-/* 分组间距 (Req 4) */
+/* 分组间距 */
 .msg + .msg { margin-top: 12px; }
 .msg.user + .msg.assistant { margin-top: 24px; }
 .msg.assistant + .msg.user { margin-top: 40px; }
 
+/* (新) 消息操作按钮 (复制/编辑) */
+.bubble-actions {
+    position: absolute;
+    bottom: -10px; /* (新) 调整位置到气泡外部下方 */
+    right: 0;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 1;
+}
+/* (新) 助手消息的操作按钮在 .bubble-inner 内部 */
+.msg.assistant .bubble-inner .bubble-actions {
+    position: absolute;
+    top: -10px; /* 调整到 .md-body 的右上方 */
+    right: 0;
+    bottom: auto;
+}
+
+.msg:hover .bubble-actions {
+    opacity: 1;
+}
+
+.btn-icon {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: var(--shadow-1);
+}
+.btn-icon:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+}
+.btn-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* (新) Thinking 块样式 */
+.thinking-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-m);
+    background: color-mix(in srgb, var(--panel) 50%, var(--bg));
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+    border-bottom: 1px solid var(--border);
+}
+.thinking-header svg {
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+}
+.thinking-content {
+    padding: 4px 12px 12px;
+    font-size: 0.9rem;
+    color: var(--text);
+    white-space: pre-wrap; /* 允许换行 */
+}
+.thinking-content .md-body {
+    line-height: 1.6;
+    font-size: 0.9rem;
+}
+.thinking-content .md-body p {
+    margin: 4px 0;
+    text-indent: 0; /* Thinking 块内不缩进 */
+}
+
+
 /* Markdown 展示 */
 .md-body {
-    line-height: 1.75; /* [MODIFIED] (Req 3) (from 1.7) */
+    line-height: 1.75;
     color: var(--text);
     white-space: normal;
     overflow-wrap: break-word;
@@ -148,9 +235,9 @@
     font-size: 16px;
 }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
-.md-body p { margin: 8px 5px; } /* [MODIFIED] (Req 3) (from 5px) */
+.md-body p { margin: 8px 5px; }
 .msg.assistant .md-body > p { text-indent: 2em; }
-.md-body ul, .md-body ol { padding-left: 1.2em; margin: .6em 0; } /* [MODIFIED] (Req 3) (from .4em) */
+.md-body ul, .md-body ol { padding-left: 1.2em; margin: .6em 0; }
 .md-body code {
     background: color-mix(in srgb, var(--panel) 65%, var(--bg));
     padding: 2px 6px;
@@ -250,6 +337,7 @@
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
     padding: 10px 10px 10px 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease; /* (新) */
 }
 .input textarea {
     flex: 1;
@@ -264,6 +352,30 @@
     font-size: 16px;
     font-family: inherit;
 }
+
+/* (新) 编辑状态 UI */
+.input-inner.is-editing {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.cancel-edit-btn {
+    width: 32px;
+    height: 32px;
+    margin-right: 4px;
+    border-color: var(--danger-border);
+    color: var(--danger);
+    background: var(--danger-bg);
+}
+.cancel-edit-btn:hover {
+    background: color-mix(in srgb, var(--danger-bg) 80%, black);
+    color: var(--danger);
+}
+.cancel-edit-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+
 #send {
     width: 40px; height: 40px;
     border-radius: 50% !important;
