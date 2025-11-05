@@ -1,6 +1,7 @@
 # app/config.py
 # 此文件集中管理所有从环境变量加载的配置项
 import os
+import json
 
 # --- 基本配置 ---
 PORT = int(os.getenv("PORT", "8080"))
@@ -29,7 +30,26 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
 
 CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
 CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "your-chat-model")
+# CHAT_MODEL 变量现在作为 RAG 链的默认后备，但主要模型列表来自 CHAT_MODELS_JSON
+CHAT_MODEL = os.getenv("CHAT_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp")
+
+# --- (新) 模型列表配置 ---
+DEFAULT_MODELS_JSON = """
+[
+  {"id": "deepseek-ai/DeepSeek-V3.2-Exp", "name": "Deepseek", "icon": "/chat/static/img/DeepSeek.svg", "temp": 0.7, "top_p": 0.7, "beta": false},
+  {"id": "moonshotai/Kimi-K2-Instruct-0905", "name": "Kimi K2", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": false},
+  {"id": "zai-org/GLM-4.6", "name": "ChatGLM", "icon": "/chat/static/img/thudm.svg", "temp": 0.6, "top_p": 0.95, "beta": false},
+  {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false},
+  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": true},
+  {"id": "inclusionAI/Ling-1T", "name": "Ling-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": true}
+]
+"""
+CHAT_MODELS_JSON = os.getenv("CHAT_MODELS_JSON", DEFAULT_MODELS_JSON)
+
+# --- (新) Beta 用户授权 ---
+# 逗号分隔的 user_id 列表
+BETA_AUTHORIZED_USER_IDS = os.getenv("BETA_AUTHORIZED_USER_IDS", "")
+
 
 # --- System Prompt ---
 DEFAULT_SYSTEM_PROMPT = """你是一个企业知识库助理。你正在回答RAG应用的问题。\n回答使用用户输入的语言。"""

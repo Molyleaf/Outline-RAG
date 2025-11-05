@@ -1,23 +1,66 @@
 // app/static/js/app.js
+
+// (新) 用于跟踪正在编辑的消息ID
+let currentEditMessageId = null;
+
 async function loadUser() {
-    const u = await api('/chat/api/me');
-    if (!u) return;
+    const data = await api('/chat/api/me');
+    if (!data || !data.user) {
+        // (新) 即使 /api/me 失败，也尝试设置默认模型并初始化UI
+        // 这在本地开发或无后端时可能有用
+        if (Object.keys(MODELS).length === 0) {
+            MODELS = { 'default': { name: 'Default', icon: '', temp: 0.7, top_p: 0.7, beta: false } };
+        }
+        currentModelId = Object.keys(MODELS)[0];
+        if (window.setupTopbarActions) setupTopbarActions();
+        return;
+    }
+
+    const u = data.user;
     userInfo = u;
-    // 主界面右上角仍显示用户头像
-    // 修复：使用字符串拼接
     avatar.style.backgroundImage = 'url(\'' + (u.avatar_url || '') + '\')';
 
-    // 仅显示“你好”或“你好，{用户名}！”
     const greetTitle = document.querySelector('#greeting .greet-title');
     if (greetTitle) {
         const name = (u.name || u.username || '').trim();
-        // 修复：使用字符串拼接
         greetTitle.textContent = name ? '你好，' + name + '！' : '你好！';
+    }
+
+    // --- (新) 动态加载模型 ---
+    MODELS = data.models || {};
+    const modelIds = Object.keys(MODELS);
+
+    currentModelId = localStorage.getItem('chat_model');
+
+    // 验证存储的模型是否仍在可用列表中
+    if (!currentModelId || !MODELS[currentModelId]) {
+        currentModelId = modelIds.length > 0 ? modelIds[0] : null;
+        if (currentModelId) {
+            localStorage.setItem('chat_model', currentModelId);
+        } else {
+            localStorage.removeItem('chat_model');
+        }
+    }
+
+    // 设置默认参数
+    if (currentModelId && MODELS[currentModelId]) {
+        currentTemperature = MODELS[currentModelId].temp;
+        currentTopP = MODELS[currentModelId].top_p;
+    } else {
+        // 如果没有可用模型，设置回退值
+        currentTemperature = 0.7;
+        currentTopP = 0.7;
+    }
+
+    // (新) 确保在模型加载后才初始化顶部栏
+    if (window.setupTopbarActions) {
+        setupTopbarActions();
+    } else {
+        console.error("setupTopbarActions not found in main.js");
     }
 }
 
 async function loadConvs() {
-    // 若用户信息未加载，先尝试一次，确保会话接口的鉴权上下文与头像渲染
     if (!userInfo) {
         try { await loadUser(); } catch(_) {}
     }
@@ -28,7 +71,6 @@ async function loadConvs() {
         const row = document.createElement('div');
         row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
         row.tabIndex = 0;
-        // 为 pjax popstate 同步高亮添加 data-id
         row.dataset.id = c.id;
         const titleEl = document.createElement('span');
         titleEl.className = 'conv-title';
@@ -45,31 +87,28 @@ async function loadConvs() {
         const del = document.createElement('div');
         del.textContent = '删除';
 
-        // (Req 4) 将标准菜单项附加到 rowMenu，以便后续重置
         rowMenu.appendChild(rename);
         rowMenu.appendChild(del);
 
-        // 修改点击逻辑为 PJAX (History API)
         row.addEventListener('click', (e) => {
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
 
             e.preventDefault();
             const href = toSameOriginUrl(c);
-            if (!href || href === location.href) return; // 已经是当前会话
+            if (!href || href === location.href) return;
 
             currentConvId = c.id;
             try {
                 history.pushState(null, '', href);
             } catch(_) {
-                location.href = href; // 回退到跳转
+                location.href = href;
                 return;
             }
 
             chatEl.innerHTML = '';
-            document.getElementById('greeting')?.remove(); // 移除问候语
-            loadMessages(); // 手动加载消息
+            document.getElementById('greeting')?.remove();
+            loadMessages();
 
-            // 更新侧边栏高亮
             document.querySelectorAll('.conv.active').forEach(n => n.classList.remove('active'));
             row.classList.add('active');
         });
@@ -77,24 +116,19 @@ async function loadConvs() {
         row.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                row.click(); // 触发上面修改过的 click 事件
+                row.click();
             }
         });
 
-        // titleEl.onclick = (e) => { e.stopPropagation(); go(); }; // 已被 row click 替代
-
-        // (Req 4) 重构菜单点击逻辑
         menuBtn.onclick = (e) => {
             e.stopPropagation();
 
             const wasOpen = rowMenu.classList.contains('visible');
             const isCustomState = rowMenu.querySelector('.conv-pop-input-group') || rowMenu.querySelector('.conv-pop-confirm-text');
 
-            // 总是先隐藏所有其他弹窗
             document.querySelectorAll('.conv-menu-pop.visible').forEach(p => {
                 if (p !== rowMenu) {
                     p.classList.remove('visible');
-                    // (Req 4) 重置其他已打开的弹窗
                     const otherRename = p.querySelector('[data-action="rename"]');
                     const otherDel = p.querySelector('[data-action="delete"]');
                     if (otherRename && otherDel) {
@@ -105,12 +139,10 @@ async function loadConvs() {
                 }
             });
 
-            // (Req 4) 总是重置当前菜单内容
             rowMenu.innerHTML = '';
             rowMenu.appendChild(rename);
             rowMenu.appendChild(del);
 
-            // 切换
             if (!wasOpen || isCustomState) {
                 rowMenu.classList.add('visible');
             } else {
@@ -118,11 +150,9 @@ async function loadConvs() {
             }
         };
 
-        // (Req 4) 重构重命名逻辑，使用内联表单
         rename.onclick = async (e) => {
             e.stopPropagation();
             const oldTitle = titleEl.textContent;
-            // 修复：使用字符串拼接
             rowMenu.innerHTML =
                 '<div class="conv-pop-input-group">' +
                 '<input type="text" value="' + oldTitle.replace(/"/g, '&quot;') + '">' +
@@ -145,35 +175,32 @@ async function loadConvs() {
                 const val = input.value;
                 const t = val.trim();
                 if (!t) { toast('标题不能为空', 'warning'); return; }
-                if (t === oldTitle) { // 标题未变，直接关闭
+                if (t === oldTitle) {
                     rowMenu.classList.remove('visible');
                     return;
                 }
 
-                // API 调用
                 const res = await api(`/chat/api/conversations/${c.id}/rename`, {
                     method: 'POST',
                     body: JSON.stringify({ title: t })
                 });
                 const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
                 if (success) {
-                    await loadConvs(); // 重新加载列表以更新标题
+                    await loadConvs();
                     toast('已重命名', 'success');
                 } else {
                     toast(res?.error || '重命名失败', 'danger');
                 }
-                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+                rowMenu.classList.remove('visible');
             };
 
             rowMenu.querySelector('.ok').onclick = (e) => { e.stopPropagation(); handleRename(); };
             input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleRename(); } };
         };
 
-        // (Req 4) 重构删除逻辑，使用内联确认
         del.onclick = async (e) => {
             e.stopPropagation();
 
-            // 修复：使用字符串拼接
             rowMenu.innerHTML =
                 '<div class="conv-pop-confirm-text">确定删除该会话？</div>' +
                 '<div class="conv-pop-actions">' +
@@ -183,39 +210,32 @@ async function loadConvs() {
 
             rowMenu.querySelector('.cancel').onclick = (e) => {
                 e.stopPropagation();
-                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+                rowMenu.classList.remove('visible');
             };
 
             rowMenu.querySelector('.delete').onclick = async (e) => {
                 e.stopPropagation();
 
-                // API 调用
                 const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
                 const success = (res && (res.ok === true || res.status === 'ok' || res.httpOk === true));
                 if (success) {
                     if (String(currentConvId) === String(c.id)) {
                         currentConvId = null; chatEl.innerHTML = '';
                         try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
-                        // 删除后显示问候语
                         document.getElementById('greeting')?.remove();
-                        loadMessages(); // loadMessages 内部会处理 greeting 显示
+                        loadMessages();
                     }
-                    await loadConvs(); // 重新加载列表
+                    await loadConvs();
                     toast('已删除', 'success');
                 } else {
                     toast(res?.error || '删除失败', 'danger');
                 }
-                rowMenu.classList.remove('visible'); // 操作后关闭菜单
+                rowMenu.classList.remove('visible');
             };
         };
 
-        // (Req 4) 原始的 rename 和 del div 现在作为模板，保存其引用
         rename.dataset.action = 'rename';
         del.dataset.action = 'delete';
-
-        // rowMenu.appendChild(rename); // 已在顶部添加
-        // rowMenu.appendChild(del); // 已在顶部添加
-        // rowMenu.style.display = 'none'; // 由 CSS 控制
 
         if (!document.__convMenuCloserBound__) {
             document.addEventListener('click', (e) => {
@@ -223,11 +243,9 @@ async function loadConvs() {
                 pops.forEach(pop => {
                     const parent = pop.parentElement;
                     const btn = parent?.querySelector('.conv-menu');
-                    // 检查 class 并移除
                     if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
                         pop.classList.remove('visible');
 
-                        // (Req 4) 点击外部时重置菜单内容
                         const renameTpl = pop.querySelector('[data-action="rename"]');
                         const delTpl = pop.querySelector('[data-action="delete"]');
                         if(renameTpl && delTpl) {
@@ -248,31 +266,24 @@ async function loadConvs() {
         // --- 移动端长按支持 ---
         let touchTimer = null;
         row.addEventListener('touchstart', (e) => {
-            // 只在移动端（窄屏）且菜单按钮不可见时触发
             if (window.innerWidth > 960 || menuBtn.offsetParent !== null) return;
 
             touchTimer = setTimeout(async () => {
                 touchTimer = null;
-                // 确保 e.preventDefault() 只在定时器触发时调用，以允许默认的滚动
-                e.preventDefault(); // 阻止后续的 click 和滚动
+                e.preventDefault();
 
-                // --- 使用自定义底部弹窗 ---
-                // 修复：使用字符串拼接
                 const menuHtml =
                     '<div class="mobile-menu-item" data-action="rename">重命名</div>' +
                     '<div class="mobile-menu-item danger" data-action="delete">删除对话</div>';
 
                 showMobileSheet(menuHtml, '对话选项');
 
-                // 动态绑定点击事件
                 const renameBtn = mobileSheetContent.querySelector('[data-action="rename"]');
                 const deleteBtn = mobileSheetContent.querySelector('[data-action="delete"]');
 
                 if (renameBtn) {
                     renameBtn.onclick = () => {
                         hideMobileSheet();
-                        // (Req 4) 移动端触发 Shoelace promptDialog
-                        // (注意：移动端弹窗未要求修改，保持原 Shoelace 逻辑)
                         (async () => {
                             const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
                             if (val == null) return;
@@ -295,7 +306,6 @@ async function loadConvs() {
                 if (deleteBtn) {
                     deleteBtn.onclick = () => {
                         hideMobileSheet();
-                        // (Req 4) 移动端触发 Shoelace confirmDialog
                         (async () => {
                             const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
                             if (!ok) return;
@@ -316,10 +326,9 @@ async function loadConvs() {
                         })();
                     };
                 }
-                // --- 结束 移动端菜单 ---
 
-            }, 500); // 500ms 长按
-        }, { passive: false }); // 需要 ability to preventDefault
+            }, 500);
+        }, { passive: false });
 
         const clearLongPress = () => {
             if (touchTimer) clearTimeout(touchTimer);
@@ -336,17 +345,14 @@ async function loadConvs() {
 
 async function loadMessages() {
     chatEl.innerHTML = '';
-    // 确保问候语被移除
     document.getElementById('greeting')?.remove();
 
     if (!currentConvId) {
-        // 如果没有会话ID，需要重新创建和显示问候语
         let greet = document.getElementById('greeting');
         if (!greet) {
             greet = document.createElement('div');
             greet.id = 'greeting';
             greet.className = 'greeting';
-            // 修复：使用字符串拼接
             greet.innerHTML =
                 '<div class="greet-title">你好！</div>' +
                 '<div class="greet-sub">随时提问，或从以下示例开始</div>' +
@@ -356,7 +362,6 @@ async function loadMessages() {
                 '<button class="chip">开发组的烂摊子怎么样了</button>' +
                 '</div>';
             chatEl.appendChild(greet);
-            // 绑定示例 chip 点击
             greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
                 btn.addEventListener('click', () => {
                     qEl.value = btn.textContent.trim();
@@ -364,11 +369,9 @@ async function loadMessages() {
                 });
             });
         }
-        // 若已有 userInfo，立即填充用户名
         const greetTitle = greet.querySelector('.greet-title');
         if (greetTitle) {
             const name = (userInfo?.name || userInfo?.username || '').trim();
-            // 修复：使用字符串拼接
             greetTitle.textContent = name ? '你好，' + name + '！' : '你好！';
         }
         greet.style.display = 'block';
@@ -386,18 +389,21 @@ function appendMsg(role, text, metadata = {}) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
 
+    // (新) 存储原始文本和ID
+    div.dataset.rawText = text;
+    if (metadata.id) {
+        div.dataset.messageId = metadata.id;
+    }
+
     const avatarEl = document.createElement('div');
     avatarEl.className = 'avatar';
     if (role === 'assistant') {
         const avatarUrl = getAvatarUrlForModel(metadata.model);
-        // 修复：使用字符串拼接
         avatarEl.style.backgroundImage = 'url(\'' + avatarUrl + '\')';
 
-        // Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
-        if (metadata.model && metadata.model.includes('moonshotai')) {
+        if (metadata.model && (metadata.model.includes('moonshotai') || metadata.model.includes('Kimi'))) {
             avatarEl.style.backgroundColor = 'black';
         } else {
-            // 默认为白色，以确保在暗色模式下也可见 (覆盖CSS)
             avatarEl.style.backgroundColor = 'white';
         }
     } else {
@@ -413,7 +419,68 @@ function appendMsg(role, text, metadata = {}) {
     bubbleInner.appendChild(node);
     bubble.appendChild(bubbleInner);
 
-    // --- 新增：显示 AI 回复的元数据 ---
+    // --- (新) 复制和编辑按钮 ---
+    const controls = document.createElement('div');
+    controls.className = 'msg-controls';
+
+    // 复制按钮 (所有角色)
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn-icon';
+    copyBtn.title = '复制';
+    copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+    copyBtn.onclick = (e) => {
+        e.stopPropagation();
+        try {
+            // 尝试使用现代 API
+            navigator.clipboard.writeText(div.dataset.rawText).then(() => {
+                toast('已复制', 'success', 1500);
+            }, () => {
+                // 回退到 execCommand
+                throw new Error('Clipboard API failed');
+            });
+        } catch (err) {
+            // execCommand 回退
+            const ta = document.createElement('textarea');
+            ta.value = div.dataset.rawText;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                toast('已复制 (回退)', 'success', 1500);
+            } catch (copyErr) {
+                toast('复制失败', 'danger', 2000);
+            }
+            document.body.removeChild(ta);
+        }
+    };
+    controls.appendChild(copyBtn);
+
+    // 编辑按钮 (仅限用户)
+    if (role === 'user' && metadata.id) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-icon';
+        editBtn.title = '编辑';
+        editBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"></path></svg>';
+        editBtn.onclick = (e) => {
+            e.stopPropagation();
+            qEl.value = div.dataset.rawText;
+            qEl.focus();
+            currentEditMessageId = div.dataset.messageId;
+            // (新) 可以在这里添加一个视觉提示，比如输入框边框高亮
+            const inputInner = document.querySelector('.input-inner');
+            inputInner?.classList.add('editing');
+            // 确保文本区域高度自适应
+            qEl.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        controls.appendChild(editBtn);
+    }
+
+    bubble.appendChild(controls);
+    // --- 结束 按钮 ---
+
+
     if (role === 'assistant' && (metadata.model || metadata.temperature !== undefined)) {
         const metaEl = document.createElement('div');
         metaEl.className = 'msg-meta';
@@ -423,17 +490,14 @@ function appendMsg(role, text, metadata = {}) {
         const topP = typeof metadata.top_p === 'number' ? metadata.top_p.toFixed(2) : 'N/A';
         const time = metadata.created_at ? new Date(metadata.created_at).toLocaleString() : '';
 
-        // 修复：使用字符串拼接
         let metaText = '模型: ' + modelName + ' · Temp: ' + temp + ' · Top-P: ' + topP;
         if (time) metaText += ' · ' + time;
 
         metaEl.textContent = metaText;
-        // 放在 bubble-inner 外部，气泡的下方
         bubble.appendChild(metaEl);
     }
 
     if (role === 'user') {
-        // (用户消息不需要占位 div)
         div.appendChild(bubble);
     } else {
         div.appendChild(avatarEl);
@@ -453,6 +517,11 @@ async function sendQuestion() {
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = 'none';
 
+    // (新) 检查是否在编辑
+    const messageIdToEdit = currentEditMessageId;
+    currentEditMessageId = null; // 重置
+    document.querySelector('.input-inner')?.classList.remove('editing'); // 移除高亮
+
     qEl.value = '';
     const ev = new Event('input');
     qEl.dispatchEvent(ev);
@@ -470,10 +539,35 @@ async function sendQuestion() {
         try { await loadConvs(); } catch(_) {}
     }
 
-    appendMsg('user', text);
+    // (新) 如果是编辑，则不追加新消息，而是等待 loadMessages 刷新
+    if (!messageIdToEdit) {
+        appendMsg('user', text);
+    }
     qEl.value = '';
 
     // --- 启动流式响应 ---
+
+    // (新) 如果是编辑，在发起请求前移除旧消息
+    if (messageIdToEdit) {
+        let msgNode = document.querySelector(`.msg.user[data-message-id="${messageIdToEdit}"]`);
+        if (msgNode) {
+            // 移除此消息之后的所有消息
+            let nextMsg = msgNode.nextElementSibling;
+            while(nextMsg) {
+                const toRemove = nextMsg;
+                nextMsg = nextMsg.nextElementSibling;
+                toRemove.remove();
+            }
+            // 更新此消息内容
+            msgNode.dataset.rawText = text;
+            const mdBody = msgNode.querySelector('.md-body');
+            if (mdBody) {
+                mdBody.innerHTML = ''; // 清空
+                mdBody.appendChild(renderMarkdown(text)); // 重新渲染
+            }
+        }
+    }
+
 
     const placeholderDiv = appendMsg('assistant', '', {
         model: currentModelId,
@@ -481,7 +575,6 @@ async function sendQuestion() {
         top_p: currentTopP
     });
 
-    // 1. 获取 .md-body 作为主容器
     let messageContainer = placeholderDiv.querySelector('.md-body');
     if (!messageContainer) {
         const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv.querySelector('.bubble') || placeholderDiv;
@@ -490,32 +583,28 @@ async function sendQuestion() {
         bubbleInner.appendChild(newBody);
         messageContainer = newBody;
     }
-    messageContainer.innerHTML = ''; // 清空（appendMsg 可能会创建带空 <p> 的）
+    messageContainer.innerHTML = '';
     messageContainer.classList.add('streaming');
 
-    // (Req 1) 添加加载动画
     const loaderEl = document.createElement('div');
     loaderEl.className = 'loading-dots';
     loaderEl.innerHTML = '<span></span><span></span><span></span>';
     messageContainer.appendChild(loaderEl);
 
-    // 2. 定义变量
-    let currentStreamingDiv = document.createElement('div'); // 第一个用于流式输出的 div
+    let currentStreamingDiv = document.createElement('div');
     messageContainer.appendChild(currentStreamingDiv);
 
-    let currentStreamingBuffer = ''; // 用于当前 div 的原始 Markdown 累积
-    // 仅在 \n\n (一个或多个新行) 处触发渲染
+    let currentStreamingBuffer = '';
     const triggerRegex = /(\n\n+)/;
     const parseFn = window.marked.parse || window.marked.default?.parse;
 
-    // 3. 定义一个在流结束时（或出错时）调用的最终化函数
+    let fullRawResponse = ""; // (新) 用于存储完整的原始回复
+
     const finalizeStream = () => {
-        // (Req 1) 确保加载器在最终化时被移除
         const loader = messageContainer.querySelector('.loading-dots');
         if (loader) loader.remove();
 
         messageContainer.classList.remove('streaming');
-        // 最终解析*最后*一个流式 div 的内容
         if (parseFn && currentStreamingBuffer.trim() !== '') {
             try {
                 const finalParsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
@@ -527,33 +616,44 @@ async function sendQuestion() {
                 }
             } catch(e) {
                 console.error("Final markdown parse error:", e);
-                currentStreamingDiv.textContent = currentStreamingBuffer; // 回退
+                currentStreamingDiv.textContent = currentStreamingBuffer;
             }
         } else if (currentStreamingBuffer.trim() === '') {
-            // 如果最后一个缓冲区为空，移除空的 div
             currentStreamingDiv.remove();
         }
+
+        // (新) 流结束后，更新 placeholderDiv 的原始文本，以便复制
+        placeholderDiv.dataset.rawText = fullRawResponse;
     };
 
+    // (新) 构建请求体
+    const payload = {
+        conv_id: currentConvId,
+        query: text,
+        model: currentModelId,
+        temperature: currentTemperature,
+        top_p: currentTopP
+    };
+    if (messageIdToEdit) {
+        payload.edit_source_message_id = messageIdToEdit;
+    }
 
-    // 5. fetch 和 SSE 处理循环
     const res = await fetch('/chat/api/ask', {
         method: 'POST',
-        body: JSON.stringify({
-            conv_id: currentConvId,
-            query: text,
-            model: currentModelId,
-            temperature: currentTemperature,
-            top_p: currentTopP
-        }),
+        body: JSON.stringify(payload),
         headers: {'Content-Type':'application/json'},
         credentials: 'include'
     });
 
     if (!res.ok) {
-        messageContainer.textContent = '请求失败'; // 替换 (这也会移除加载器)
+        messageContainer.textContent = '请求失败';
         messageContainer.classList.remove('streaming');
         toast('请求失败', 'danger');
+
+        // (新) 如果是编辑失败，刷新消息列表以恢复
+        if (messageIdToEdit) {
+            await loadMessages();
+        }
         return;
     }
 
@@ -561,12 +661,12 @@ async function sendQuestion() {
     const decoder = new TextDecoder();
     let buffer = '';
     let modelDetected = false;
-    let streamDone = false; // <--- 在这里添加标志
+    let streamDone = false;
 
     try {
         while (true) {
             const { value, done } = await reader.read();
-            if (done) break; // 流自然结束
+            if (done) break;
 
             buffer += decoder.decode(value, {stream: true});
             let idx;
@@ -578,11 +678,11 @@ async function sendQuestion() {
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        streamDone = true; // <-- 设置标志
-                        break; // 跳出内层 while (idx) 循环
+                        streamDone = true;
+                        break;
                     }
-                    if (data === '[DONE]') { // (修正)
-                        streamDone = true; // <-- 设置标志
+                    if (data === '[DONE]') {
+                        streamDone = true;
                         break;
                     }
 
@@ -592,9 +692,7 @@ async function sendQuestion() {
                             const avatarUrl = getAvatarUrlForModel(j.model);
                             const avatarEl = placeholderDiv.querySelector('.avatar');
                             if (avatarEl) {
-                                // 修复：使用字符串拼接
                                 avatarEl.style.backgroundImage = 'url(\'' + avatarUrl + '\')';
-
                                 if (j.model.includes('moonshotai')) {
                                     avatarEl.style.backgroundColor = 'black';
                                 } else {
@@ -604,48 +702,42 @@ async function sendQuestion() {
                             modelDetected = true;
                         }
 
-                        // --- 流式处理核心逻辑 ---
+                        // --- (新) 流式处理核心逻辑 (适配 Thinking) ---
                         const delta = j.choices?.[0]?.delta?.content;
+                        const thinking = j.choices?.[0]?.delta?.thinking; // 适配 Thinking
+                        const combinedDelta = (delta || '') + (thinking || '');
 
-                        // (Req 1) 收到第一个数据块时，移除加载动画
+                        fullRawResponse += combinedDelta; // 累加原始文本
+
+                        // (新) 修复加载动画逻辑
                         const loader = messageContainer.querySelector('.loading-dots');
-                        if (loader && (typeof delta === 'string' && delta.length > 0)) {
+                        if (loader && combinedDelta.length > 0) {
                             loader.remove();
                         }
 
-                        if (typeof delta === 'string' && delta.length > 0) {
+                        if (combinedDelta.length > 0) {
 
-                            // 使用一个小的回看缓冲区来检查跨 delta 的触发器
-                            const lookbehind = currentStreamingBuffer.slice(-5); // 5 字符回看
-                            const testBuffer = lookbehind + delta;
+                            const lookbehind = currentStreamingBuffer.slice(-5);
+                            const testBuffer = lookbehind + combinedDelta;
                             const match = testBuffer.match(triggerRegex);
 
                             if (match && parseFn) {
-                                // 触发器命中！
-                                // 确定触发器在 delta 中的开始位置
                                 const triggerStartInDelta = match.index - lookbehind.length;
-
                                 let textBeforeTrigger, triggerAndRest;
 
                                 if (triggerStartInDelta < 0) {
-                                    // 触发器在 lookbehind 中开始
-                                    // 整个 delta 都属于新块
                                     textBeforeTrigger = "";
-                                    triggerAndRest = delta;
+                                    triggerAndRest = combinedDelta;
                                 } else {
-                                    // 触发器在 delta 内部开始
-                                    // 分割 delta
-                                    textBeforeTrigger = delta.substring(0, triggerStartInDelta);
-                                    triggerAndRest = delta.substring(triggerStartInDelta);
+                                    textBeforeTrigger = combinedDelta.substring(0, triggerStartInDelta);
+                                    triggerAndRest = combinedDelta.substring(triggerStartInDelta);
                                 }
 
-                                // A: 处理触发器之前的文本
                                 if (textBeforeTrigger) {
                                     currentStreamingBuffer += textBeforeTrigger;
                                     appendFadeInChunk(textBeforeTrigger, currentStreamingDiv);
                                 }
 
-                                // B: 解析当前 div 的*完整*缓冲区并替换其内容
                                 if (currentStreamingBuffer.trim() !== '') {
                                     const parsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
                                     currentStreamingDiv.innerHTML = parsedHtml;
@@ -653,21 +745,18 @@ async function sendQuestion() {
                                         try { window.hljs.highlightElement(block); } catch(e){}
                                     });
                                 } else {
-                                    currentStreamingDiv.remove(); // 移除空的 div
+                                    currentStreamingDiv.remove();
                                 }
 
-                                // C: 创建一个新的 div 用于后续流式传输
                                 currentStreamingDiv = document.createElement('div');
                                 messageContainer.appendChild(currentStreamingDiv);
 
-                                // D: 使用触发器和剩余文本开始新的缓冲区
                                 currentStreamingBuffer = triggerAndRest;
                                 appendFadeInChunk(triggerAndRest, currentStreamingDiv);
 
                             } else {
-                                // 没有命中触发器，继续在当前 div 中流式传输
-                                currentStreamingBuffer += delta;
-                                appendFadeInChunk(delta, currentStreamingDiv);
+                                currentStreamingBuffer += combinedDelta;
+                                appendFadeInChunk(combinedDelta, currentStreamingDiv);
                             }
                         }
                         // --- 流式处理核心逻辑结束 ---
@@ -675,26 +764,32 @@ async function sendQuestion() {
                     } catch {}
                 }
 
-                // (修正) 如果是 [DONE]，跳出外层循环
                 if (chunk.includes('data: [DONE]')) {
-                    streamDone = true; // <-- 设置标志
+                    streamDone = true;
                     break;
                 }
             }
 
-            // 在这里检查标志，以跳出外层 while (true) 循环
             if (streamDone) {
                 break;
             }
 
-            // 导致错误的那一行已被移除 (if (chunk.includes('data: [DONE]')) break;)
-
         }
 
-        finalizeStream(); // 处理流在 [DONE] 之前结束的情况
+        finalizeStream();
+
+        // (新) 编辑成功后，重新加载消息以获取新 ID
+        if (messageIdToEdit) {
+            await loadMessages();
+        }
+
     } catch (e) {
         console.error("Stream processing error:", e);
-        finalizeStream(); // 异常时也尝试最终化
+        finalizeStream();
         toast('连接中断', 'warning');
+        // (新) 编辑失败，刷新
+        if (messageIdToEdit) {
+            await loadMessages();
+        }
     }
 }

@@ -7,19 +7,20 @@ from typing import List, Sequence
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents import Document
-from langchain_core.documents.transformers import BaseDocumentTransformer
+# (已移除) 'BaseDocumentTransformer' 不再直接使用
+# from langchain_core.documents.transformers import BaseDocumentTransformer
+# (*** 修复 ***) 导入 BaseDocumentCompressor
+from langchain.retrievers.document_compressors.base import BaseDocumentCompressor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-# (已确认 3) 此导入在 langchain-community==0.4.1  中是正确的
 from langchain_community.storage import RedisStore
-# (已确认 3) 此导入在 langchain==1.0.3  中是正确的 (Linter 可能会误报)
 from langchain.storage import CacheBackedEmbeddings
 
 import config
 
 logger = logging.getLogger(__name__)
 
-# --- 1. 共享的 HTTP 客户端 ---
+# --- (不变) 1. 共享的 HTTP 客户端 ---
 def _create_retry_session():
     session = requests.Session()
     retry = Retry(
@@ -30,14 +31,14 @@ def _create_retry_session():
     session.mount("https://", adapter)
     return session
 
-# --- 2. 聊天模型 (LLM) ---
+# --- (不变) 2. 聊天模型 (LLM) ---
 llm = ChatOpenAI(
     model=config.CHAT_MODEL,
     api_key=config.CHAT_API_TOKEN,
     base_url=f"{config.CHAT_API_URL}/v1",
 )
 
-# --- 3. 嵌入模型 (Embedding) ---
+# --- (不变) 3. 嵌入模型 (Embedding) ---
 
 # 3a. LangChain 缓存需要一个 *不* 解码响应 (decode_responses=False) 的 Redis 客户端
 _redis_cache_client = None
@@ -56,14 +57,14 @@ if config.REDIS_URL:
             port=parsed_url.port,
             password=parsed_url.password,
             db=db_num,
-            decode_responses=False # 必须为 False
+            decode_responses=False
         )
         _redis_cache_client.ping()
     except Exception as e:
         logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False): %s", e)
         _redis_cache_client = None
 
-# 3b. 基础 Embedding API (Qwen/Qwen3-Embedding-0.6B)
+# 3b. 基础 Embedding API
 _base_embeddings = OpenAIEmbeddings(
     model=config.EMBEDDING_MODEL,
     api_key=config.EMBEDDING_API_TOKEN,
@@ -83,7 +84,7 @@ else:
 
 
 # --- 4. 重排模型 (Reranker) ---
-class SiliconFlowReranker(BaseDocumentTransformer):
+class SiliconFlowReranker(BaseDocumentCompressor): # (*** 修复 ***) 继承 BaseDocumentCompressor
     """
     自定义 LangChain Reranker，适配 SiliconFlow 的 API
     (Qwen/Qwen3-Reranker-0.6B)
@@ -98,6 +99,7 @@ class SiliconFlowReranker(BaseDocumentTransformer):
         self.client = _create_retry_session()
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    # (*** 修复 ***) 此方法现在正确地实现了 BaseDocumentCompressor 的抽象方法
     def compress_documents(
             self,
             documents: Sequence[Document],
@@ -144,5 +146,5 @@ class SiliconFlowReranker(BaseDocumentTransformer):
 
         return final_docs
 
-# 实例化 Reranker
+# 实例化 Reranker (现在可以正常工作)
 reranker = SiliconFlowReranker()

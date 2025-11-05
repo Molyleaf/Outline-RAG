@@ -1,21 +1,17 @@
 # app/rag.py
-# 包含文本分块、向量检索、以及与 Outline 同步（全量、增量）等核心 RAG 功能
 import json
 import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-# (已修改 1) 导入 PGVectorStore
 from langchain_postgres import PGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# (已修改 2) 修复 langchain 1.0.x 的导入路径
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors.pipeline import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 
 import config
-# (已修改 1) 导入 sync engine
 from database import engine, redis_client
 from app.llm_services import embeddings_model, reranker
 from app.outline_client import outline_list_docs, outline_get_doc
@@ -24,13 +20,15 @@ logger = logging.getLogger(__name__)
 
 # --- 1. 初始化 LangChain 组件 ---
 
-# 1a. 初始化 PGVector 存储 (已修改 1)
-# PGVectorStore 将自动创建 'langchain_pg_collection' 和 'langchain_pg_embedding' 表
+# 1a. 初始化 PGVector 存储
 vector_store = PGVectorStore(
-    engine=engine, # <-- (修复) 使用 database.py 中定义的 sync engine
-    collection_name="outline_rag_collection",
-    embedding_function=embeddings_model,
-    # (已移除) use_async_with_sync_fallback=True (非 PGVectorStore 的参数)
+    # (*** 修复 ***)
+    # 1. 'collection_name' 和 'embedding' 是位置参数
+    # 2. 'embedding_function' 重命名为 'embedding'
+    # 3. 'engine' 重命名为 'connection' (作为关键字参数传入)
+    "outline_rag_collection",
+    embeddings_model,
+    connection=engine,
 )
 
 # 1b. 初始化文本分割器
@@ -51,7 +49,7 @@ base_retriever = vector_store.as_retriever(
 pipeline_compressor = DocumentCompressorPipeline(
     transformers=[
         EmbeddingsRedundantFilter(embeddings=embeddings_model),
-        reranker # 来自 llm_services.py
+        reranker
     ]
 )
 
@@ -60,7 +58,7 @@ compression_retriever = ContextualCompressionRetriever(
     base_retriever=base_retriever
 )
 
-# --- 2. 数据库同步任务 (重写) ---
+# --- (不变) 2. 数据库同步任务 ---
 
 def process_doc_batch_task(doc_ids: list):
     """
@@ -89,13 +87,11 @@ def process_doc_batch_task(doc_ids: list):
         if not updated_at_str:
             now_dt = datetime.now(timezone.utc)
             updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
-        # (已移除) 对 updated_at_dt 的解析，因为不再存入 SQL 表
 
-        # 1. 创建 LangChain Document 对象
         doc = Document(
             page_content=content,
             metadata={
-                "source_id": doc_id, # 用于 PGVectorStore 过滤
+                "source_id": doc_id,
                 "title": info.get("title") or "",
                 "outline_updated_at_str": updated_at_str,
             }
@@ -104,23 +100,18 @@ def process_doc_batch_task(doc_ids: list):
         successful_ids.add(doc_id)
 
     if docs_to_process_lc:
-        # 1. 分块
         chunks = text_splitter.split_documents(docs_to_process_lc)
 
         if chunks:
             logger.info(f"正在为 {len(successful_ids)} 篇文档处理 {len(chunks)} 个分块...")
 
-            # 2. (已修改) 从 PGVectorStore 删除所有旧分块
-            # 我们必须手动查询 cmetadata 来找到旧块的 uuid
             ids_to_delete = []
             try:
                 with engine.begin() as conn:
-                    # 1. 获取 collection_id
                     coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                     coll_id = coll_id_row[0] if coll_id_row else None
 
                     if coll_id:
-                        # 2. 查找与 source_id 匹配的所有块的 uuid
                         ids_to_delete_rows = conn.execute(
                             text("""
                                  SELECT uuid FROM langchain_pg_embedding
@@ -137,11 +128,7 @@ def process_doc_batch_task(doc_ids: list):
                 logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
                 vector_store.delete(ids=ids_to_delete)
 
-            # 3. (已修改) 添加新分块
-            # 我们不提供 ID，让 PGVectorStore 自动生成 UUID
             vector_store.add_documents(chunks)
-
-    # 4. (已删除) 更新 SQL 跟踪表 (documents) 的逻辑
 
     if redis_client:
         try:
@@ -166,16 +153,13 @@ def refresh_all_task():
 
         remote_docs_map = {doc['id']: doc['updatedAt'] for doc in remote_docs_raw if doc.get('id') and doc.get('updatedAt')}
 
-        # (已修改) 使用 PGVectorStore 元数据进行快速对比
         local_docs_map = {}
         try:
             with engine.connect() as conn:
-                # 1. 获取 collection_id
                 coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                 coll_id = coll_id_row[0] if coll_id_row else None
 
                 if coll_id:
-                    # 2. (新) 查询 PGVectorStore 的元数据
                     local_docs_raw = conn.execute(
                         text("""
                              SELECT DISTINCT ON ((cmetadata ->> 'source_id'))
@@ -191,7 +175,6 @@ def refresh_all_task():
                     logger.info("未找到 PGVectorStore 集合，假定本地为空。")
         except Exception as e:
             logger.error(f"从 PGVectorStore 读取元数据失败: {e}")
-            # 继续执行，local_docs_map 为空，将导致全量刷新
 
         remote_ids = set(remote_docs_map.keys())
         local_ids = set(local_docs_map.keys())
@@ -204,7 +187,7 @@ def refresh_all_task():
         if to_delete_ids:
             logger.warning(f"发现 {len(to_delete_ids)} 篇在本地存在但在远程不存在的文档，将被删除。")
             for doc_id in to_delete_ids:
-                delete_doc(doc_id) # 使用新的 delete_doc
+                delete_doc(doc_id)
 
         docs_to_process_ids = to_add_ids + to_update_ids
         if not docs_to_process_ids:
@@ -247,14 +230,10 @@ def refresh_all_task():
             redis_client.delete("refresh:lock")
 
 def delete_doc(doc_id):
-    """(重写) 从 PGVectorStore 中删除文档"""
-    # (已删除) 从 SQL 跟踪表删除
-
-    # (新) 按元数据从 PGVectorStore 删除
+    """从 PGVectorStore 中删除文档"""
     ids_to_delete = []
     try:
         with engine.begin() as conn:
-            # 1. 获取 collection_id
             coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
             if not coll_id_row:
                 logger.warning(f"删除 {doc_id} 失败：未找到集合。")
@@ -262,7 +241,6 @@ def delete_doc(doc_id):
 
             coll_id = coll_id_row[0]
 
-            # 2. 查找与 source_id 匹配的所有块的 uuid
             ids_to_delete_rows = conn.execute(
                 text("""
                      SELECT uuid FROM langchain_pg_embedding

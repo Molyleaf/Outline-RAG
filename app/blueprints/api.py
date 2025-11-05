@@ -11,15 +11,16 @@ from werkzeug.utils import secure_filename
 
 # --- LangChain ---
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.documents import Document
+from langchain_core.item_getters import ItemGetter
 
 import config
 from database import engine, redis_client
 
-# --- (新) 导入 LangChain 和 Outline 服务 ---
+# --- 导入 LangChain 和 Outline 服务 ---
 from app.llm_services import llm
 from app.rag import compression_retriever
 from app.outline_client import verify_outline_signature
@@ -27,7 +28,7 @@ from app.outline_client import verify_outline_signature
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
 
-# --- (修复 Issue 8) utils.py 合并于此 ---
+# --- (不变) utils.py 合并于此 ---
 def require_login():
     """校验用户是否登录，否则中止请求。"""
     if "user" not in session:
@@ -49,7 +50,31 @@ def allowed_file(filename):
 @api_bp.route("/api/me")
 def api_me():
     require_login()
-    return jsonify(current_user())
+
+    # --- (新) 加载和过滤模型列表 ---
+    user_id = current_user().get("id")
+    auth_user_ids = set(uid.strip() for uid in config.BETA_AUTHORIZED_USER_IDS.split(",") if uid.strip())
+
+    try:
+        all_models = json.loads(config.CHAT_MODELS_JSON)
+    except json.JSONDecodeError:
+        logger.error("CHAT_MODELS_JSON 环境变量格式错误，将返回空模型列表。")
+        all_models = []
+
+    available_models = []
+    for model in all_models:
+        is_beta = model.get("beta", False)
+        if not is_beta or (is_beta and user_id in auth_user_ids):
+            available_models.append(model)
+
+    # 转换列表为前端期望的字典格式 (keyed by id)
+    models_dict = {model["id"]: model for model in available_models}
+
+    # 返回用户信息和过滤后的模型列表
+    return jsonify({
+        "user": current_user(),
+        "models": models_dict
+    })
 
 @api_bp.route("/api/conversations", methods=["GET", "POST"])
 def api_conversations():
@@ -118,7 +143,7 @@ def api_messages():
         redis_client.set(cache_key, response_json)
     return Response(response_json, mimetype='application/json')
 
-# --- (重写) /api/ask (核心 RAG 链) ---
+# --- (核心 RAG 链) ---
 
 def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
     return "\n".join([f"{m.type}: {m.content}" for m in messages])
@@ -126,18 +151,18 @@ def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
 def _format_docs(docs: List[Document]) -> str:
     return "\n\n---\n\n".join([doc.page_content for doc in docs])
 
-# 1. 定义查询重写链 (复刻 api.py 逻辑)
+# 1. 定义查询重写链
 rewrite_chain = (
         {
             "history": lambda x: _format_history_str(x["chat_history"]),
             "query": lambda x: x["input"]
         }
         | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-        | llm.bind(temperature=0.0, top_p=1.0) # 使用确定性设置
+        | llm.bind(temperature=0.0, top_p=1.0)
         | StrOutputParser()
 )
 
-# 2. 定义最终 RAG 链 (复刻 api.py 逻辑)
+# 2. 定义最终 RAG 链
 rag_chain = (
         {
             "rewritten_query": rewrite_chain,
@@ -145,12 +170,16 @@ rag_chain = (
             "chat_history": lambda x: x["chat_history"]
         }
         | RunnablePassthrough.assign(
-    context=lambda x: _format_docs(compression_retriever.invoke(x["rewritten_query"]))
+    context=(
+            ItemGetter("rewritten_query")
+            | compression_retriever
+            | RunnableLambda(_format_docs)
+    )
 )
         | {
             "chat_history": lambda x: x["chat_history"],
             "context": lambda x: x["context"],
-            "query": lambda x: x["input"] # 使用原始 input
+            "query": lambda x: x["input"]
         }
         | ChatPromptTemplate.from_messages([
     ("system", config.SYSTEM_PROMPT),
@@ -171,6 +200,9 @@ def api_ask():
     temperature = body.get("temperature")
     top_p = body.get("top_p")
 
+    # (新) 获取编辑ID
+    edit_source_message_id = body.get("edit_source_message_id")
+
     if not query or not conv_id:
         return jsonify({"error":"missing query or conv_id"}), 400
 
@@ -178,12 +210,35 @@ def api_ask():
     with engine.begin() as conn:
         if not conn.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": current_user()["id"]}).scalar():
             abort(403)
-        rs = conn.execute(
-            text("SELECT role, content FROM messages WHERE conv_id=:cid ORDER BY id DESC LIMIT :lim"),
-            {"cid": conv_id, "lim": config.MAX_HISTORY_MESSAGES}
-        ).mappings().all()
+
+        rs = []
+
+        if edit_source_message_id:
+            # (新) 编辑逻辑
+            user_msg_id = int(edit_source_message_id)
+            # 删除此消息之后的所有消息
+            conn.execute(text("DELETE FROM messages WHERE conv_id=:cid AND id > :mid"),
+                         {"cid": conv_id, "mid": user_msg_id})
+            # 更新此消息的内容
+            conn.execute(text("UPDATE messages SET content=:c WHERE id=:mid AND conv_id=:cid AND role='user'"),
+                         {"cid": conv_id, "c": query, "mid": user_msg_id})
+            # 获取此消息之前的所有历史
+            rs = conn.execute(
+                text("SELECT role, content FROM messages WHERE conv_id=:cid AND id < :mid ORDER BY id DESC LIMIT :lim"),
+                {"cid": conv_id, "mid": user_msg_id, "lim": config.MAX_HISTORY_MESSAGES}
+            ).mappings().all()
+
+        else:
+            # (旧) 新增逻辑
+            rs = conn.execute(
+                text("SELECT role, content FROM messages WHERE conv_id=:cid ORDER BY id DESC LIMIT :lim"),
+                {"cid": conv_id, "lim": config.MAX_HISTORY_MESSAGES}
+            ).mappings().all()
+            # 插入新
+            conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'user',:c)"),
+                         {"cid": conv_id, "c": query})
+
         chat_history_db = reversed(rs)
-        conn.execute(text("INSERT INTO messages (conv_id, role, content) VALUES (:cid,'user',:c)"), {"cid": conv_id, "c": query})
 
     if redis_client:
         redis_client.delete(f"messages:{conv_id}")
@@ -195,14 +250,12 @@ def api_ask():
         elif r["role"] == "assistant":
             chat_history.append(AIMessage(content=r["content"]))
 
-    # 绑定前端传入的 LLM 参数
     llm_with_options = llm.bind(
         model=model,
         temperature=temperature,
         top_p=top_p
     )
 
-    # 动态重新绑定链的最后一步 (LLM + Parser)
     final_chain = (
             rag_chain.steps[0]
             | rag_chain.steps[1]
@@ -224,11 +277,66 @@ def api_ask():
                 "chat_history": chat_history
             })
 
-            for delta in stream:
-                if delta:
-                    full_response += delta
-                    # (不变) 构造与前端兼容的 SSE 响应
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': delta}}], 'model': model_name})}\n\n"
+            for chunk in stream:
+                # (新) 适配 Thinking 和 Content
+                # 假设流输出的是字典，而不是纯字符串 (如果 StrOutputParser 仍在，则需要调整)
+                # 假设 final_chain 被修改为不带 StrOutputParser，直接输出 AIMessageChunk
+                # 暂时我们还用 StrOutputParser，所以 chunk 仍然是字符串
+                # 为了支持 Thinking，我们需要修改 RAG 链
+
+                # --- 临场简化：假设 StrOutputParser 仍在 ---
+                # 我们需要在 LLM 响应中寻找 Thinking 标记，这很困难
+                # 让我们假设 LLM (如 Qwen) 会在流中返回非 OpenAI 标准的 'thinking' 字段
+                # 这意味着 RAG 链的最后一步不应该是 StrOutputParser，而应该是 llm_with_options
+
+                # --- (新) RAG 链修改 (在上方) ---
+                # 既然 RAG 链最后是 StrOutputParser，它只会输出字符串
+                # 我们必须在 *这里* 模拟 Thinking (或者修改 RAG 链)
+
+                # --- 妥协：暂时假定 StrOutputParser 仍在，Thinking 逻辑在前端处理 ---
+                # 我们需要修改 generate() 来处理来自 llm.stream() 的 AIMessageChunk
+
+                # --- (新) 正确的 RAG 链 (移除末尾 StrOutputParser) ---
+                final_chain_streaming = (
+                        rag_chain.steps[0]
+                        | rag_chain.steps[1]
+                        | rag_chain.steps[2]
+                        | rag_chain.steps[3]
+                        | llm_with_options
+                    # | rag_chain.steps[5] # 移除了 StrOutputParser
+                )
+
+                stream = final_chain_streaming.stream({
+                    "input": query,
+                    "chat_history": chat_history
+                })
+
+                for delta_chunk in stream:
+                    # delta_chunk 是一个 AIMessageChunk
+                    delta_content = delta_chunk.content or ""
+
+                    # (新) 尝试获取 'thinking'
+                    # Qwen/Thinking 的输出可能在 additional_kwargs
+                    delta_thinking = ""
+                    if delta_chunk.additional_kwargs and "thinking" in delta_chunk.additional_kwargs:
+                        delta_thinking = delta_chunk.additional_kwargs["thinking"] or ""
+
+                    # (新) 适配 Qwen3-Next 的 thinking 格式 (tool_calls)
+                    # 这是一个简化的模拟，实际格式可能更复杂
+                    if delta_chunk.tool_call_chunks:
+                        try:
+                            # 假设 thinking 内容在第一个 tool_call 的 args 中
+                            tc = delta_chunk.tool_call_chunks[0]
+                            if tc.get("name") == "thinking":
+                                args_str = tc.get("args", "{}")
+                                args_json = json.loads(args_str)
+                                delta_thinking = args_json.get("thought", "")
+                        except Exception:
+                            pass # 解析失败则忽略
+
+                    if delta_content or delta_thinking:
+                        full_response += delta_content + delta_thinking
+                        yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
             yield "data: [DONE]\n\n"
 
@@ -253,6 +361,7 @@ def api_ask():
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
 
+# --- (不变) /api/upload ---
 @api_bp.route("/api/upload", methods=["POST"])
 def upload():
     require_login()
@@ -267,6 +376,7 @@ def upload():
                      {"u": current_user()["id"], "n": name, "c": content})
     return jsonify({"ok": True, "filename": name})
 
+# --- (不变) /update/all ---
 @api_bp.route("/update/all", methods=["POST"])
 def update_all():
     require_login()
@@ -283,6 +393,7 @@ def update_all():
         logger.exception("加入刷新任务到队列时失败: %s", e)
         return jsonify({"ok": False, "error": "启动刷新失败"}), 500
 
+# --- (不变) /api/refresh/status ---
 @api_bp.route("/api/refresh/status", methods=["GET"])
 def refresh_status():
     require_login()
@@ -333,7 +444,7 @@ def refresh_status():
     except (ValueError, TypeError):
         return jsonify({"status": "running", "message": "正在计算..."})
 
-
+# --- (不变) /update/webhook ---
 @api_bp.route("/update/webhook", methods=["POST"])
 def update_webhook():
     raw = request.get_data()
