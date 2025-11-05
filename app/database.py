@@ -108,19 +108,18 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
-# (ASYNC REFACTOR) (*** 修复 ***)
+# (ASYNC REFACTOR) (*** 最终修复 ***)
 async def db_init():
     """异步初始化数据库"""
+
     # 1. 从池中获取一个连接
     async with async_engine.connect() as conn:
 
         # 2. (AUTOCOMMIT) 获取咨询锁
         # (*** 修复 ***)
-        # .execution_options() 返回一个 *coroutine*，
-        # 必须 await 它来获取配置好的新连接。
+        # 派生一个 AUTOCOMMIT connection wrapper (conn_ac)
         conn_ac = await conn.execution_options(isolation_level="AUTOCOMMIT")
         await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
-
         logger.info("数据库咨询锁已获取。")
 
         try:
@@ -129,8 +128,13 @@ async def db_init():
             # 重用 'conn_ac' (AUTOCOMMIT 连接)
             await conn_ac.execute(text(PRE_TX_SQL))
 
+            # (*** 修复 ***)
+            # 在尝试使用 'conn.begin()' 之前，必须显式关闭
+            # 'conn_ac' wrapper，以将父 'conn' 的状态重置。
+            await conn_ac.close()
+
             # 4. (TRANSACTIONAL) 执行所有 DDL
-            # 现在 conn 上没有事务，我们可以安全地启动一个
+            # 'conn' (父连接) 现在是干净的，可以安全地启动事务
             async with conn.begin():
                 logger.info("数据库事务已开始，正在执行 INIT_SQL...")
                 # 运行同步代码块 (因为 TX_INIT_SQL 是一个大字符串)
@@ -149,5 +153,10 @@ async def db_init():
             # 5. (AUTOCOMMIT) 释放锁
             logger.info("释放数据库咨询锁...")
             # (*** 修复 ***)
-            # 重用 'conn_ac' (AUTOCOMMIT 连接)
-            await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
+            # 不要重用 'conn_ac' (它可能已关闭或状态错误)。
+            # 派生一个 *新* 的 AUTOCOMMIT wrapper 来安全地释放锁。
+            conn_ac_final = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await conn_ac_final.execute(text("SELECT pg_advisory_unlock(9876543210)"))
+            # (*** 修复 ***)
+            # 关闭这个 final wrapper
+            await conn_ac_final.close()
