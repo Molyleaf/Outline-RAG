@@ -3,18 +3,15 @@ import logging
 import urllib.parse
 from typing import Sequence, Any
 
-# (ASYNC REFACTOR)
-import redis.asyncio as redis
+import redis # 导入 *同步* redis 库
+# ---
 import httpx
 from httpx import Response
-# ---
 from langchain_community.storage import RedisStore
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
 from langchain_core.documents import Document
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 import config
 
@@ -55,7 +52,8 @@ if config.REDIS_URL:
             except (ValueError, IndexError):
                 db_num = 0
 
-        # (ASYNC REFACTOR) 使用 redis.asyncio.Redis
+        # (*** 关键修复 ***)
+        # LangChain 的 RedisStore 需要一个 *同步* 客户端实例。
         _redis_cache_client = redis.Redis(
             host=parsed_url.hostname,
             port=parsed_url.port,
@@ -63,9 +61,9 @@ if config.REDIS_URL:
             db=db_num,
             decode_responses=False # 缓存需要原始字节
         )
-        # (ASYNC REFACTOR) Ping 在 main.py/startup 中处理
+        # (*** 修复结束 ***)
     except Exception as e:
-        logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False, async): %s", e)
+        logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False, sync client): %s", e)
         _redis_cache_client = None
 
 # 3b. 基础 Embedding API (不变)
@@ -78,12 +76,12 @@ _base_embeddings = OpenAIEmbeddings(
 
 # 3c. 带缓存的 Embedding 模型
 if _redis_cache_client:
-    # (ASYNC REFACTOR) RedisStore 支持异步客户端
+    # (修改) RedisStore 现在接收一个同步客户端，这是它所期望的
     store = RedisStore(client=_redis_cache_client, namespace="embeddings")
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
         _base_embeddings, store, namespace=f"emb:{config.EMBEDDING_MODEL}"
     )
-    logger.info("LangChain Embedding 缓存已启用 (Redis-Async)")
+    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient)")
 else:
     embeddings_model = _base_embeddings
     logger.info("LangChain Embedding 缓存未启用")
