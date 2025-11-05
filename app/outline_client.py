@@ -3,30 +3,41 @@ import hashlib
 import hmac
 import logging
 
-# (ASYNC REFACTOR)
 import httpx
 from httpx import Response
-# ---
+from httpx_retries import RetryTransport, Retry
 
 import config
 
 logger = logging.getLogger(__name__)
 
-# --- (ASYNC REFACTOR) HTTP 辅助函数 (httpx) ---
+# --- HTTP 辅助函数 (httpx) ---
 def _create_retry_client() -> httpx.AsyncClient:
     """创建带重试的 httpx.AsyncClient"""
-    retry_strategy = httpx.Retry(
+
+    # 1. 定义 Retry 策略
+    retry_strategy = Retry(
         total=3,
         backoff_factor=0.5,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["POST", "GET"],
     )
-    transport = httpx.AsyncHTTPTransport(retries=retry_strategy, http2=True)
+
+    # 2. 定义要包装的底层 transport (保留 http2)
+    base_transport = httpx.AsyncHTTPTransport(http2=True)
+
+    # 3. 使用 'transport' 参数
+    transport = RetryTransport(
+        retry=retry_strategy,
+        transport=base_transport
+    )
+
+    # 4. 创建客户端
     client = httpx.AsyncClient(transport=transport, timeout=60)
     return client
 
 async def http_post_json_raw(url, payload, headers=None, client: httpx.AsyncClient = None):
-    """(ASYNC REFACTOR) 异步 POST"""
+    """异步 POST"""
     should_close = False
     if client is None:
         client = _create_retry_client()
@@ -47,12 +58,11 @@ async def http_post_json_raw(url, payload, headers=None, client: httpx.AsyncClie
         if should_close:
             await client.aclose()
 
-# --- Outline API 函数 (ASYNC REFACTOR) ---
+# --- Outline API 函数 ---
 def outline_headers():
     return {"Authorization": f"Bearer {config.OUTLINE_API_TOKEN}", "Content-Type": "application/json"}
 
 async def outline_list_collections(client: httpx.AsyncClient):
-    """(ASYNC REFACTOR)"""
     u = f"{config.OUTLINE_API_URL}/api/collections.list"
     data = await http_post_json_raw(u, {"limit": 100}, headers=outline_headers(), client=client)
     if not data or not data.get("data"):
@@ -61,7 +71,6 @@ async def outline_list_collections(client: httpx.AsyncClient):
     return data["data"]
 
 async def outline_list_docs():
-    """(ASYNC REFACTOR)"""
     client = _create_retry_client()
     try:
         collections = await outline_list_collections(client=client)
@@ -106,12 +115,11 @@ async def outline_list_docs():
 
 
 async def outline_get_doc(doc_id):
-    """(ASYNC REFACTOR)"""
     u = f"{config.OUTLINE_API_URL}/api/documents.info"
     data = await http_post_json_raw(u, {"id": doc_id}, headers=outline_headers())
     return data.get("data") if data else None
 
-# --- Webhook 验证 (不变, 纯函数) ---
+# --- Webhook 验证 ---
 def verify_outline_signature(raw_body, signature_hex: str) -> bool:
     if not config.OUTLINE_WEBHOOK_SIGN: return True
     try:

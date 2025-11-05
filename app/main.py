@@ -4,9 +4,8 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Request
@@ -17,17 +16,15 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 导入配置
 import config
-
+# 导入异步任务
+import rag
 # 导入新的异步蓝图 (APIRouter)
 from blueprints.api import api_router
 from blueprints.auth import auth_router
 from blueprints.views import views_router
-
 # 导入异步数据库
 from database import db_init, redis_client, async_engine
 
-# 导入异步任务
-import rag
 # (已移除) from app import archive_old_messages_task
 
 # --- 1. FastAPI 应用初始化 ---

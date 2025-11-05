@@ -3,28 +3,24 @@ import json
 import logging
 import time
 import uuid
+from operator import itemgetter as itemgetter
 from typing import List, Dict, Any
 
 import config
-# (ASYNC REFACTOR)
+import rag
 from database import AsyncSessionLocal, redis_client
-from fastapi import APIRouter, Depends, HTTPException, Request, Body
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-# ---
 from langchain_core.documents import Document
-from operator import itemgetter as itemgetter
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableParallel
+from llm_services import llm
+from outline_client import verify_outline_signature
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
-
-from llm_services import llm
-from outline_client import verify_outline_signature
-
-import rag
 
 logger = logging.getLogger(__name__)
 # (ASYNC REFACTOR)

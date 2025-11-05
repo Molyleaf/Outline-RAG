@@ -3,9 +3,10 @@ import re
 
 # (ASYNC REFACTOR)
 from database import AsyncSessionLocal
-from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi import APIRouter, Request, Depends
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import text
+
 # ---
 
 # (ASYNC REFACTOR)
@@ -47,7 +48,7 @@ async def chat_page_with_guid(
 
     if not re.fullmatch(r"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", conv_guid):
         resp = RedirectResponse("/chat")
-        resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
+        resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="lax")
         return resp
 
     # (ASYNC REFACTOR)
@@ -60,7 +61,7 @@ async def chat_page_with_guid(
 
     if not own:
         resp = RedirectResponse("/chat")
-        resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="Lax")
+        resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="lax")
         return resp
 
     return FileResponse("static/index.html", headers=HTML_RESPONSE_HEADERS)

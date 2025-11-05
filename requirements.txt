@@ -27,3 +27,4 @@ httpx_retries==0.4.5
 redis[hiredis]==7.0.1
 starlette==0.48.0
 python-multipart==0.0.20
+pydantic==2.12.3

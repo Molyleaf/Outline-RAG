@@ -1,6 +1,5 @@
 # app/app.py
 import logging
-import os
 import sys
 
 # (修改) 不再导入 redis 或 requests

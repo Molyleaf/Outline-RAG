@@ -4,8 +4,7 @@ import urllib.parse
 
 # (ASYNC REFACTOR) 导入 redis.asyncio
 import redis.asyncio as redis
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 import config
 
@@ -26,7 +25,7 @@ else:
 async_engine = create_async_engine(db_url, future=True)
 
 # (ASYNC REFACTOR) 创建异步 Session
-AsyncSessionLocal = sessionmaker(
+AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=async_engine,
