@@ -107,11 +107,13 @@ CREATE TABLE IF NOT EXISTS attachments (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TIMESTAMTz NOT NULL DEFAULT NOW()
+  
+  -- (*** 最终修复 ***) 纠正这里的拼写错误
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 """
 
-# (ASYNC REFACTOR) (*** 最终修复 ***)
+# (ASYNC REFACTOR)
 async def db_init():
     """异步初始化数据库"""
 
@@ -131,19 +133,13 @@ async def db_init():
                 async with conn_tx.begin():
                     logger.info("数据库事务已开始，正在执行 INIT_SQL...")
 
-                    # (*** 修复 ***)
-                    # "cannot insert multiple commands into a prepared statement"
-                    # 我们必须按 ';' 拆分 DDL 字符串，并单独执行每个命令。
-
-                    # 过滤掉拆分后可能产生的空字符串
+                    # 按 ';' 拆分 DDL 字符串，并单独执行每个命令
                     commands = [cmd.strip() for cmd in TX_INIT_SQL.split(';') if cmd.strip()]
 
                     for sql_command in commands:
-                        # (*** 修复 ***)
                         # 逐个异步执行每个 DDL 命令
                         await conn_tx.execute(text(sql_command))
 
-                    # (*** 修复 ***)
                     # 异步执行 ANALYZE
                     await conn_tx.execute(text("ANALYZE"))
 
