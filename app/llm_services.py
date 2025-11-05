@@ -2,9 +2,10 @@
 import logging
 import urllib.parse
 from typing import Sequence, Any
-import hashlib # (*** 新增 ***) 导入 hashlib 用于 SHA-256
+import hashlib
 
 import redis
+import redis.asyncio as aredis
 import httpx
 from httpx import Response
 from langchain_community.storage import RedisStore
@@ -12,16 +13,27 @@ from langchain_classic.embeddings.cache import CacheBackedEmbeddings
 from langchain_core.documents import Document
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 import config
 
 logger = logging.getLogger(__name__)
 
-# (*** 修复 2 ***)
-# 为 SHA-1 警告提供一个更安全的 key_encoder
+# (*** 关键修复 ***)
+# 将 namespace 移入 key_encoder 中
+# 1. 定义缓存键的前缀（之前在 'namespace' 参数中）
+_cache_prefix = f"emb:{config.EMBEDDING_MODEL}"
+
 def _sha256_encoder(s: str) -> str:
-    """Encodes a string to its SHA-256 hash, safe for cache keys."""
-    return hashlib.sha256(s.encode()).hexdigest()
+    """
+    将输入文本编码为 SHA-256 哈希，并附加模型特定的前缀。
+    """
+    # 1. 计算文本内容的哈希
+    hash_id = hashlib.sha256(s.encode()).hexdigest()
+    # 2. 返回 命名空间前缀:哈希值 作为最终的键
+    return f"{_cache_prefix}:{hash_id}"
+# (*** 修复结束 ***)
 
 # --- 1. 共享的 HTTP 客户端 (httpx) ---
 def _create_retry_client() -> httpx.AsyncClient:
@@ -77,14 +89,18 @@ _base_embeddings = OpenAIEmbeddings(
 
 # 3c. 带缓存的 Embedding 模型
 if _redis_cache_client:
+    # 'store' 仍然可以使用它自己的 'namespace'（例如 "embeddings"）
+    # 这与 CacheBackedEmbeddings 的键是分开的。
     store = RedisStore(client=_redis_cache_client, namespace="embeddings")
+
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
         _base_embeddings,
         store,
-        namespace=f"emb:{config.EMBEDDING_MODEL}",
-        key_encoder=_sha256_encoder # (*** 修复 2 ***) 消除 SHA-1 警告
+        # (*** 关键修复 ***)
+        # 移除 'namespace' 参数，因为它现在已包含在 'key_encoder' 中
+        key_encoder=_sha256_encoder
     )
-    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient, SHA256)")
+    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient, SHA256+Prefix)")
 else:
     embeddings_model = _base_embeddings
     logger.info("LangChain Embedding 缓存未启用")
@@ -92,9 +108,6 @@ else:
 
 # --- 4. 重排模型 (Reranker) ---
 class SiliconFlowReranker(BaseDocumentCompressor):
-    """
-    (ASYNC REFACTOR) 适配 SiliconFlow API 的异步 Reranker
-    """
     model: str = config.RERANKER_MODEL
     api_url: str = f"{config.RERANKER_API_URL}/v1/rerank"
     api_token: str = config.RERANKER_API_TOKEN
@@ -103,20 +116,16 @@ class SiliconFlowReranker(BaseDocumentCompressor):
     client: httpx.AsyncClient = None
     logger: Any = None
 
-    # (*** 关键修复 1 ***)
-    # 修复 PydanticSchemaGenerationError
-    # 告诉 Pydantic 允许 httpx.AsyncClient 这种"任意"类型
+    # (修复 Pydantic 错误 - 保持不变)
     class Config:
         arbitrary_types_allowed = True
-    # (*** 修复结束 ***)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # (ASYNC REFACTOR)
         self.client = _create_retry_client()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    # (ASYNC REFACTOR) 实现 acompress_documents
+    # ... (SiliconFlowReranker 的其余部分保持不变) ...
     async def acompress_documents(
             self,
             documents: Sequence[Document],
@@ -139,7 +148,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
         try:
-            # (ASYNC REFACTOR)
             resp: Response = await self.client.post(self.api_url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
             data = resp.json()
@@ -164,7 +172,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
 
         return final_docs
 
-    # (保留) 同步方法，以防万一被调用（尽管我们不打算使用它）
     def compress_documents(
             self,
             documents: Sequence[Document],
@@ -172,10 +179,7 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             callbacks=None,
     ) -> Sequence[Document]:
         self.logger.warning("SiliconFlowReranker.compress_documents (同步) 被调用，这不应该发生。")
-        # 这是一个 hack，但在 RAG 链中不应发生
-        # 在 FastAPI 中，我们不能轻易地从异步代码中调用同步 IO
         return []
-
 
 # 实例化 Reranker (现在是异步感知的)
 reranker = SiliconFlowReranker()
