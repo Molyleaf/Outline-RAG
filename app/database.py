@@ -23,7 +23,7 @@ else:
     db_url = config.DATABASE_URL
 
 # (ASYNC REFACTOR) 创建异步引擎
-async_engine = create_engine(db_url, future=True)
+async_engine = create_async_engine(db_url, future=True)
 
 # (ASYNC REFACTOR) 创建异步 Session
 AsyncSessionLocal = sessionmaker(
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMTz NOT NULL DEFAULT NOW()
 );
 """
 

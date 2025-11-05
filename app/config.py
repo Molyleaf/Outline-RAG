@@ -85,4 +85,4 @@ ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FIL
 
 # --- 持久化目录 ---
 ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "/app/data/attachments")
-ARCHIVE_DIR = os.getenv("ARCHIVE_DIR", "/app/data/archive")
+# ARCHIVE_DIR 已移除

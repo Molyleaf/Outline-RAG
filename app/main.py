@@ -28,7 +28,7 @@ from database import db_init, redis_client, async_engine
 
 # 导入异步任务
 import rag
-from app import archive_old_messages_task # 可以复用这个函数，因为它内部导入了同步 engine
+# (已移除) from app import archive_old_messages_task
 
 # --- 1. FastAPI 应用初始化 ---
 app = FastAPI(
@@ -91,9 +91,7 @@ async def task_worker():
                 await rag.refresh_all_task()
             elif task_name == "process_doc_batch":
                 await rag.process_doc_batch_task(task_data.get("doc_ids", []))
-            elif task_name == "archive_old_messages":
-                # 这个任务是同步的，为了不阻塞事件循环，在线程池中运行它
-                await asyncio.to_thread(archive_old_messages_task)
+            # (已移除) archive_old_messages 任务
             else:
                 logger.warning("未知任务类型: %s", task_name)
 
@@ -150,7 +148,7 @@ async def startup_event():
 
     # 2. 创建目录
     os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
-    os.makedirs(config.ARCHIVE_DIR, exist_ok=True)
+    # (已移除) ARCHIVE_DIR
 
     # 3. 初始化数据库 (异步)
     try:
@@ -193,12 +191,8 @@ async def shutdown_event():
 # --- 8. 健康检查 ---
 @app.get("/healthz", tags=["Health"])
 async def healthz():
-    """健康检查，并周期性地将归档任务加入队列。"""
-    if redis_client:
-        # (ASYNC REFACTOR)
-        if await redis_client.set("archive:lock", "1", ex=3600, nx=True):
-            logger.info("将归档任务加入队列。")
-            await redis_client.lpush("task_queue", json.dumps({"task": "archive_old_messages"}))
+    """健康检查。"""
+    # (已移除) 归档任务触发逻辑
     return "ok"
 
 # --- 9. 全局异常处理 ---

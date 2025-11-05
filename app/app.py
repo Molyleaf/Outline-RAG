@@ -1,11 +1,7 @@
 # app/app.py
-import json
 import logging
 import os
 import sys
-import threading
-import time
-from datetime import datetime, timezone, timedelta
 
 # (修改) 不再导入 redis 或 requests
 from flask import Flask
@@ -42,51 +38,7 @@ assets.register('js_all', js_bundle)
 assets.register('css_all', css_bundle)
 # --- Assets 配置结束 ---
 
-# --- 3. (保留) archive_old_messages_task ---
-# (这个任务是同步的，将被 main.py 的线程池调用)
-def archive_old_messages_task(days=90, batch_size=2000):
-    """归档旧消息的任务。"""
-
-    # (修改) 在函数内部导入同步的 database engine
-    import config
-    from sqlalchemy import create_engine, text
-
-    logger = logging.getLogger("archive_task") # 使用独立的 logger
-
-    # (修改) 创建一个临时的同步 engine
-    sync_engine = None
-    try:
-        if not config.DATABASE_URL:
-            logger.error("归档任务：缺少 DATABASE_URL")
-            return
-
-        db_url = config.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-        if "psycopg2" not in db_url:
-            db_url = config.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
-
-        sync_engine = create_engine(db_url, future=True)
-
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        logger.info("开始归档 %s 天前的旧消息...", days)
-        processed_count = 0
-        while True:
-            with sync_engine.begin() as conn:
-                rows = conn.execute(text("SELECT * FROM messages WHERE created_at < :cutoff ORDER BY id LIMIT :limit"),
-                                    {"cutoff": cutoff, "limit": batch_size}).mappings().all()
-                if not rows: break
-                processed_count += len(rows)
-                ts = int(time.time())
-                fname = os.path.join(config.ARCHIVE_DIR, f"messages_{ts}_{rows[0]['id']}_{rows[-1]['id']}.jsonl")
-                with open(fname, "a", encoding="utf-8") as f:
-                    for r in rows: f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
-                conn.execute(text("DELETE FROM messages WHERE id = ANY(:ids)"), {"ids": [r["id"] for r in rows]})
-        logger.info("旧消息归档任务完成，共处理 %d 条消息。", processed_count)
-
-    except Exception as e:
-        logger.error(f"归档任务失败: {e}", exc_info=True)
-    finally:
-        if sync_engine:
-            sync_engine.dispose()
+# --- 3. (已移除) archive_old_messages_task ---
 
 
 # --- (已移除) _startup_self_check ---
