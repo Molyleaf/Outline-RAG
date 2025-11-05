@@ -13,10 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-# (修复) 导入 Starlette 的 ASGI 兼容中间件
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
-# (移除) 不再使用 Werkzeug (WSGI) 的中间件
-# from werkzeug.middleware.proxy_fix import ProxyFix
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 # 导入配置
 import config
