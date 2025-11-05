@@ -112,51 +112,45 @@ CREATE TABLE IF NOT EXISTS attachments (
 async def db_init():
     """异步初始化数据库"""
 
-    # 1. 从池中获取一个连接
-    async with async_engine.connect() as conn:
+    # 1. (AUTOCOMMIT) 获取咨询锁
+    # (*** 修复 ***)
+    # 获取一个*专用*的连接 (conn_lock) 来处理 AUTOCOMMIT 任务
+    async with async_engine.connect() as conn_lock:
 
-        # 2. (AUTOCOMMIT) 获取咨询锁
-        # (*** 修复 ***)
         # 派生一个 AUTOCOMMIT connection wrapper (conn_ac)
-        conn_ac = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        conn_ac = await conn_lock.execution_options(isolation_level="AUTOCOMMIT")
         await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
         logger.info("数据库咨询锁已获取。")
 
         try:
             # 3. (AUTOCOMMIT) 创建扩展
-            # (*** 修复 ***)
-            # 重用 'conn_ac' (AUTOCOMMIT 连接)
             await conn_ac.execute(text(PRE_TX_SQL))
 
-            # (*** 修复 ***)
-            # 在尝试使用 'conn.begin()' 之前，必须显式关闭
-            # 'conn_ac' wrapper，以将父 'conn' 的状态重置。
-            await conn_ac.close()
-
             # 4. (TRANSACTIONAL) 执行所有 DDL
-            # 'conn' (父连接) 现在是干净的，可以安全地启动事务
-            async with conn.begin():
-                logger.info("数据库事务已开始，正在执行 INIT_SQL...")
-                # 运行同步代码块 (因为 TX_INIT_SQL 是一个大字符串)
-                await conn.run_sync(lambda sync_conn: sync_conn.execute(text(TX_INIT_SQL)))
-                await conn.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
+            # (*** 修复 ***)
+            # 获取一个 *全新* 的连接 (conn_tx) 来安全地执行事务
+            # 这个连接与 conn_lock 是分开的
+            async with async_engine.connect() as conn_tx:
+                async with conn_tx.begin():
+                    logger.info("数据库事务已开始，正在执行 INIT_SQL...")
+                    await conn_tx.run_sync(lambda sync_conn: sync_conn.execute(text(TX_INIT_SQL)))
+                    await conn_tx.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
+
+            # conn_tx (事务连接) 在这里自动关闭和提交
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")
 
         except Exception as e:
-            # (关键) 捕获并记录 *真正* 的初始化错误
             logger.error(f"数据库初始化 (db_init) 失败: {e}", exc_info=True)
-            # 重新抛出异常，以便 main.py 知道启动失败
+            # 重新抛出，main.py 会捕获并 sys.exit(1)
+            # finally 块仍会执行
             raise
 
         finally:
             # 5. (AUTOCOMMIT) 释放锁
+            # (*** 修复 ***)
+            # 重用 'conn_ac' (它仍然存活且处于 AUTOCOMMIT 模式) 来释放锁
             logger.info("释放数据库咨询锁...")
-            # (*** 修复 ***)
-            # 不要重用 'conn_ac' (它可能已关闭或状态错误)。
-            # 派生一个 *新* 的 AUTOCOMMIT wrapper 来安全地释放锁。
-            conn_ac_final = await conn.execution_options(isolation_level="AUTOCOMMIT")
-            await conn_ac_final.execute(text("SELECT pg_advisory_unlock(9876543210)"))
-            # (*** 修复 ***)
-            # 关闭这个 final wrapper
-            await conn_ac_final.close()
+            await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
+
+        # conn_lock (和 conn_ac) 在这里自动关闭
