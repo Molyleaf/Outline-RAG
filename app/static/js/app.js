@@ -535,7 +535,6 @@ async function sendQuestion() {
         }
     };
 
-    // 4. (rerender 函数已被移除)
 
     // 5. fetch 和 SSE 处理循环
     const res = await fetch('/chat/api/ask', {
@@ -562,24 +561,30 @@ async function sendQuestion() {
     const decoder = new TextDecoder();
     let buffer = '';
     let modelDetected = false;
+    let streamDone = false; // <--- 在这里添加标志
 
     try {
         while (true) {
             const { value, done } = await reader.read();
-            if (done) break;
+            if (done) break; // 流自然结束
+
             buffer += decoder.decode(value, {stream: true});
             let idx;
+
             while ((idx = buffer.indexOf('\n\n')) >= 0) {
                 const chunk = buffer.slice(0, idx).trim();
                 buffer = buffer.slice(idx + 2);
+
                 if (chunk.startsWith('data:')) {
                     const data = chunk.slice(5).trim();
                     if (data === '[DONE]') {
-                        // finalizeStream(); // 将在循环外调用
-                        // return; // 不要在这里 return，让循环自然结束
-                        break; // 跳出 while (idx) 循环
+                        streamDone = true; // <-- 设置标志
+                        break; // 跳出内层 while (idx) 循环
                     }
-                    if (data === '[DONE]') break; // (修正) 应该跳出外层 while (true) 循环，但 finalizeStream 在外部处理
+                    if (data === '[DONE]') { // (修正)
+                        streamDone = true; // <-- 设置标志
+                        break;
+                    }
 
                     try {
                         const j = JSON.parse(data);
@@ -669,11 +674,23 @@ async function sendQuestion() {
 
                     } catch {}
                 }
+
                 // (修正) 如果是 [DONE]，跳出外层循环
-                if (chunk.includes('data: [DONE]')) break;
+                if (chunk.includes('data: [DONE]')) {
+                    streamDone = true; // <-- 设置标志
+                    break;
+                }
             }
-            if (chunk.includes('data: [DONE]')) break;
+
+            // 在这里检查标志，以跳出外层 while (true) 循环
+            if (streamDone) {
+                break;
+            }
+
+            // 导致错误的那一行已被移除 (if (chunk.includes('data: [DONE]')) break;)
+
         }
+
         finalizeStream(); // 处理流在 [DONE] 之前结束的情况
     } catch (e) {
         console.error("Stream processing error:", e);
