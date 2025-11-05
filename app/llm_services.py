@@ -5,7 +5,7 @@ from typing import Sequence, Any
 
 import redis
 import requests
-from langchain_classic.storage import RedisStore
+from langchain_community.storage import RedisStore
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
 from langchain_core.documents import Document
 from langchain_core.documents import BaseDocumentCompressor
