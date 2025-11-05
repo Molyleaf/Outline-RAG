@@ -171,8 +171,8 @@ app.add_middleware(
 )
 
 # --- 4. 注册路由 (APIRouter) ---
-app.include_router(views_router, prefix="/chat", tags=["Views"])
 app.include_router(auth_router, prefix="/chat", tags=["Auth"])
+app.include_router(views_router, prefix="/chat", tags=["Views"])
 app.include_router(api_router, prefix="/chat", tags=["API"])
 
 

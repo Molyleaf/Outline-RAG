@@ -4,6 +4,8 @@ import urllib.parse
 
 # (ASYNC REFACTOR) 导入 redis.asyncio
 import redis.asyncio as redis
+# (*** 修复 1 ***) 导入 text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 import config
@@ -111,10 +113,11 @@ async def db_init():
     """异步初始化数据库"""
     async with async_engine.begin() as conn:
         # 使用 run_sync 在异步连接上执行同步 DDL
-        await conn.run_sync(lambda sync_conn: sync_conn.execute(f"SELECT pg_advisory_lock(9876543210)"))
+        # (*** 修复 1 ***) 将所有原始字符串 SQL 用 text() 包裹
+        await conn.run_sync(lambda sync_conn: sync_conn.execute(text(f"SELECT pg_advisory_lock(9876543210)")))
         try:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(INIT_SQL))
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("ANALYZE"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text(INIT_SQL)))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
             logger.info("数据库表结构初始化/检查完成 (异步)。")
         finally:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT pg_advisory_unlock(9876543210)"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT pg_advisory_unlock(9876543210)")))
