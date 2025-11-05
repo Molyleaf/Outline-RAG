@@ -1,91 +1,69 @@
 # app/blueprints/views.py
-# (已修改 4) 移除了未使用的导入
 import re
 
-from database import engine
-from flask import Blueprint, session, redirect, send_from_directory, current_app
+# (ASYNC REFACTOR)
+from database import AsyncSessionLocal
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import text
+# ---
 
-# (已移除) 'require_login' 未在此文件中使用 (views.py 使用重定向，api.py 使用 abort)
-# from .api import require_login
+# (ASYNC REFACTOR)
+views_router = APIRouter()
 
-views_bp = Blueprint('views', __name__)
+def get_current_user_optional(request: Request) -> dict | None:
+    """依赖项：获取用户（如果已登录）"""
+    return request.session.get("user")
 
-def _serve_static_with_cache(filename, content_type, max_age=86400):
-    resp = send_from_directory(current_app.static_folder, filename)
-    resp.headers["Content-Type"] = f"{content_type}; charset=utf-8"
-    resp.headers.setdefault("Cache-Control", f"public, max-age={max_age}")
-    return resp
+async def get_db_session():
+    """FastAPI 依赖项：获取异步数据库 session。"""
+    async with AsyncSessionLocal() as session:
+        yield session
 
-@views_bp.route("/")
-def chat_page():
-    # (已确认 4) 此登录检查逻辑正确，它重定向到登录页面
-    if "user" not in session:
-        return redirect("/chat/login")
+# (ASYNC REFACTOR)
+# index.html 现在由 FileResponse 提供
+HTML_RESPONSE_HEADERS = {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
-    resp = send_from_directory(current_app.static_folder, "index.html")
-    resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
+@views_router.get("/")
+async def chat_page(user: dict = Depends(get_current_user_optional)):
+    if not user:
+        return RedirectResponse("/chat/login")
 
-@views_bp.route("/<string:conv_guid>")
-def chat_page_with_guid(conv_guid: str):
-    # (已确认 4) 此登录检查逻辑正确
-    if "user" not in session:
-        return redirect("/chat/login")
+    return FileResponse("static/index.html", headers=HTML_RESPONSE_HEADERS)
+
+@views_router.get("/{conv_guid}")
+async def chat_page_with_guid(
+        conv_guid: str,
+        user: dict = Depends(get_current_user_optional),
+        session = Depends(get_db_session)
+):
+    if not user:
+        return RedirectResponse("/chat/login")
 
     if not re.fullmatch(r"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", conv_guid):
-        resp = redirect("/chat")
+        resp = RedirectResponse("/chat")
         resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="Lax")
         return resp
-    with engine.begin() as conn:
-        user_id = (session.get("user") or {}).get("id")
-        if not user_id:
-            return redirect("/chat/login")
 
-        own = conn.execute(text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
-                           {"id": conv_guid, "u": user_id}).scalar()
+    # (ASYNC REFACTOR)
+    async with session.begin():
+        user_id = user.get("id")
+        own = (await session.execute(
+            text("SELECT 1 FROM conversations WHERE id=:id AND user_id=:u"),
+            {"id": conv_guid, "u": user_id}
+        )).scalar()
+
     if not own:
-        resp = redirect("/chat")
+        resp = RedirectResponse("/chat")
         resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="Lax")
         return resp
-    return chat_page()
 
-# --- (不变) 静态文件路由 ---
-@views_bp.route("/static/img/DeepSeek.svg")
-def chat_static_deepseek_svg():
-    return _serve_static_with_cache("img/DeepSeek.svg", "image/svg+xml")
+    return FileResponse("static/index.html", headers=HTML_RESPONSE_HEADERS)
 
-@views_bp.route("/static/img/Tongyi.svg")
-def chat_static_tongyi_svg():
-    return _serve_static_with_cache("img/Tongyi.svg", "image/svg+xml")
-
-@views_bp.route("/static/img/zhipu.svg")
-def chat_static_zhipu_svg():
-    return _serve_static_with_cache("img/zhipu.svg", "image/svg+xml")
-
-@views_bp.route("/static/img/moonshotai_new.png")
-def chat_static_moonshotai_new_png():
-    return _serve_static_with_cache("img/moonshotai_new.png", "image/png")
-
-@views_bp.route("/static/img/ling.png")
-def chat_static_ling_png():
-    return _serve_static_with_cache("img/ling.png", "image/png")
-
-@views_bp.route("/static/img/openai.svg")
-def chat_static_openai_svg():
-    return _serve_static_with_cache("img/openai.svg", "image/svg+xml")
-
-@views_bp.route("/static/img/thudm.svg")
-def chat_static_thudm_svg():
-    return _serve_static_with_cache("img/thudm.svg", "image/svg+xml")
-
-@views_bp.route("/static/img/favicon.ico")
-def chat_static_favicon_ico():
-    return _serve_static_with_cache("img/favicon.ico", "image/x-icon")
-
-@views_bp.route("/static/img/favicon.svg")
-def chat_static_favicon_svg():
-    return _serve_static_with_cache("img/favicon.svg", "image/svg+xml")
+# --- (已移除) 静态文件路由 ---
+# (已在 main.py 中通过 app.mount("/chat/static", ...) 统一处理)

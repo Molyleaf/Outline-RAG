@@ -2,8 +2,9 @@
 import logging
 import urllib.parse
 
-import redis
-from sqlalchemy import create_engine
+# (ASYNC REFACTOR) 导入 redis.asyncio
+import redis.asyncio as redis
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 import config
@@ -13,11 +14,27 @@ logger = logging.getLogger(__name__)
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-engine = create_engine(config.DATABASE_URL, future=True)
+# (ASYNC REFACTOR) 确保 URL 是 asyncpg
+if not config.DATABASE_URL.startswith("postgresql+asyncpg"):
+    logger.warning("DATABASE_URL 不是 postgresql+asyncpg，将尝试替换...")
+    db_url = config.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+else:
+    db_url = config.DATABASE_URL
 
-Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# (ASYNC REFACTOR) 创建异步引擎
+async_engine = create_engine(db_url, future=True)
 
-# --- Redis 连接 (与原版一致) ---
+# (ASYNC REFACTOR) 创建异步 Session
+AsyncSessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
+
+# --- (ASYNC REFACTOR) 异步 Redis 连接 ---
 redis_client = None
 if config.REDIS_URL:
     try:
@@ -29,6 +46,7 @@ if config.REDIS_URL:
             except (ValueError, IndexError):
                 db_num = 0
 
+        # (ASYNC REFACTOR) 使用 redis.asyncio.Redis
         redis_client = redis.Redis(
             host=parsed_url.hostname,
             port=parsed_url.port,
@@ -36,16 +54,17 @@ if config.REDIS_URL:
             db=db_num,
             decode_responses=True
         )
-        redis_client.ping()
-        logger.info("Successfully connected to Redis.")
+        # (ASYNC REFACTOR) ping() 现在是异步的，在 main.py 的 startup 中检查
+        logger.info("Redis (asyncio) 客户端已配置。")
     except Exception as e:
-        logger.critical("Failed to connect to Redis: %s", e)
+        logger.critical("Failed to configure async Redis: %s", e)
         redis_client = None
 else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
-# --- (已修改) 初始化 SQL ---
-# 删除了 'documents' 表，因为 PGVectorStore 将自行管理文档和元数据
+# --- (不变) 初始化 SQL ---
+# (注意：database.py 中的 INIT_SQL 和 db_init() 是同步的)
+# (我们将修改 db_init() 为异步)
 INIT_SQL = f"""
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -66,7 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversatio
 CREATE TABLE IF NOT EXISTS messages (
   id BIGSERIAL PRIMARY KEY,
   conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- (新) 关联 user_id
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -77,7 +96,7 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_conv_id_id_asc ON messages(conv_id, id ASC);
-CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id); -- (新) 索引
+CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id BIGSERIAL PRIMARY KEY,
@@ -88,12 +107,15 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
-def db_init():
-    with engine.begin() as conn:
-        conn.exec_driver_sql("SELECT pg_advisory_lock(9876543210)")
+# (ASYNC REFACTOR)
+async def db_init():
+    """异步初始化数据库"""
+    async with async_engine.begin() as conn:
+        # 使用 run_sync 在异步连接上执行同步 DDL
+        await conn.run_sync(lambda sync_conn: sync_conn.execute(f"SELECT pg_advisory_lock(9876543210)"))
         try:
-            conn.exec_driver_sql(INIT_SQL)
-            conn.exec_driver_sql("ANALYZE")
-            logger.info("数据库表结构初始化/检查完成。")
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(INIT_SQL))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute("ANALYZE"))
+            logger.info("数据库表结构初始化/检查完成 (异步)。")
         finally:
-            conn.exec_driver_sql("SELECT pg_advisory_unlock(9876543210)")
+            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT pg_advisory_unlock(9876543210)"))

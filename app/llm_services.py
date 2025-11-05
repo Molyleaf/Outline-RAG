@@ -3,8 +3,11 @@ import logging
 import urllib.parse
 from typing import Sequence, Any
 
-import redis
-import requests
+# (ASYNC REFACTOR)
+import redis.asyncio as redis
+import httpx
+from httpx import Response
+# ---
 from langchain_community.storage import RedisStore
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
 from langchain_core.documents import Document
@@ -17,25 +20,28 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# --- (不变) 1. 共享的 HTTP 客户端 ---
-def _create_retry_session():
-    session = requests.Session()
-    retry = Retry(
-        total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["POST", "GET"], raise_on_status=False,
+# --- (ASYNC REFACTOR) 1. 共享的 HTTP 客户端 (httpx) ---
+def _create_retry_client() -> httpx.AsyncClient:
+    """创建带重试的 httpx.AsyncClient"""
+    retry_strategy = httpx.Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["POST", "GET"],
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    return session
+    transport = httpx.AsyncHTTPTransport(retries=retry_strategy)
+    client = httpx.AsyncClient(transport=transport)
+    return client
 
 # --- (不变) 2. 聊天模型 (LLM) ---
+# (ChatOpenAI 自动支持 ainvoke/astream)
 llm = ChatOpenAI(
     model=config.CHAT_MODEL,
     api_key=config.CHAT_API_TOKEN,
     base_url=f"{config.CHAT_API_URL}/v1",
 )
 
-# --- (不变) 3. 嵌入模型 (Embedding) ---
+# --- (ASYNC REFACTOR) 3. 嵌入模型 (Embedding) ---
 
 # 3a. LangChain 缓存需要一个 *不* 解码响应 (decode_responses=False) 的 Redis 客户端
 _redis_cache_client = None
@@ -49,19 +55,21 @@ if config.REDIS_URL:
             except (ValueError, IndexError):
                 db_num = 0
 
+        # (ASYNC REFACTOR) 使用 redis.asyncio.Redis
         _redis_cache_client = redis.Redis(
             host=parsed_url.hostname,
             port=parsed_url.port,
             password=parsed_url.password,
             db=db_num,
-            decode_responses=False
+            decode_responses=False # 缓存需要原始字节
         )
-        _redis_cache_client.ping()
+        # (ASYNC REFACTOR) Ping 在 main.py/startup 中处理
     except Exception as e:
-        logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False): %s", e)
+        logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False, async): %s", e)
         _redis_cache_client = None
 
-# 3b. 基础 Embedding API
+# 3b. 基础 Embedding API (不变)
+# (OpenAIEmbeddings 自动支持 aembed_documents/aembed_query)
 _base_embeddings = OpenAIEmbeddings(
     model=config.EMBEDDING_MODEL,
     api_key=config.EMBEDDING_API_TOKEN,
@@ -70,38 +78,38 @@ _base_embeddings = OpenAIEmbeddings(
 
 # 3c. 带缓存的 Embedding 模型
 if _redis_cache_client:
+    # (ASYNC REFACTOR) RedisStore 支持异步客户端
     store = RedisStore(client=_redis_cache_client, namespace="embeddings")
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
         _base_embeddings, store, namespace=f"emb:{config.EMBEDDING_MODEL}"
     )
-    logger.info("LangChain Embedding 缓存已启用 (Redis)")
+    logger.info("LangChain Embedding 缓存已启用 (Redis-Async)")
 else:
     embeddings_model = _base_embeddings
     logger.info("LangChain Embedding 缓存未启用")
 
 
-# --- 4. 重排模型 (Reranker) ---
-class SiliconFlowReranker(BaseDocumentCompressor): # (*** 修复 ***) 继承 BaseDocumentCompressor
+# --- (ASYNC REFACTOR) 4. 重排模型 (Reranker) ---
+class SiliconFlowReranker(BaseDocumentCompressor):
     """
-    自定义 LangChain Reranker，适配 SiliconFlow 的 API
-    (Qwen/Qwen3-Reranker-0.6B)
+    (ASYNC REFACTOR) 适配 SiliconFlow API 的异步 Reranker
     """
     model: str = config.RERANKER_MODEL
     api_url: str = f"{config.RERANKER_API_URL}/v1/rerank"
     api_token: str = config.RERANKER_API_TOKEN
     top_n: int = config.K
 
-    # 修复：为 Pydantic 声明 client 和 logger 字段
-    client: Any = None
+    client: httpx.AsyncClient = None
     logger: Any = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.client = _create_retry_session()
+        # (ASYNC REFACTOR)
+        self.client = _create_retry_client()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    # (*** 修复 ***) 此方法现在正确地实现了 BaseDocumentCompressor 的抽象方法
-    def compress_documents(
+    # (ASYNC REFACTOR) 实现 acompress_documents
+    async def acompress_documents(
             self,
             documents: Sequence[Document],
             query: str,
@@ -123,11 +131,12 @@ class SiliconFlowReranker(BaseDocumentCompressor): # (*** 修复 ***) 继承 Bas
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
         try:
-            resp = self.client.post(self.api_url, json=payload, headers=headers, timeout=60)
+            # (ASYNC REFACTOR)
+            resp: Response = await self.client.post(self.api_url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
             data = resp.json()
-        except requests.RequestException as e:
-            self.logger.warning(f"SiliconFlowReranker API 调用失败: {e}")
+        except httpx.HTTPError as e:
+            self.logger.warning(f"SiliconFlowReranker API (async) 调用失败: {e}")
             return []
 
         results = data.get("results")
@@ -147,5 +156,18 @@ class SiliconFlowReranker(BaseDocumentCompressor): # (*** 修复 ***) 继承 Bas
 
         return final_docs
 
-# 实例化 Reranker (现在可以正常工作)
+    # (保留) 同步方法，以防万一被调用（尽管我们不打算使用它）
+    def compress_documents(
+            self,
+            documents: Sequence[Document],
+            query: str,
+            callbacks=None,
+    ) -> Sequence[Document]:
+        self.logger.warning("SiliconFlowReranker.compress_documents (同步) 被调用，这不应该发生。")
+        # 这是一个 hack，但在 RAG 链中不应发生
+        # 在 FastAPI 中，我们不能轻易地从异步代码中调用同步 IO
+        return []
+
+
+# 实例化 Reranker (现在是异步感知的)
 reranker = SiliconFlowReranker()

@@ -106,5 +106,5 @@ USER 1001:1001
 EXPOSE 8080
 
 # (*** 已修改 ***)
-# CMD 命令保持不变，但它现在是在 /code 目录中运行
-CMD ["gunicorn", "-w", "2", "-k", "gthread", "--threads", "8", "-b", "0.0.0.0:8080", "--timeout", "120", "--access-logfile", "/dev/null", "--error-logfile", "-", "app:app"]
+# (ASYNC REFACTOR) 使用 uvicorn 启动 main:app
+CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "app.main:app"]

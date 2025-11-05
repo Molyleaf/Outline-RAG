@@ -1,5 +1,4 @@
 # app/blueprints/auth.py
-# 处理用户登录、登出和 OIDC 回调逻辑
 import base64
 import hashlib
 import json
@@ -8,79 +7,79 @@ import time
 import urllib.parse
 
 import config
-import requests
-from database import engine, redis_client
-from flask import Blueprint, request, session, redirect, url_for
+# (ASYNC REFACTOR)
+import httpx
+from database import AsyncSessionLocal, redis_client
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import RedirectResponse, Response
+# ---
 from jose import jwt
 from jose.exceptions import JOSEError
-from requests.adapters import HTTPAdapter
 from sqlalchemy import text
-from urllib3.util.retry import Retry
 
-auth_bp = Blueprint('auth', __name__)
+# (ASYNC REFACTOR)
+auth_router = APIRouter()
 
-# --- 创建带重试的 requests Session 辅助函数 ---
-def _create_retry_session():
-    session = requests.Session()
-    retry = Retry(
-        total=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504],
-        allowed_methods=["GET", "POST"], raise_on_status=False,
+# --- (ASYNC REFACTOR) 创建带重试的 httpx Client ---
+def _create_retry_client() -> httpx.AsyncClient:
+    """创建带重试的 httpx.AsyncClient"""
+    retry_strategy = httpx.Retry(
+        total=3,
+        backoff_factor=0.5,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET", "POST"],
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    # session.mount("http://", adapter)
-    return session
+    transport = httpx.AsyncHTTPTransport(retries=retry_strategy)
+    # (ASYNC REFACTOR) OIDC 客户端使用单独的 client，超时时间短
+    client = httpx.AsyncClient(transport=transport, timeout=10)
+    return client
 
-# --- OIDC Helpers (使用 requests 重构) ---
-def oidc_discovery():
-    """获取OIDC配置，优先从Redis缓存读取。"""
+# --- OIDC Helpers (ASYNC REFACTOR) ---
+async def oidc_discovery(client: httpx.AsyncClient):
+    """(ASYNC REFACTOR) 异步获取OIDC配置"""
     cache_key = "oidc:discovery"
     if redis_client:
-        cached = redis_client.get(cache_key)
+        cached = await redis_client.get(cache_key)
         if cached:
             return json.loads(cached)
-
     try:
-        session = _create_retry_session()
-        resp = session.get(f"{config.GITLAB_URL}/.well-known/openid-configuration", timeout=10)
+        resp = await client.get(f"{config.GITLAB_URL}/.well-known/openid-configuration")
         resp.raise_for_status()
         data = resp.json()
         if redis_client:
-            redis_client.set(cache_key, json.dumps(data), ex=43200) # 缓存12小时
+            await redis_client.set(cache_key, json.dumps(data), ex=43200) # 缓存12小时
         return data
-    except requests.RequestException as e:
-        # 在Web请求的上下文中，记录错误比让整个应用崩溃更好
-        print(f"Error during OIDC discovery: {e}")
+    except httpx.HTTPError as e:
+        print(f"Error during OIDC discovery (async): {e}")
         return None
 
-
-def _get_jwks(jwks_uri):
-    """获取JWKS公钥集，优先从Redis缓存读取。"""
+async def _get_jwks(client: httpx.AsyncClient, jwks_uri: str):
+    """(ASYNC REFACTOR) 异步获取JWKS"""
     cache_key = f"oidc:jwks:{jwks_uri}"
     if redis_client:
-        cached = redis_client.get(cache_key)
+        cached = await redis_client.get(cache_key)
         if cached:
             return json.loads(cached)
-
     try:
-        session = _create_retry_session()
-        resp = session.get(jwks_uri, timeout=10)
+        resp = await client.get(jwks_uri)
         resp.raise_for_status()
         data = resp.json()
         if redis_client:
-            redis_client.set(cache_key, json.dumps(data), ex=43200) # 缓存12小时
+            await redis_client.set(cache_key, json.dumps(data), ex=43200) # 缓存12小时
         return data
-    except requests.RequestException as e:
-        print(f"Error fetching JWKS: {e}")
+    except httpx.HTTPError as e:
+        print(f"Error fetching JWKS (async): {e}")
         return None
 
-def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None):
+async def _verify_jwt_rs256(client: httpx.AsyncClient, id_token, expected_iss, expected_aud, expected_nonce=None):
+    """(ASYNC REFACTOR) 异步验证JWT"""
     try:
-        disc = oidc_discovery()
+        disc = await oidc_discovery(client)
         if not disc: raise ValueError("Could not fetch OIDC discovery document.")
-        jwks = _get_jwks(disc["jwks_uri"])
+        jwks = await _get_jwks(client, disc["jwks_uri"])
         if not jwks: raise ValueError("Could not fetch JWKS.")
 
+        # jwt.decode 是 CPU 密集型，同步运行即可
         payload = jwt.decode(
             id_token, jwks, algorithms=["RS256"], audience=expected_aud,
             issuer=expected_iss, options={"require_exp": True}
@@ -91,10 +90,14 @@ def _verify_jwt_rs256(id_token, expected_iss, expected_aud, expected_nonce=None)
     except JOSEError as e:
         raise ValueError(f"Invalid ID token: {e}") from e
 
-def oidc_build_auth_url(state, code_challenge):
-    disc = oidc_discovery()
+async def oidc_build_auth_url(request: Request, client: httpx.AsyncClient, state, code_challenge):
+    """(ASYNC REFACTOR)"""
+    disc = await oidc_discovery(client)
     if not disc: return "/chat" # 如果发现失败，则重定向到主页
-    redirect_uri = config.OIDC_REDIRECT_URI or url_for("auth.oidc_callback", _external=True)
+
+    # (ASYNC REFACTOR) 使用 request.url_for
+    redirect_uri = config.OIDC_REDIRECT_URI or str(request.url_for("oidc_callback"))
+
     params = urllib.parse.urlencode({
         "response_type": "code", "client_id": config.GITLAB_CLIENT_ID,
         "redirect_uri": redirect_uri, "scope": "openid profile email",
@@ -103,10 +106,14 @@ def oidc_build_auth_url(state, code_challenge):
     })
     return f"{disc['authorization_endpoint']}?{params}"
 
-def oidc_exchange_token(code, code_verifier):
-    disc = oidc_discovery()
+async def oidc_exchange_token(request: Request, client: httpx.AsyncClient, code, code_verifier):
+    """(ASYNC REFACTOR)"""
+    disc = await oidc_discovery(client)
     if not disc: return None
-    redirect_uri = config.OIDC_REDIRECT_URI or url_for("auth.oidc_callback", _external=True)
+
+    # (ASYNC REFACTOR) 使用 request.url_for
+    redirect_uri = config.OIDC_REDIRECT_URI or str(request.url_for("oidc_callback"))
+
     data = {
         "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
         "client_id": config.GITLAB_CLIENT_ID, "client_secret": config.GITLAB_CLIENT_SECRET,
@@ -114,63 +121,82 @@ def oidc_exchange_token(code, code_verifier):
     }
 
     try:
-        session = _create_retry_session()
-        resp = session.post(disc["token_endpoint"], data=data, timeout=10)
+        resp = await client.post(disc["token_endpoint"], data=data)
         resp.raise_for_status()
         return resp.json()
-    except requests.RequestException as e:
-        print(f"Error exchanging token: {e}")
+    except httpx.HTTPError as e:
+        print(f"Error exchanging token (async): {e}")
         return None
 
-# --- Routes ---
-@auth_bp.route("/login")
-def login():
+# --- (ASYNC REFACTOR) FastAPI 依赖注入 OIDC 客户端 ---
+def get_oidc_client():
+    return _create_retry_client()
+
+
+# --- Routes (ASYNC REFACTOR) ---
+@auth_router.get("/login")
+async def login(request: Request, client: httpx.AsyncClient = Depends(get_oidc_client)):
     state = f"{secrets.token_urlsafe(16)}.{int(time.time())}.{secrets.token_urlsafe(8)}"
     code_verifier = secrets.token_urlsafe(64)
-    session["oidc_state"] = state
-    session["oidc_state_exp"] = int(time.time()) + 600
-    session["code_verifier"] = code_verifier
+
+    # (ASYNC REFACTOR) 使用 request.session
+    request.session["oidc_state"] = state
+    request.session["oidc_state_exp"] = int(time.time()) + 600
+    request.session["code_verifier"] = code_verifier
+
     challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().rstrip("=")
-    auth_url = oidc_build_auth_url(state, challenge)
-    return redirect(auth_url)
+    auth_url = await oidc_build_auth_url(request, client, state, challenge)
 
-@auth_bp.route("/oidc/callback")
-def oidc_callback():
-    state, code = request.args.get("state"), request.args.get("code")
-    sess_state, sess_exp = session.get("oidc_state"), int(session.get("oidc_state_exp") or 0)
+    await client.aclose()
+    return RedirectResponse(auth_url)
+
+@auth_router.get("/oidc/callback")
+async def oidc_callback(request: Request, state: str = None, code: str = None, client: httpx.AsyncClient = Depends(get_oidc_client)):
+    # (ASYNC REFACTOR) 使用 request.session
+    sess_state = request.session.get("oidc_state")
+    sess_exp = int(request.session.get("oidc_state_exp") or 0)
+
     if not state or state != sess_state or int(time.time()) > sess_exp or not code:
-        return "Invalid or expired state, or missing code", 400
+        return Response("Invalid or expired state, or missing code", status_code=400)
 
-    token = oidc_exchange_token(code, session.get("code_verifier"))
+    token = await oidc_exchange_token(request, client, code, request.session.get("code_verifier"))
     if not token or "id_token" not in token:
-        return "Failed to exchange token", 400
+        return Response("Failed to exchange token", status_code=400)
 
     try:
-        idp = _verify_jwt_rs256(token["id_token"], config.GITLAB_URL, config.GITLAB_CLIENT_ID, state.split(".")[0])
+        idp = await _verify_jwt_rs256(client, token["id_token"], config.GITLAB_URL, config.GITLAB_CLIENT_ID, state.split(".")[0])
     except ValueError as e:
-        return f"ID Token validation failed: {e}", 400
+        return Response(f"ID Token validation failed: {e}", status_code=400)
+    finally:
+        await client.aclose()
 
-    session.pop("oidc_state", None)
-    session.pop("oidc_state_exp", None)
-    session.pop("code_verifier", None)
+    # (ASYNC REFACTOR)
+    request.session.pop("oidc_state", None)
+    request.session.pop("oidc_state_exp", None)
+    request.session.pop("code_verifier", None)
 
     user_id = idp.get("sub")
     name = idp.get("name") or idp.get("preferred_username") or "user"
     avatar_url = idp.get("picture")
 
-    session["user"] = {"id": user_id, "name": name, "avatar_url": avatar_url}
-    # (Req 2) 将 Session 标记为永久（使用 app.config 中设置的 7 天有效期）
-    session.permanent = True
+    request.session["user"] = {"id": user_id, "name": name, "avatar_url": avatar_url}
+    # (ASYNC REFACTOR) SessionMiddleware 会处理 session 的持久化 (max_age)
 
-    with engine.begin() as conn:
-        conn.execute(text("""
-                          INSERT INTO users (id, name, avatar_url) VALUES (:id, :name, :avatar)
-                              ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, avatar_url=EXCLUDED.avatar_url
-                          """), {"id": user_id, "name": name, "avatar": avatar_url})
+    # (*** 这是对 Error 2 的核心修复 ***)
+    # (ASYNC REFACTOR) 使用异步 session
+    try:
+        async with AsyncSessionLocal.begin() as session:
+            await session.execute(text("""
+                                       INSERT INTO users (id, name, avatar_url) VALUES (:id, :name, :avatar)
+                                           ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, avatar_url=EXCLUDED.avatar_url
+                                       """), {"id": user_id, "name": name, "avatar": avatar_url})
+    except Exception as e:
+        logger.error(f"Failed to upsert user {user_id} during OIDC callback: {e}", exc_info=True)
+        return Response(f"Failed to update user database: {e}", status_code=500)
 
-    return redirect("/chat")
+    return RedirectResponse("/chat")
 
-@auth_bp.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/chat")
+@auth_router.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/chat")
