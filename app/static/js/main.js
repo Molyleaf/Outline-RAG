@@ -1,3 +1,4 @@
+// app/static/js/main.js
 avatar.addEventListener('click', () => {
     // 使用 toggle class 切换
     menu.classList.toggle('visible');

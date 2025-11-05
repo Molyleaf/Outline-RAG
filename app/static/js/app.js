@@ -1,3 +1,4 @@
+// app/static/js/app.js
 async function loadUser() {
     const u = await api('/chat/api/me');
     if (!u) return;

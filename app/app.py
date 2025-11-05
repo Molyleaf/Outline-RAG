@@ -47,16 +47,6 @@ assets.register('js_all', js_bundle)
 assets.register('css_all', css_bundle)
 # --- Assets 配置结束 ---
 
-# --- (*** 注意 ***) ---
-# 所有依赖 `config.py` 的代码都已移到下面的运行时函数中
-# `flask assets build` 将在此处停止导入
-# --- (*** 注意 ***) ---
-
-
-# --- 函数定义 (安全) ---
-# ( ... _startup_self_check, register_blueprints, ... 等函数保持不变 ... )
-# ( ... healthz, task_worker, webhook_watcher ... 等函数保持不变 ... )
-
 def _startup_self_check():
     """在运行时执行的启动自检"""
     # 在函数内部导入 config

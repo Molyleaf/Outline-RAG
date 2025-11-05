@@ -1,4 +1,4 @@
-// --- DOM 元素 ---
+// app/static/js/core.js
 const avatar = document.getElementById('avatar');
 const menu = document.getElementById('menu');
 const chatEl = document.getElementById('chat');
