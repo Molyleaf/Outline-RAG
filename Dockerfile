@@ -107,4 +107,4 @@ EXPOSE 8080
 
 # (*** 已修改 ***)
 # (ASYNC REFACTOR) 使用 uvicorn 启动 main:app
-CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "app.main:app"]
+CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "main:app"]

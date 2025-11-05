@@ -53,7 +53,7 @@ assets.register('css_all', css_bundle)
 if __name__ == "__main__":
     # (此逻辑仅用于本地开发 `python app/app.py`)
     print("This file (app.py) is now ONLY for 'flask assets build' or local dev assets.")
-    print("Run 'uvicorn app.main:app --reload' for the main server.")
+    print("Run 'uvicorn main:app --reload' for the main server.")
 
     # 临时的 logger
     logging.basicConfig(level=logging.INFO)
