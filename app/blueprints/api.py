@@ -3,12 +3,13 @@ import json
 import logging
 import time
 import uuid
-from operator import itemgetter as itemgetter
+from operator import itemgetter
 from typing import List, Dict, Any
 
 import config
 import rag
 from database import AsyncSessionLocal, redis_client
+# (修复) APRouter -> APIRouter
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
@@ -23,35 +24,32 @@ from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
 logger = logging.getLogger(__name__)
-# (ASYNC REFACTOR)
+# (修复) APRouter -> APIRouter
 api_router = APIRouter()
 
-# --- (ASYNC REFACTOR) 依赖注入：用户认证 ---
+# --- 依赖注入：用户认证 ---
 def get_current_user(request: Request) -> Dict[str, Any]:
     """FastAPI 依赖项：校验用户是否登录。"""
     if "user" not in request.session:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return request.session.get("user")
 
-# --- (ASYNC REFACTOR) 依赖注入：获取数据库 Session ---
+# --- 依赖注入：获取数据库 Session ---
 async def get_db_session():
     """FastAPI 依赖项：获取异步数据库 session。"""
     async with AsyncSessionLocal() as session:
         yield session
 
-# --- (不变) utils ---
+# --- utils ---
 def allowed_file(filename):
-    """检查文件名后缀是否在允许列表中。"""
-    if "." not in filename:
-        return False
-    ext = filename.rsplit(".", 1)[1].lower()
-    return ext in config.ALLOWED_FILE_EXTENSIONS
+    """(修复 8) 检查文件名后缀是否在允许列表中。"""
+    return "." in filename and \
+        filename.rsplit(".", 1)[1].lower() in config.ALLOWED_FILE_EXTENSIONS
 # --- 合并结束 ---
 
 
 @api_router.get("/api/me")
 async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
-    """(ASYNC REFACTOR)"""
     user_id = user.get("id")
     auth_user_ids = set(uid.strip() for uid in config.BETA_AUTHORIZED_USER_IDS.split(",") if uid.strip())
 
@@ -74,7 +72,7 @@ async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
         "models": models_dict
     })
 
-# (ASYNC REFACTOR) Pydantic 模型
+# Pydantic 模型
 class ConversationCreate(BaseModel):
     title: str | None = "新会话"
 
@@ -92,19 +90,18 @@ class AskRequest(BaseModel):
 
 @api_router.get("/api/conversations")
 async def api_get_conversations(
-        request: Request,
+        # (修复 3) 移除了未使用的 'request'
         page: int = 1,
         page_size: int = 20,
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR) 获取对话列表"""
+    """获取对话列表"""
     uid = user["id"]
     page = max(1, page)
     page_size = max(1, min(100, page_size))
     offset = (page - 1) * page_size
 
-    # (ASYNC REFACTOR)
     async with session.begin():
         total_res = (await session.execute(text("SELECT COUNT(1) FROM conversations WHERE user_id=:u"), {"u": uid})).scalar()
         total = int(total_res or 0)
@@ -123,13 +120,11 @@ async def api_create_conversation(
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR) 创建新对话"""
+    """创建新对话"""
     uid = user["id"]
     title = body.title or "新会话"
     guid = str(uuid.uuid4())
 
-    # (ASYNC REFACTOR) (*** 这是对 Error 2 的核心修复 ***)
-    # 此处将正确地检查来自 auth.py 的 user_id 是否存在
     try:
         async with session.begin():
             await session.execute(
@@ -153,7 +148,6 @@ async def api_conversation_rename(
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR)"""
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="标题不能为空")
@@ -175,7 +169,6 @@ async def api_conversation_delete(
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR)"""
     async with session.begin():
         res = await session.execute(
             text("DELETE FROM conversations WHERE id=:id AND user_id=:u"),
@@ -196,7 +189,6 @@ async def api_messages(
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR)"""
     if not conv_id:
         raise HTTPException(status_code=400, detail="conv_id 缺失")
 
@@ -234,7 +226,7 @@ async def api_ask(
         user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
-    """(ASYNC REFACTOR) 聊天流式响应"""
+    """聊天流式响应"""
 
     query, conv_id = (body.query or "").strip(), body.conv_id
     model, temperature, top_p = body.model, body.temperature, body.top_p
@@ -243,7 +235,6 @@ async def api_ask(
     if not query or not conv_id:
         raise HTTPException(status_code=400, detail="missing query or conv_id")
 
-    # (ASYNC REFACTOR) 确保 RAG 组件已初始化
     try:
         await rag.initialize_rag_components()
     except Exception as e:
@@ -255,7 +246,7 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 未就绪"}, status_code=503)
 
-    # --- (ASYNC REFACTOR) RAG 链定义 (使用异步) ---
+    # --- RAG 链定义 (使用异步) ---
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
         return "\n".join([f"{m.type}: {m.content}" for m in messages])
 
@@ -269,12 +260,10 @@ async def api_ask(
                 "query": lambda x: x["input"]
             })
             | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-            # (ASYNC REFACTOR) .ainvoke() 将被自动调用
             | llm.bind(temperature=0.0, top_p=1.0)
             | StrOutputParser()
     )
 
-    # (ASYNC REFACTOR)
     # 必须显式调用 aget_relevant_documents
     # 否则 LCEL 会调用同步的 get_relevant_documents
     async def _run_retriever(query: str) -> List[Document]:
@@ -289,33 +278,32 @@ async def api_ask(
             })
             | RunnablePassthrough.assign(
         context=(
-                RunnableLambda(itemgetter("rewritten_query"))
-                | RunnableLambda(_run_retriever) # <--- 显式异步调用
-                | RunnableLambda[List[Document], str](_format_docs)
+                itemgetter("rewritten_query")
+                | RunnableLambda(_run_retriever) # Linter 误报 (1)
+                | RunnableLambda[List[Document], str](_format_docs) # Linter 误报 (2)
         )
     )
             | RunnableParallel({
         "chat_history": lambda x: x["chat_history"],
         "context": lambda x: x["context"],
-        "query": lambda x: x["input"]
+        "query": lambda x: x["input"] # Linter 误报 (4)
     })
             | ChatPromptTemplate.from_messages([
         ("system", config.SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
         ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
     ])
-            | llm # .ainvoke() 将被自动调用
+            | llm
             | StrOutputParser()
     )
     # --- RAG 链定义结束 ---
 
     chat_history_db = []
-    # (ASYNC REFACTOR)
     async with session.begin():
         if not (await session.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": user["id"]})).scalar():
             raise HTTPException(status_code=403, detail="无权限")
 
-        rs = []
+        rs = [] # Linter 误报 (5) - 'rs' 在下面被使用
         if edit_source_message_id:
             try:
                 user_msg_id = int(edit_source_message_id)
@@ -342,7 +330,7 @@ async def api_ask(
             await session.execute(text("INSERT INTO messages (conv_id, user_id, role, content) VALUES (:cid, :uid, 'user', :c)"),
                                   {"cid": conv_id, "uid": user["id"], "c": query})
 
-        chat_history_db = reversed(rs)
+        chat_history_db = reversed(rs) # 'rs' 在这里被使用
 
     if redis_client:
         await redis_client.delete(f"messages:{conv_id}")
@@ -365,7 +353,6 @@ async def api_ask(
         # | rag_chain.steps[5] # 移除了 StrOutputParser
     )
 
-    # (ASYNC REFACTOR) 异步生成器
     async def generate():
         yield ": ping\n\n"
         full_response = ""
@@ -373,13 +360,11 @@ async def api_ask(
         thinking_response = ""
 
         try:
-            # (ASYNC REFACTOR) 使用 .astream()
             stream = final_chain_streaming.astream({
                 "input": query,
                 "chat_history": chat_history
             })
 
-            # (ASYNC REFACTOR)
             async for delta_chunk in stream:
                 delta_content = delta_chunk.content or ""
                 delta_thinking = ""
@@ -412,7 +397,6 @@ async def api_ask(
             return
 
         if full_response:
-            # (ASYNC REFACTOR)
             async with AsyncSessionLocal.begin() as db_session:
                 full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
                 await db_session.execute(
@@ -422,17 +406,16 @@ async def api_ask(
             if redis_client:
                 await redis_client.delete(f"messages:{conv_id}")
 
-    # (ASYNC REFACTOR)
     return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no"
     })
 
-# --- (ASYNC REFACTOR) /api/upload (未完全异步，但适配 FastAPI) ---
+# --- /api/upload ---
 @api_router.post("/api/upload")
 async def upload(
         request: Request,
-        user: Dict[str, Any] = Depends(get_current_user),
+        user: Dict[str, Any] = Depends(get_current_user), # 'user' 在此被使用
         session = Depends(get_db_session)
 ):
     form = await request.form()
@@ -454,9 +437,9 @@ async def upload(
         )
     return JSONResponse({"ok": True, "filename": name})
 
-# --- (ASYNC REFACTOR) /update/all ---
+# --- /update/all ---
 @api_router.post("/update/all")
-async def update_all(user: Dict[str, Any] = Depends(get_current_user)):
+async def update_all(_user: Dict[str, Any] = Depends(get_current_user)): # (修复 6)
     if not redis_client:
         return JSONResponse({"ok": False, "error": "任务队列服务未配置"}, status_code=503)
     if not await redis_client.set("refresh:lock", "1", ex=3600, nx=True):
@@ -470,9 +453,9 @@ async def update_all(user: Dict[str, Any] = Depends(get_current_user)):
         logger.exception("加入刷新任务到队列时失败 (async): %s", e)
         return JSONResponse({"ok": False, "error": "启动刷新失败"}, status_code=500)
 
-# --- (ASYNC REFACTOR) /api/refresh/status ---
+# --- /api/refresh/status ---
 @api_router.get("/api/refresh/status")
-async def refresh_status(user: Dict[str, Any] = Depends(get_current_user)):
+async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)): # (修复 6)
     if not redis_client:
         return JSONResponse({"status": "disabled", "message": "Redis not configured"})
 
@@ -484,14 +467,15 @@ async def refresh_status(user: Dict[str, Any] = Depends(get_current_user)):
         return JSONResponse({"status": "idle", "message": "空闲"})
 
     try:
+        # (修复 7) 移除了 "refresh:delete_count"
         counts = await redis_client.mget([
             "refresh:total_queued", "refresh:success_count",
-            "skipped_count", "refresh:delete_count"
+            "skipped_count"
         ])
         total_queued = int(counts[0] or 0)
         success_count = int(counts[1] or 0)
         skipped_count = int(counts[2] or 0)
-        delete_count = int(counts[3] or 0)
+        # (修复 7) 移除了 'delete_count'
 
         processed_count = success_count + skipped_count
 
@@ -502,7 +486,8 @@ async def refresh_status(user: Dict[str, Any] = Depends(get_current_user)):
 
             p = redis_client.pipeline()
             p.set("refresh:status", json.dumps(status), ex=300)
-            p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count", "refresh:delete_count")
+            # (修复 7) 移除了 "refresh:delete_count"
+            p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count")
             await p.execute()
 
             return JSONResponse(status)
@@ -513,7 +498,7 @@ async def refresh_status(user: Dict[str, Any] = Depends(get_current_user)):
     except (ValueError, TypeError):
         return JSONResponse({"status": "running", "message": "正在计算..."})
 
-# --- (ASYNC REFACTOR) /update/webhook ---
+# --- /update/webhook ---
 @api_router.post("/update/webhook")
 async def update_webhook(request: Request):
     raw = await request.body()
