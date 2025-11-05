@@ -108,16 +108,33 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
-# (ASYNC REFACTOR)
 async def db_init():
     """异步初始化数据库"""
-    async with async_engine.begin() as conn:
-        # 使用 run_sync 在异步连接上执行同步 DDL
-        # (*** 修复 1 ***) 将所有原始字符串 SQL 用 text() 包裹
+    # 1. 从池中获取一个连接
+    async with async_engine.connect() as conn:
+
+        # 2. 在此连接上获取会话级咨询锁
+        #    (使用 run_sync 自动提交)
         await conn.run_sync(lambda sync_conn: sync_conn.execute(text(f"SELECT pg_advisory_lock(9876543210)")))
+
         try:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text(INIT_SQL)))
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
+            # 3. 现在，在此连接上开始一个新事务
+            async with conn.begin():
+                logger.info("数据库事务已开始，正在执行 INIT_SQL...")
+                await conn.run_sync(lambda sync_conn: sync_conn.execute(text(INIT_SQL)))
+                await conn.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
+
             logger.info("数据库表结构初始化/检查完成 (异步)。")
+
+        except Exception as e:
+            # (关键) 捕获并记录 *真正* 的初始化错误
+            logger.error(f"数据库初始化 (db_init) 失败: {e}", exc_info=True)
+            # 重新抛出异常，以便 main.py 知道启动失败
+            raise
+
         finally:
+            # 4. 无论成功还是失败，都在 'finally' 中释放锁
+            #    因为 'finally' 在事务 ('conn.begin()') 外部，
+            #    所以连接不会处于 "aborted" 状态。
+            logger.info("释放数据库咨询锁...")
             await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT pg_advisory_unlock(9876543210)")))
