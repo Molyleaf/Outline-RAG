@@ -4,7 +4,7 @@ import urllib.parse
 
 # (ASYNC REFACTOR) 导入 redis.asyncio
 import redis.asyncio as redis
-# (*** 修复 1 ***) 导入 text
+# (*** 修复 ***) 导入 text
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -63,12 +63,12 @@ if config.REDIS_URL:
 else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
-# --- (不变) 初始化 SQL ---
-# (注意：database.py 中的 INIT_SQL 和 db_init() 是同步的)
-# (我们将修改 db_init() 为异步)
-INIT_SQL = f"""
-CREATE EXTENSION IF NOT EXISTS vector;
+# --- (*** 修复 ***) 分离 DDL ---
+# 1. 必须在事务外 (AUTOCOMMIT 模式) 执行的命令
+PRE_TX_SQL = "CREATE EXTENSION IF NOT EXISTS vector;"
 
+# 2. 应该在事务内执行的命令
+TX_INIT_SQL = f"""
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT,
@@ -108,20 +108,33 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
+# (ASYNC REFACTOR) (*** 修复 ***)
 async def db_init():
     """异步初始化数据库"""
     # 1. 从池中获取一个连接
     async with async_engine.connect() as conn:
 
-        # 2. 在此连接上获取会话级咨询锁
-        #    (使用 run_sync 自动提交)
-        await conn.run_sync(lambda sync_conn: sync_conn.execute(text(f"SELECT pg_advisory_lock(9876543210)")))
+        # 2. (AUTOCOMMIT) 获取咨询锁
+        # (*** Linter 修复 ***)
+        # 将 .execution_options(...) 拆分到单独的变量
+        # 以便 Linter 正确识别类型
+        conn_ac = conn.execution_options(isolation_level="AUTOCOMMIT")
+        await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
+
+        logger.info("数据库咨询锁已获取。")
 
         try:
-            # 3. 现在，在此连接上开始一个新事务
+            # 3. (AUTOCOMMIT) 创建扩展
+            # (*** Linter 修复 ***)
+            # 重用 'conn_ac' (AUTOCOMMIT 连接)
+            await conn_ac.execute(text(PRE_TX_SQL))
+
+            # 4. (TRANSACTIONAL) 执行所有 DDL
+            # 现在 conn 上没有事务，我们可以安全地启动一个
             async with conn.begin():
                 logger.info("数据库事务已开始，正在执行 INIT_SQL...")
-                await conn.run_sync(lambda sync_conn: sync_conn.execute(text(INIT_SQL)))
+                # 运行同步代码块 (因为 TX_INIT_SQL 是一个大字符串)
+                await conn.run_sync(lambda sync_conn: sync_conn.execute(text(TX_INIT_SQL)))
                 await conn.run_sync(lambda sync_conn: sync_conn.execute(text("ANALYZE")))
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")
@@ -133,8 +146,8 @@ async def db_init():
             raise
 
         finally:
-            # 4. 无论成功还是失败，都在 'finally' 中释放锁
-            #    因为 'finally' 在事务 ('conn.begin()') 外部，
-            #    所以连接不会处于 "aborted" 状态。
+            # 5. (AUTOCOMMIT) 释放锁
             logger.info("释放数据库咨询锁...")
-            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT pg_advisory_unlock(9876543210)")))
+            # (*** Linter 修复 ***)
+            # 重用 'conn_ac' (AUTOCOMMIT 连接)
+            await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
