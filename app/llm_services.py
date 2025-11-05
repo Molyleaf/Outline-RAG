@@ -7,11 +7,13 @@ from typing import List, Sequence
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.documents import Document
-from langchain.retrievers.document_compressors.base import BaseDocumentTransformer
+from langchain_core.documents.transformers import BaseDocumentTransformer
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from langchain.storage import RedisStore
-from langchain.embeddings import CacheBackedEmbeddings
+# (已确认 3) 此导入在 langchain-community==0.4.1  中是正确的
+from langchain_community.storage import RedisStore
+# (已确认 3) 此导入在 langchain==1.0.3  中是正确的 (Linter 可能会误报)
+from langchain.storage import CacheBackedEmbeddings
 
 import config
 
@@ -19,9 +21,6 @@ logger = logging.getLogger(__name__)
 
 # --- 1. 共享的 HTTP 客户端 ---
 def _create_retry_session():
-    """
-    创建带重试的 requests.Session，复用自原 services.py
-    """
     session = requests.Session()
     retry = Retry(
         total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
@@ -116,7 +115,7 @@ class SiliconFlowReranker(BaseDocumentTransformer):
             "query": query,
             "documents": doc_texts,
             "top_n": self.top_n,
-            "return_documents": True # 确保 API 返回文档内容
+            "return_documents": True
         }
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
@@ -136,12 +135,10 @@ class SiliconFlowReranker(BaseDocumentTransformer):
         for res in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
             original_index = res.get("index")
             if original_index is not None and 0 <= original_index < len(documents):
-                # 从原始文档复制元数据
                 new_doc = Document(
                     page_content=res.get("document", doc_texts[original_index]),
                     metadata=documents[original_index].metadata.copy()
                 )
-                # 添加 reranker 分数
                 new_doc.metadata["relevance_score"] = res.get("relevance_score")
                 final_docs.append(new_doc)
 

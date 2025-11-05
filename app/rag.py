@@ -5,13 +5,17 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-from langchain_community.vectorstores import PGVector
+# (已修改 1) 导入 PGVectorStore
+from langchain_postgres import PGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.retrievers import ContextualCompressionRetriever
+# (已修改 2) 修复 langchain 1.0.x 的导入路径
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors.pipeline import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 
 import config
+# (已修改 1) 导入 sync engine
 from database import engine, redis_client
 from app.llm_services import embeddings_model, reranker
 from app.outline_client import outline_list_docs, outline_get_doc
@@ -20,15 +24,16 @@ logger = logging.getLogger(__name__)
 
 # --- 1. 初始化 LangChain 组件 ---
 
-# 1a. 初始化 PGVector 存储
-# PGVector 将自动创建 'langchain_pg_collection' 和 'langchain_pg_embedding' 表
-vector_store = PGVector(
-    connection_string=config.DATABASE_URL,
+# 1a. 初始化 PGVector 存储 (已修改 1)
+# PGVectorStore 将自动创建 'langchain_pg_collection' 和 'langchain_pg_embedding' 表
+vector_store = PGVectorStore(
+    engine=engine, # <-- (修复) 使用 database.py 中定义的 sync engine
     collection_name="outline_rag_collection",
     embedding_function=embeddings_model,
+    # (已移除) use_async_with_sync_fallback=True (非 PGVectorStore 的参数)
 )
 
-# 1b. 初始化文本分割器 (替换 chunk_text)
+# 1b. 初始化文本分割器
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -36,14 +41,13 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
-# 1c. 初始化基础检索器 (替换 search_similar)
+# 1c. 初始化基础检索器
 base_retriever = vector_store.as_retriever(
     search_type="similarity",
     search_kwargs={"k": config.TOP_K}
 )
 
-# 1d. 初始化压缩/重排检索器 (替换 services.rerank)
-#    这个检索器会自动运行基础检索，然后使用 reranker (SiliconFlowReranker) 压缩结果
+# 1d. 初始化压缩/重排检索器
 pipeline_compressor = DocumentCompressorPipeline(
     transformers=[
         EmbeddingsRedundantFilter(embeddings=embeddings_model),
@@ -60,13 +64,12 @@ compression_retriever = ContextualCompressionRetriever(
 
 def process_doc_batch_task(doc_ids: list):
     """
-    (重写) 处理一批文档：获取、分块、嵌入并存储到 PGVector 和 SQL 跟踪表。
+    处理一批文档：获取、分块、嵌入并存储到 PGVectorStore。
     """
     if not doc_ids:
         return
 
     docs_to_process_lc = []
-    docs_to_process_sql = []
     successful_ids = set()
     skipped_ids = set()
 
@@ -82,36 +85,22 @@ def process_doc_batch_task(doc_ids: list):
             skipped_ids.add(doc_id)
             continue
 
-        # (逻辑保留自 rag.py)
         updated_at_str = info.get("updatedAt")
         if not updated_at_str:
             now_dt = datetime.now(timezone.utc)
-            updated_at_dt = now_dt
             updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
-        else:
-            try:
-                updated_at_dt = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00'))
-            except (ValueError, TypeError):
-                logger.warning("无法解析文档 %s 的 updatedAt 时间戳 '%s'，使用当前时间代替。", doc_id, updated_at_str)
-                updated_at_dt = datetime.now(timezone.utc)
+        # (已移除) 对 updated_at_dt 的解析，因为不再存入 SQL 表
 
         # 1. 创建 LangChain Document 对象
         doc = Document(
             page_content=content,
             metadata={
-                "source_id": doc_id, # 用于 PGVector 过滤
+                "source_id": doc_id, # 用于 PGVectorStore 过滤
                 "title": info.get("title") or "",
                 "outline_updated_at_str": updated_at_str,
             }
         )
         docs_to_process_lc.append(doc)
-
-        # 2. 准备 SQL 跟踪表数据
-        docs_to_process_sql.append({
-            "id": doc_id, "title": info.get("title") or "", "content": content,
-            "updated_at": updated_at_dt,
-            "outline_updated_at_str": updated_at_str
-        })
         successful_ids.add(doc_id)
 
     if docs_to_process_lc:
@@ -120,29 +109,40 @@ def process_doc_batch_task(doc_ids: list):
 
         if chunks:
             logger.info(f"正在为 {len(successful_ids)} 篇文档处理 {len(chunks)} 个分块...")
-            # 2. (原子操作) 删除 PGVector 中所有旧分块
-            vector_store.delete(filter={"source_id": {"$in": list(successful_ids)}})
 
-            # 3. (原子操作) 添加新分块
-            #    我们提供自定义 ID 以确保幂等性
-            chunk_ids = [f"{c.metadata['source_id']}_{i}" for i, c in enumerate(chunks)]
-            vector_store.add_documents(chunks, ids=chunk_ids)
+            # 2. (已修改) 从 PGVectorStore 删除所有旧分块
+            # 我们必须手动查询 cmetadata 来找到旧块的 uuid
+            ids_to_delete = []
+            try:
+                with engine.begin() as conn:
+                    # 1. 获取 collection_id
+                    coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
+                    coll_id = coll_id_row[0] if coll_id_row else None
 
-    if docs_to_process_sql:
-        # 4. 更新 SQL 跟踪表 (逻辑保留自 rag.py)
-        with engine.begin() as conn:
-            conn.execute(
-                text("""
-                     INSERT INTO documents (id, title, content, updated_at, outline_updated_at_str)
-                     VALUES (:id, :title, :content, :updated_at, :outline_updated_at_str)
-                         ON CONFLICT (id) DO UPDATE SET
-                         title = EXCLUDED.title, content = EXCLUDED.content,
-                                                 updated_at = EXCLUDED.updated_at, outline_updated_at_str = EXCLUDED.outline_updated_at_str
-                     """),
-                docs_to_process_sql
-            )
+                    if coll_id:
+                        # 2. 查找与 source_id 匹配的所有块的 uuid
+                        ids_to_delete_rows = conn.execute(
+                            text("""
+                                 SELECT uuid FROM langchain_pg_embedding
+                                 WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') = ANY(:source_ids)
+                                 """),
+                            {"coll_id": coll_id, "source_ids": list(successful_ids)}
+                        ).fetchall()
+                        ids_to_delete = [row[0] for row in ids_to_delete_rows]
+            except Exception as e:
+                logger.error(f"查询旧分块 UUIDs 时出错: {e}，将跳过删除，尝试直接 Upsert。")
+                ids_to_delete = []
 
-    # (逻辑保留自 rag.py)
+            if ids_to_delete:
+                logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
+                vector_store.delete(ids=ids_to_delete)
+
+            # 3. (已修改) 添加新分块
+            # 我们不提供 ID，让 PGVectorStore 自动生成 UUID
+            vector_store.add_documents(chunks)
+
+    # 4. (已删除) 更新 SQL 跟踪表 (documents) 的逻辑
+
     if redis_client:
         try:
             p = redis_client.pipeline()
@@ -158,7 +158,7 @@ def process_doc_batch_task(doc_ids: list):
 
 
 def refresh_all_task():
-    """(重写) 优雅刷新任务：对比并找出差异，然后分批将任务加入队列。"""
+    """优雅刷新任务：对比并找出差异，然后分批将任务加入队列。"""
     try:
         remote_docs_raw = outline_list_docs()
         if remote_docs_raw is None:
@@ -166,10 +166,32 @@ def refresh_all_task():
 
         remote_docs_map = {doc['id']: doc['updatedAt'] for doc in remote_docs_raw if doc.get('id') and doc.get('updatedAt')}
 
-        # 仍然使用 SQL 'documents' 表进行快速元数据对比
-        with engine.connect() as conn:
-            local_docs_raw = conn.execute(text("SELECT id, outline_updated_at_str FROM documents")).mappings().all()
-            local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('outline_updated_at_str')}
+        # (已修改) 使用 PGVectorStore 元数据进行快速对比
+        local_docs_map = {}
+        try:
+            with engine.connect() as conn:
+                # 1. 获取 collection_id
+                coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
+                coll_id = coll_id_row[0] if coll_id_row else None
+
+                if coll_id:
+                    # 2. (新) 查询 PGVectorStore 的元数据
+                    local_docs_raw = conn.execute(
+                        text("""
+                             SELECT DISTINCT ON ((cmetadata ->> 'source_id'))
+                                 (cmetadata ->> 'source_id') as id,
+                                 (cmetadata ->> 'outline_updated_at_str') as outline_updated_at_str
+                             FROM langchain_pg_embedding
+                             WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') IS NOT NULL
+                             """),
+                        {"coll_id": coll_id}
+                    ).mappings().all()
+                    local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('id') and doc.get('outline_updated_at_str')}
+                else:
+                    logger.info("未找到 PGVectorStore 集合，假定本地为空。")
+        except Exception as e:
+            logger.error(f"从 PGVectorStore 读取元数据失败: {e}")
+            # 继续执行，local_docs_map 为空，将导致全量刷新
 
         remote_ids = set(remote_docs_map.keys())
         local_ids = set(local_docs_map.keys())
@@ -186,14 +208,12 @@ def refresh_all_task():
 
         docs_to_process_ids = to_add_ids + to_update_ids
         if not docs_to_process_ids:
-            # (逻辑保留自 rag.py)
             final_message = f"刷新完成。删除了 {len(to_delete_ids)} 篇陈旧文档。" if to_delete_ids else "刷新完成，数据已是最新。"
             if redis_client:
                 status = {"status": "success", "message": final_message}
                 redis_client.set("refresh:status", json.dumps(status), ex=300)
             return
 
-        # (逻辑保留自 rag.py)
         if redis_client:
             try:
                 p = redis_client.pipeline()
@@ -206,7 +226,6 @@ def refresh_all_task():
             except Exception as e:
                 logger.error("初始化Redis刷新计数器时出错: %s", e)
 
-        # (逻辑保留自 rag.py)
         batch_size = config.REFRESH_BATCH_SIZE
         num_batches = (len(docs_to_process_ids) + batch_size - 1) // batch_size
         logger.info(f"共有 {len(docs_to_process_ids)} 个文档需要新增/更新，将分 {num_batches} 批处理。")
@@ -219,21 +238,45 @@ def refresh_all_task():
         logger.info(f"已将 {len(docs_to_process_ids)} 个文档的新增/更新任务加入处理队列。")
 
     except Exception as e:
-        # (逻辑保留自 rag.py)
         logger.exception("refresh_all_task failed: %s", e)
         if redis_client:
             status = {"status": "error", "message": f"刷新失败: {e}"}
             redis_client.set("refresh:status", json.dumps(status), ex=300)
     finally:
-        # (逻辑保留自 rag.py)
         if redis_client and not redis_client.exists("refresh:total_queued"):
             redis_client.delete("refresh:lock")
 
 def delete_doc(doc_id):
-    """(重写) 从 SQL 跟踪表 和 PGVector 中删除文档"""
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM documents WHERE id=:id"), {"id": doc_id})
+    """(重写) 从 PGVectorStore 中删除文档"""
+    # (已删除) 从 SQL 跟踪表删除
 
-    # 按元数据从 PGVector 删除
-    vector_store.delete(filter={"source_id": {"$in": [doc_id]}})
-    logger.info("已从 SQL 和 PGVector 删除文档: %s", doc_id)
+    # (新) 按元数据从 PGVectorStore 删除
+    ids_to_delete = []
+    try:
+        with engine.begin() as conn:
+            # 1. 获取 collection_id
+            coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
+            if not coll_id_row:
+                logger.warning(f"删除 {doc_id} 失败：未找到集合。")
+                return
+
+            coll_id = coll_id_row[0]
+
+            # 2. 查找与 source_id 匹配的所有块的 uuid
+            ids_to_delete_rows = conn.execute(
+                text("""
+                     SELECT uuid FROM langchain_pg_embedding
+                     WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') = :source_id
+                     """),
+                {"coll_id": coll_id, "source_id": doc_id}
+            ).fetchall()
+            ids_to_delete = [row[0] for row in ids_to_delete_rows]
+    except Exception as e:
+        logger.error(f"查询 {doc_id} 的旧分块 UUIDs 时出错: {e}")
+        return
+
+    if ids_to_delete:
+        vector_store.delete(ids=ids_to_delete)
+        logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
+    else:
+        logger.info("在 PGVectorStore 中未找到要删除的文档: %s", doc_id)

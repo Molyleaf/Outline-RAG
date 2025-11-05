@@ -1,11 +1,13 @@
 # app/blueprints/views.py
-# 处理所有服务于前端页面和静态资源的路由
+# (已修改 4) 移除了未使用的导入
 import re
 
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
 
 from database import engine
+# (已移除) 'require_login' 未在此文件中使用 (views.py 使用重定向，api.py 使用 abort)
+# from .api import require_login
 
 views_bp = Blueprint('views', __name__)
 
@@ -17,13 +19,12 @@ def _serve_static_with_cache(filename, content_type, max_age=86400):
 
 @views_bp.route("/")
 def chat_page():
-    # 恢复：在返回页面前执行简单的登录检查
+    # (已确认 4) 此登录检查逻辑正确，它重定向到登录页面
     if "user" not in session:
         return redirect("/chat/login")
 
     resp = send_from_directory(current_app.static_folder, "index.html")
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    # 为作为应用入口的HTML页面设置禁止缓存的响应头，这依然是好的实践
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -31,7 +32,7 @@ def chat_page():
 
 @views_bp.route("/<string:conv_guid>")
 def chat_page_with_guid(conv_guid: str):
-    # 恢复：在返回页面前执行简单的登录检查
+    # (已确认 4) 此登录检查逻辑正确
     if "user" not in session:
         return redirect("/chat/login")
 
@@ -52,6 +53,7 @@ def chat_page_with_guid(conv_guid: str):
         return resp
     return chat_page()
 
+# --- (不变) 静态文件路由 ---
 @views_bp.route("/static/img/DeepSeek.svg")
 def chat_static_deepseek_svg():
     return _serve_static_with_cache("img/DeepSeek.svg", "image/svg+xml")

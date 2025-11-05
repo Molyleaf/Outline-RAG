@@ -45,17 +45,9 @@ else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
 # --- (已修改) 初始化 SQL ---
-# 删除了 'chunks' 表及其索引，因为 PGVector 将自行管理
+# 删除了 'documents' 表，因为 PGVectorStore 将自行管理文档和元数据
 INIT_SQL = f"""
 CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE IF NOT EXISTS documents (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL,
-  outline_updated_at_str TEXT
-);
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
