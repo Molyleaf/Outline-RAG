@@ -1,9 +1,9 @@
 # app/rag.py
 import json
 import logging
+import threading  # (*** 新增 ***)
 from datetime import datetime, timezone
 
-# (*** 新增 ***)
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
@@ -17,44 +17,93 @@ from sqlalchemy import text
 import config
 from llm_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc
-
-# (*** 修改 ***)
-# 导入同步引擎，并重命名
 from database import engine as sync_engine, redis_client
 
 logger = logging.getLogger(__name__)
 
-# --- 1. 初始化 LangChain 组件 ---
+# --- (*** 修改 ***) ---
+# 1. 延迟初始化 LangChain 组件
+# 将所有需要I/O的组件在全局设为 None
+# 它们将在 initialize_rag_components() 中被真正初始化
 
-# (*** 新增：创建 AsyncEngine ***)
-# PGVectorStore V2 (langchain-postgres > 0.1.0)
-# 必须使用 AsyncEngine (基于 asyncpg)
-# 我们必须创建一个新的 async_engine，
-# 因为 'database.py' 中的 'engine' (现在是 sync_engine) 是同步的 (psycopg)，
-# 被 app.py, api.py, views.py 和 RAG 任务使用。
-if not config.DATABASE_URL:
-    raise ValueError("DATABASE_URL is not set, cannot init PGVectorStore")
+async_engine = None
+vector_store = None
+base_retriever = None
+compression_retriever = None
 
-# 假设 DATABASE_URL 使用 psycopg (例如 postgresql+psycopg://)
-# 将其转换为 asyncpg (例如 postgresql+asyncpg://)
-async_db_url = config.DATABASE_URL.replace("postgresql+psycopg", "postgresql+asyncpg", 1)
-# 如果原始 URL 只是 postgresql:// (没有驱动)，也进行替换
-if "postgresql+asyncpg" not in async_db_url:
-    async_db_url = config.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-async_engine = create_async_engine(async_db_url)
+# (*** 新增 ***)
+# 使用锁来确保初始化在每个 Gunicorn worker 进程中只运行一次
+_rag_lock = threading.Lock()
 
 
-# 1a. 初始化 PGVector 存储
-# (*** 修复 ***)
-# PGVectorStore.create_sync() 必须 传入一个 AsyncEngine
-vector_store = PGVectorStore.create_sync(
-    async_engine, # <--- 传入新创建的 AsyncEngine
-    table_name="outline_rag_collection",
-    embedding_service=embeddings_model,
-)
+# (*** 新增 ***)
+def initialize_rag_components():
+    """
+    延迟初始化 RAG 组件。
+    这避免了在 Gunicorn 导入时（此时没有 asyncio 循环）运行 I/O 代码。
+    """
+    global async_engine, vector_store, base_retriever, compression_retriever
 
-# 1b. 初始化文本分割器
+    # 使用双重检查锁定来提高性能，避免每次都获取锁
+    if vector_store:
+        return
+
+    with _rag_lock:
+        # 再次检查，防止在等待锁时另一个线程已完成初始化
+        if vector_store:
+            return
+
+        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore)...")
+
+        # --- 1a. 创建 AsyncEngine ---
+        if not config.DATABASE_URL:
+            raise ValueError("DATABASE_URL is not set")
+
+        # (修复 'asyncpg2' 错误)
+        async_db_url = config.DATABASE_URL.replace("postgresql+psycopg2", "postgresql+asyncpg", 1)
+        if "postgresql+asyncpg" not in async_db_url:
+            async_db_url = config.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        async_engine = create_async_engine(async_db_url)
+
+        # --- 1b. 初始化 PGVector 存储 ---
+        # (这是之前在导入时失败的代码)
+        try:
+            vector_store = PGVectorStore.create_sync(
+                async_engine,
+                table_name="outline_rag_collection",
+                embedding_service=embeddings_model,
+            )
+            logger.info("PGVectorStore initialized.")
+        except Exception as e:
+            logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
+            # 如果初始化失败，保持为 None，以便下次尝试
+            async_engine = None # 清理引擎
+            raise
+
+        # --- 1c. 初始化基础检索器 ---
+        base_retriever = vector_store.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": config.TOP_K}
+        )
+
+        # --- 1d. 初始化压缩/重排检索器 ---
+        pipeline_compressor = DocumentCompressorPipeline(
+            transformers=[
+                EmbeddingsRedundantFilter(embeddings=embeddings_model),
+                reranker
+            ]
+        )
+
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=pipeline_compressor,
+            base_retriever=base_retriever
+        )
+
+        logger.info("RAG components initialization complete.")
+
+
+# 1e. 初始化文本分割器 (这是无状态的，可以安全地在全局定义)
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -62,31 +111,20 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
-# 1c. 初始化基础检索器
-base_retriever = vector_store.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": config.TOP_K}
-)
+# --- (*** 移除 ***) ---
+# 删除了之前在这里的所有全局初始化代码
+# (async_engine = ..., vector_store = ..., base_retriever = ..., etc.)
 
-# 1d. 初始化压缩/重排检索器
-pipeline_compressor = DocumentCompressorPipeline(
-    transformers=[
-        EmbeddingsRedundantFilter(embeddings=embeddings_model),
-        reranker
-    ]
-)
 
-compression_retriever = ContextualCompressionRetriever(
-    base_compressor=pipeline_compressor,
-    base_retriever=base_retriever
-)
-
-# --- (不变) 2. 数据库同步任务 ---
+# --- 2. 数据库同步任务 ---
 
 def process_doc_batch_task(doc_ids: list):
     """
     处理一批文档：获取、分块、嵌入并存储到 PGVectorStore。
     """
+    # (*** 新增 ***) 确保 RAG 已初始化
+    initialize_rag_components()
+
     if not doc_ids:
         return
 
@@ -123,6 +161,7 @@ def process_doc_batch_task(doc_ids: list):
         successful_ids.add(doc_id)
 
     if docs_to_process_lc:
+        # (使用全局定义的 text_splitter)
         chunks = text_splitter.split_documents(docs_to_process_lc)
 
         if chunks:
@@ -130,7 +169,7 @@ def process_doc_batch_task(doc_ids: list):
 
             ids_to_delete = []
             try:
-                # (*** 修改 ***)
+                # (*** 修改 ***) 使用 sync_engine
                 with sync_engine.begin() as conn:
                     coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                     coll_id = coll_id_row[0] if coll_id_row else None
@@ -151,12 +190,12 @@ def process_doc_batch_task(doc_ids: list):
             if ids_to_delete:
                 logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
                 try:
-                    vector_store.delete(ids=ids_to_delete)
+                    vector_store.delete(ids=ids_to_delete) # (现在是安全的)
                 except Exception as e:
                     logger.error(f"调用 vector_store.delete 删除 chunks: {ids_to_delete} 时失败: {e}。继续尝试添加...")
 
             try:
-                vector_store.add_documents(chunks)
+                vector_store.add_documents(chunks) # (现在是安全的)
             except Exception as e:
                 logger.error(f"调用 vector_store.add_documents 添加 {len(chunks)} 个 chunks 时失败: {e}。")
 
@@ -177,6 +216,9 @@ def process_doc_batch_task(doc_ids: list):
 
 def refresh_all_task():
     """优雅刷新任务：对比并找出差异，然后分批将任务加入队列。"""
+    # (*** 新增 ***) 确保 RAG 已初始化 (因为此任务会调用 delete_doc)
+    initialize_rag_components()
+
     try:
         remote_docs_raw = outline_list_docs()
         if remote_docs_raw is None:
@@ -186,7 +228,7 @@ def refresh_all_task():
 
         local_docs_map = {}
         try:
-            # (*** 修改 ***)
+            # (*** 修改 ***) 使用 sync_engine
             with sync_engine.connect() as conn:
                 coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                 coll_id = coll_id_row[0] if coll_id_row else None
@@ -263,9 +305,12 @@ def refresh_all_task():
 
 def delete_doc(doc_id):
     """从 PGVectorStore 中删除文档"""
+    # (*** 新增 ***) 确保 RAG 已初始化
+    initialize_rag_components()
+
     ids_to_delete = []
     try:
-        # (*** 修改 ***)
+        # (*** 修改 ***) 使用 sync_engine
         with sync_engine.begin() as conn:
             coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
             if not coll_id_row:
@@ -288,7 +333,7 @@ def delete_doc(doc_id):
 
     if ids_to_delete:
         try:
-            vector_store.delete(ids=ids_to_delete)
+            vector_store.delete(ids=ids_to_delete) # (现在是安全的)
             logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
         except Exception as e:
             logger.error(f"调用 vector_store.delete 删除 {doc_id} (chunks: {ids_to_delete}) 时失败: {e}")

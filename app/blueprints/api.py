@@ -19,7 +19,11 @@ from werkzeug.utils import secure_filename
 
 from llm_services import llm
 from outline_client import verify_outline_signature
-from rag import compression_retriever
+
+# (*** 修改 ***)
+# 不要导入 compression_retriever，而是导入整个 rag 模块
+import rag
+# from rag import compression_retriever # <--- (旧代码)
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
@@ -139,53 +143,9 @@ def api_messages():
         redis_client.set(cache_key, response_json)
     return Response(response_json, mimetype='application/json')
 
-# --- (核心 RAG 链) ---
-
-def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
-    return "\n".join([f"{m.type}: {m.content}" for m in messages])
-
-def _format_docs(docs: List[Document]) -> str:
-    return "\n\n---\n\n".join([doc.page_content for doc in docs])
-
-# 1. 定义查询重写链
-rewrite_chain = (
-        RunnableParallel({
-            "history": lambda x: _format_history_str(x["chat_history"]),
-            "query": lambda x: x["input"]
-        })
-        | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-        | llm.bind(temperature=0.0, top_p=1.0)
-        | StrOutputParser()
-)
-
-# 2. 定义最终 RAG 链
-rag_chain = (
-    # 修复：显式使用 RunnableParallel
-        RunnableParallel({
-            "rewritten_query": rewrite_chain,
-            "input": lambda x: x["input"],
-            "chat_history": lambda x: x["chat_history"]
-        })
-        | RunnablePassthrough.assign(
-    context=(
-            RunnableLambda(itemgetter("rewritten_query"))
-            | compression_retriever
-            | RunnableLambda[List[Document], str](_format_docs)
-    )
-)
-        | RunnableParallel({
-            "chat_history": lambda x: x["chat_history"],
-            "context": lambda x: x["context"],
-            "query": lambda x: x["input"]
-        })
-        | ChatPromptTemplate.from_messages([
-    ("system", config.SYSTEM_PROMPT),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
-])
-        | llm
-        | StrOutputParser()
-)
+# --- (*** 修改 ***) ---
+# 删除了在全局范围定义的 RAG 链
+# --- (*** 修改结束 ***) ---
 
 
 @api_bp.route("/api/ask", methods=["POST"])
@@ -196,9 +156,71 @@ def api_ask():
     model = body.get("model")
     temperature = body.get("temperature")
     top_p = body.get("top_p")
-
-    # (新) 获取编辑ID
     edit_source_message_id = body.get("edit_source_message_id")
+
+    # (*** 新增 ***)
+    # 在处理请求时，确保 RAG 组件已初始化
+    # 这将是 Gunicorn worker 进程中的第一次调用（如果任务尚未运行）
+    try:
+        rag.initialize_rag_components()
+    except Exception as e:
+        logger.critical(f"[{conv_id}] 无法初始化 RAG 组件: {e}", exc_info=True)
+        return jsonify({"error": f"RAG 服务初始化失败: {e}"}), 503
+
+    # (*** 新增 ***)
+    # 现在我们可以安全地从 rag 模块获取已初始化的组件
+    compression_retriever = rag.compression_retriever
+    if compression_retriever is None:
+        logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 未能初始化。")
+        return jsonify({"error": "RAG 服务组件 'compression_retriever' 未就绪"}), 503
+
+    # (*** 修改：将 RAG 链的定义移到此处 ***)
+    def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
+        return "\n".join([f"{m.type}: {m.content}" for m in messages])
+
+    def _format_docs(docs: List[Document]) -> str:
+        return "\n\n---\n\n".join([doc.page_content for doc in docs])
+
+    # 1. 定义查询重写链
+    rewrite_chain = (
+            RunnableParallel({
+                "history": lambda x: _format_history_str(x["chat_history"]),
+                "query": lambda x: x["input"]
+            })
+            | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
+            | llm.bind(temperature=0.0, top_p=1.0)
+            | StrOutputParser()
+    )
+
+    # 2. 定义最终 RAG 链
+    rag_chain = (
+            RunnableParallel({
+                "rewritten_query": rewrite_chain,
+                "input": lambda x: x["input"],
+                "chat_history": lambda x: x["chat_history"]
+            })
+            | RunnablePassthrough.assign(
+        context=(
+                RunnableLambda(itemgetter("rewritten_query"))
+                | compression_retriever # <--- (现在可以安全使用)
+                | RunnableLambda[List[Document], str](_format_docs)
+        )
+    )
+            | RunnableParallel({
+        "chat_history": lambda x: x["chat_history"],
+        "context": lambda x: x["context"],
+        "query": lambda x: x["input"]
+    })
+            | ChatPromptTemplate.from_messages([
+        ("system", config.SYSTEM_PROMPT),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
+    ])
+            | llm
+            | StrOutputParser()
+    )
+    # (*** RAG 链定义结束 ***)
+
 
     if not query or not conv_id:
         return jsonify({"error":"missing query or conv_id"}), 400
