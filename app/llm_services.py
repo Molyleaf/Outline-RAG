@@ -5,9 +5,9 @@ from typing import Sequence
 
 import redis
 import requests
-from langchain.retrievers.document_compressors.base import BaseDocumentCompressor
-from langchain.storage import CacheBackedEmbeddings
-from langchain_community.storage import RedisStore
+from langchain_community import BaseDocumentCompressor
+from langchain_community import CacheBackedEmbeddings
+from langchain_community import RedisStore
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from requests.adapters import HTTPAdapter

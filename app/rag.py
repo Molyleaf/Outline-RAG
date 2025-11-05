@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors.pipeline import DocumentCompressorPipeline
+from langchain_community import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_postgres import PGVectorStore

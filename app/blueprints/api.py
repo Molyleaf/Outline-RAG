@@ -9,7 +9,7 @@ import config
 from database import engine, redis_client
 from flask import (Blueprint, jsonify, request, abort, make_response, Response, session)
 from langchain_core.documents import Document
-from langchain_core.item_getters import ItemGetter
+from operator import itemgetter as itemgetter
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 # --- LangChain ---
@@ -19,9 +19,9 @@ from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
 # --- 导入 LangChain 和 Outline 服务 ---
-from app.llm_services import llm
-from app.outline_client import verify_outline_signature
-from app.rag import compression_retriever
+from llm_services import llm
+from outline_client import verify_outline_signature
+from rag import compression_retriever
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
@@ -169,7 +169,7 @@ rag_chain = (
         }
         | RunnablePassthrough.assign(
     context=(
-            ItemGetter("rewritten_query")
+            itemgetter("rewritten_query")
             | compression_retriever
             | RunnableLambda(_format_docs)
     )

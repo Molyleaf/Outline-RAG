@@ -43,9 +43,6 @@ RUN pip config set global.index-url https://mirrors.pku.edu.cn/pypi/simple/ \
 
 COPY --chown=1001:1001 app/. /app/
 
-ENV OUTLINE_WEBHOOK_SIGN=false \
-    SECRET_KEY="123"
-
 RUN flask assets build
 
 
