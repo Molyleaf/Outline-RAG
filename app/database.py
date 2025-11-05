@@ -115,17 +115,17 @@ async def db_init():
     async with async_engine.connect() as conn:
 
         # 2. (AUTOCOMMIT) 获取咨询锁
-        # (*** Linter 修复 ***)
-        # 将 .execution_options(...) 拆分到单独的变量
-        # 以便 Linter 正确识别类型
-        conn_ac = conn.execution_options(isolation_level="AUTOCOMMIT")
+        # (*** 修复 ***)
+        # .execution_options() 返回一个 *coroutine*，
+        # 必须 await 它来获取配置好的新连接。
+        conn_ac = await conn.execution_options(isolation_level="AUTOCOMMIT")
         await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
 
         logger.info("数据库咨询锁已获取。")
 
         try:
             # 3. (AUTOCOMMIT) 创建扩展
-            # (*** Linter 修复 ***)
+            # (*** 修复 ***)
             # 重用 'conn_ac' (AUTOCOMMIT 连接)
             await conn_ac.execute(text(PRE_TX_SQL))
 
@@ -148,6 +148,6 @@ async def db_init():
         finally:
             # 5. (AUTOCOMMIT) 释放锁
             logger.info("释放数据库咨询锁...")
-            # (*** Linter 修复 ***)
+            # (*** 修复 ***)
             # 重用 'conn_ac' (AUTOCOMMIT 连接)
             await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
