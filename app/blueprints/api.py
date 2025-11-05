@@ -12,13 +12,11 @@ from langchain_core.documents import Document
 from operator import itemgetter as itemgetter
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
-# --- LangChain ---
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableParallel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
-# --- 导入 LangChain 和 Outline 服务 ---
 from llm_services import llm
 from outline_client import verify_outline_signature
 from rag import compression_retriever
@@ -151,10 +149,10 @@ def _format_docs(docs: List[Document]) -> str:
 
 # 1. 定义查询重写链
 rewrite_chain = (
-        {
+        RunnableParallel({
             "history": lambda x: _format_history_str(x["chat_history"]),
             "query": lambda x: x["input"]
-        }
+        })
         | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
         | llm.bind(temperature=0.0, top_p=1.0)
         | StrOutputParser()
@@ -162,23 +160,24 @@ rewrite_chain = (
 
 # 2. 定义最终 RAG 链
 rag_chain = (
-        {
+    # 修复：显式使用 RunnableParallel
+        RunnableParallel({
             "rewritten_query": rewrite_chain,
             "input": lambda x: x["input"],
             "chat_history": lambda x: x["chat_history"]
-        }
+        })
         | RunnablePassthrough.assign(
     context=(
-            itemgetter("rewritten_query")
+            RunnableLambda(itemgetter("rewritten_query"))
             | compression_retriever
-            | RunnableLambda(_format_docs)
+            | RunnableLambda[List[Document], str](_format_docs)
     )
 )
-        | {
+        | RunnableParallel({
             "chat_history": lambda x: x["chat_history"],
             "context": lambda x: x["context"],
             "query": lambda x: x["input"]
-        }
+        })
         | ChatPromptTemplate.from_messages([
     ("system", config.SYSTEM_PROMPT),
     MessagesPlaceholder(variable_name="chat_history"),

@@ -1,14 +1,14 @@
 # app/llm_services.py
 import logging
 import urllib.parse
-from typing import Sequence
+from typing import Sequence, Any
 
 import redis
 import requests
-from langchain_community import BaseDocumentCompressor
-from langchain_community import CacheBackedEmbeddings
-from langchain_community import RedisStore
+from langchain_classic.storage import RedisStore
+from langchain_classic.embeddings.cache import CacheBackedEmbeddings
 from langchain_core.documents import Document
+from langchain_core.documents import BaseDocumentCompressor
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -90,6 +90,10 @@ class SiliconFlowReranker(BaseDocumentCompressor): # (*** 修复 ***) 继承 Bas
     api_url: str = f"{config.RERANKER_API_URL}/v1/rerank"
     api_token: str = config.RERANKER_API_TOKEN
     top_n: int = config.K
+
+    # 修复：为 Pydantic 声明 client 和 logger 字段
+    client: Any = None
+    logger: Any = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -3,6 +3,7 @@ python-jose==3.5.0
 flask==3.1.2
 sqlalchemy==2.0.44
 psycopg2==2.9.11
+asyncpg==0.30.0
 requests==2.32.5
 redis==7.0.1
 tasks_py==1.0.3
@@ -22,3 +23,4 @@ langchain_openai==1.0.2
 langchain-core==1.0.3
 langchain-text-splitters==1.0.0
 langchain-postgres==0.0.16
+langchain_classic==1.0.0

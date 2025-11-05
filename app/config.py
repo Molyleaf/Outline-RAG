@@ -15,7 +15,7 @@ REDIS_URL = os.getenv("REDIS_URL")
 # --- Outline ---
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
-OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "").strip()
+OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "123").strip()
 OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "true").lower() == "true"
 
 # --- AI 服务 ---
@@ -72,7 +72,7 @@ REFRESH_BATCH_SIZE = int(os.getenv("REFRESH_BATCH_SIZE", "100"))
 
 # --- OIDC (GitLab) ---
 GITLAB_CLIENT_ID = os.getenv("GITLAB_CLIENT_ID", "")
-GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "")
+GITLAB_CLIENT_SECRET = os.getenv("GITLAB_CLIENT_SECRET", "123")
 GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")
 

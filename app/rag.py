@@ -3,32 +3,55 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
-from langchain_community import DocumentCompressorPipeline
+# (*** 新增 ***)
+from sqlalchemy.ext.asyncio import create_async_engine
+
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
+from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain_core.documents import Document
 from langchain_postgres import PGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-from app.llm_services import embeddings_model, reranker
-from app.outline_client import outline_list_docs, outline_get_doc
-from database import engine, redis_client
+from llm_services import embeddings_model, reranker
+from outline_client import outline_list_docs, outline_get_doc
+
+# (*** 修改 ***)
+# 导入同步引擎，并重命名
+from database import engine as sync_engine, redis_client
 
 logger = logging.getLogger(__name__)
 
 # --- 1. 初始化 LangChain 组件 ---
 
+# (*** 新增：创建 AsyncEngine ***)
+# PGVectorStore V2 (langchain-postgres > 0.1.0)
+# 必须使用 AsyncEngine (基于 asyncpg)
+# 我们必须创建一个新的 async_engine，
+# 因为 'database.py' 中的 'engine' (现在是 sync_engine) 是同步的 (psycopg)，
+# 被 app.py, api.py, views.py 和 RAG 任务使用。
+if not config.DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set, cannot init PGVectorStore")
+
+# 假设 DATABASE_URL 使用 psycopg (例如 postgresql+psycopg://)
+# 将其转换为 asyncpg (例如 postgresql+asyncpg://)
+async_db_url = config.DATABASE_URL.replace("postgresql+psycopg", "postgresql+asyncpg", 1)
+# 如果原始 URL 只是 postgresql:// (没有驱动)，也进行替换
+if "postgresql+asyncpg" not in async_db_url:
+    async_db_url = config.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+async_engine = create_async_engine(async_db_url)
+
+
 # 1a. 初始化 PGVector 存储
-vector_store = PGVectorStore(
-    # (*** 修复 ***)
-    # 1. 'collection_name' 和 'embedding' 是位置参数
-    # 2. 'embedding_function' 重命名为 'embedding'
-    # 3. 'engine' 重命名为 'connection' (作为关键字参数传入)
-    "outline_rag_collection",
-    embeddings_model,
-    connection=engine,
+# (*** 修复 ***)
+# PGVectorStore.create_sync() 必须 传入一个 AsyncEngine
+vector_store = PGVectorStore.create_sync(
+    async_engine, # <--- 传入新创建的 AsyncEngine
+    table_name="outline_rag_collection",
+    embedding_service=embeddings_model,
 )
 
 # 1b. 初始化文本分割器
@@ -107,7 +130,8 @@ def process_doc_batch_task(doc_ids: list):
 
             ids_to_delete = []
             try:
-                with engine.begin() as conn:
+                # (*** 修改 ***)
+                with sync_engine.begin() as conn:
                     coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                     coll_id = coll_id_row[0] if coll_id_row else None
 
@@ -162,7 +186,8 @@ def refresh_all_task():
 
         local_docs_map = {}
         try:
-            with engine.connect() as conn:
+            # (*** 修改 ***)
+            with sync_engine.connect() as conn:
                 coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
                 coll_id = coll_id_row[0] if coll_id_row else None
 
@@ -240,7 +265,8 @@ def delete_doc(doc_id):
     """从 PGVectorStore 中删除文档"""
     ids_to_delete = []
     try:
-        with engine.begin() as conn:
+        # (*** 修改 ***)
+        with sync_engine.begin() as conn:
             coll_id_row = conn.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"}).first()
             if not coll_id_row:
                 logger.warning(f"删除 {doc_id} 失败：未找到集合。")
