@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI 应用启动...")
 
     # --- Startup ---
-    # 1. 配置检查
+    # 1. 配置检查 (不变)
     if not config.SECRET_KEY:
         logger.critical("SECRET_KEY 未设置，拒绝启动。")
         sys.exit(1)
@@ -103,25 +103,20 @@ async def lifespan(app: FastAPI):
         logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
         sys.exit(1)
 
-    # 2. 创建目录
+    # 2. 创建目录 (不变)
     os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
 
-    # 3. 初始化数据库
+    # 3. 初始化数据库 (*** 修改 ***)
     try:
-        should_initialize = True
-        if redis_client:
-            if not await redis_client.set("app:startup:lock", "1", ex=60, nx=True):
-                should_initialize = False
+        # 移除了 Redis 启动锁。
+        # db_init() 内部的 pg_advisory_lock 已足够保证 DDL 安全。
+        # 所有 worker 都将尝试初始化，但只有一个会真正执行 DDL。
+        logger.info(f"Worker (pid: {os.getpid()}) 正在执行 db_init() (使用 pg_advisory_lock)...")
+        await db_init()
+        logger.info(f"Worker (pid: {os.getpid()}) db_init() 完成。")
 
-        if should_initialize:
-            logger.info(f"Worker (pid: {os.getpid()}) 正在执行主初始化...")
-            await db_init()
-            logger.info("[启动自检] 异步启动，跳过同步 HTTP 自检。")
-        else:
-            logger.info(f"Worker (pid: {os.getpid()}) 等待主初始化完成...")
-            await asyncio.sleep(5)
-
-        # 4. 启动后台任务
+        # 4. 启动后台任务 (原逻辑)
+        # (此逻辑在 'try' 块内，'if/else' 块之外，保持不变)
         if redis_client:
             asyncio.create_task(task_worker())
             asyncio.create_task(webhook_watcher())
@@ -134,7 +129,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # --- Shutdown ---
+    # --- Shutdown --- (不变)
     logger.info("FastAPI 应用关闭...")
     if async_engine:
         await async_engine.dispose()
