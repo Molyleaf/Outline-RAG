@@ -3,18 +3,18 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import text
-from langchain_postgres import PGVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors.pipeline import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
+from langchain_postgres import PGVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy import text
 
 import config
-from database import engine, redis_client
 from app.llm_services import embeddings_model, reranker
 from app.outline_client import outline_list_docs, outline_get_doc
+from database import engine, redis_client
 
 logger = logging.getLogger(__name__)
 

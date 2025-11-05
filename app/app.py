@@ -2,13 +2,13 @@
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
 
 import redis
 import requests
-import sys
 from flask import Flask
 # (新) 导入 Flask-Assets
 from flask_assets import Environment, Bundle

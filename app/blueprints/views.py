@@ -2,10 +2,10 @@
 # (已修改 4) 移除了未使用的导入
 import re
 
+from database import engine
 from flask import Blueprint, session, redirect, send_from_directory, current_app
 from sqlalchemy import text
 
-from database import engine
 # (已移除) 'require_login' 未在此文件中使用 (views.py 使用重定向，api.py 使用 abort)
 # from .api import require_login
 

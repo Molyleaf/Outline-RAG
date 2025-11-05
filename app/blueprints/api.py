@@ -5,25 +5,23 @@ import time
 import uuid
 from typing import List
 
+import config
+from database import engine, redis_client
 from flask import (Blueprint, jsonify, request, abort, make_response, Response, session)
-from sqlalchemy import text
-from werkzeug.utils import secure_filename
-
+from langchain_core.documents import Document
+from langchain_core.item_getters import ItemGetter
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.output_parsers import StrOutputParser
 # --- LangChain ---
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.documents import Document
-from langchain_core.item_getters import ItemGetter
-
-import config
-from database import engine, redis_client
+from sqlalchemy import text
+from werkzeug.utils import secure_filename
 
 # --- 导入 LangChain 和 Outline 服务 ---
 from app.llm_services import llm
-from app.rag import compression_retriever
 from app.outline_client import verify_outline_signature
+from app.rag import compression_retriever
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)

@@ -1,20 +1,20 @@
 # app/llm_services.py
 import logging
-import requests
 import urllib.parse
-import redis
-from typing import List, Sequence
+from typing import Sequence
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.documents import Document
+import redis
+import requests
 # (已移除) 'BaseDocumentTransformer' 不再直接使用
 # from langchain_core.documents.transformers import BaseDocumentTransformer
 # (*** 修复 ***) 导入 BaseDocumentCompressor
 from langchain.retrievers.document_compressors.base import BaseDocumentCompressor
+from langchain.storage import CacheBackedEmbeddings
+from langchain_community.storage import RedisStore
+from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from langchain_community.storage import RedisStore
-from langchain.storage import CacheBackedEmbeddings
 
 import config
 

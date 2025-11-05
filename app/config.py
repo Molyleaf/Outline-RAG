@@ -1,7 +1,6 @@
 # app/config.py
 # 此文件集中管理所有从环境变量加载的配置项
 import os
-import json
 
 # --- 基本配置 ---
 PORT = int(os.getenv("PORT", "8080"))

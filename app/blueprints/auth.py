@@ -7,16 +7,15 @@ import secrets
 import time
 import urllib.parse
 
+import config
 import requests
+from database import engine, redis_client
 from flask import Blueprint, request, session, redirect, url_for
 from jose import jwt
 from jose.exceptions import JOSEError
 from requests.adapters import HTTPAdapter
 from sqlalchemy import text
 from urllib3.util.retry import Retry
-
-import config
-from database import engine, redis_client
 
 auth_bp = Blueprint('auth', __name__)
 
