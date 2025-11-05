@@ -13,7 +13,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from werkzeug.middleware.proxy_fix import ProxyFix
+# (修复) 导入 Starlette 的 ASGI 兼容中间件
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+# (移除) 不再使用 Werkzeug (WSGI) 的中间件
+# from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 导入配置
 import config
@@ -155,7 +158,10 @@ app = FastAPI(
 # --- 3. 注册中间件 ---
 
 # 3a. 修复代理后的 HTTPS (mixed content)
-app.add_middleware(ProxyFix, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+# (修复) 使用 Starlette/FastAPI 兼容的 ProxyHeadersMiddleware
+# trusted_hosts="*" 表示信任来自任何上游代理的 X-Forwarded-* 头
+# 即使 IDE 报错，此行在运行时也是正确的
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # 3b. Session 中间件
 app.add_middleware(
@@ -163,7 +169,7 @@ app.add_middleware(
     secret_key=config.SECRET_KEY,
     session_cookie="session",
     max_age=int(timedelta(days=7).total_seconds()), # 7 天
-    https_only=False, # 设为 False, ProxyFix 会处理 proto
+    https_only=False, # 设为 False, ProxyHeadersMiddleware 会处理 proto
     same_site="lax",
 )
 
