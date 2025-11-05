@@ -2,9 +2,9 @@
 import logging
 import urllib.parse
 from typing import Sequence, Any
+import hashlib # (*** 新增 ***) 导入 hashlib 用于 SHA-256
 
-import redis # 导入 *同步* redis 库
-# ---
+import redis
 import httpx
 from httpx import Response
 from langchain_community.storage import RedisStore
@@ -17,7 +17,13 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# --- (ASYNC REFACTOR) 1. 共享的 HTTP 客户端 (httpx) ---
+# (*** 修复 2 ***)
+# 为 SHA-1 警告提供一个更安全的 key_encoder
+def _sha256_encoder(s: str) -> str:
+    """Encodes a string to its SHA-256 hash, safe for cache keys."""
+    return hashlib.sha256(s.encode()).hexdigest()
+
+# --- 1. 共享的 HTTP 客户端 (httpx) ---
 def _create_retry_client() -> httpx.AsyncClient:
     """创建带重试的 httpx.AsyncClient"""
     retry_strategy = httpx.Retry(
@@ -30,17 +36,16 @@ def _create_retry_client() -> httpx.AsyncClient:
     client = httpx.AsyncClient(transport=transport)
     return client
 
-# --- (不变) 2. 聊天模型 (LLM) ---
-# (ChatOpenAI 自动支持 ainvoke/astream)
+# --- 2. 聊天模型 (LLM) ---
 llm = ChatOpenAI(
     model=config.CHAT_MODEL,
     api_key=config.CHAT_API_TOKEN,
     base_url=f"{config.CHAT_API_URL}/v1",
 )
 
-# --- (ASYNC REFACTOR) 3. 嵌入模型 (Embedding) ---
+# --- 3. 嵌入模型 (Embedding) ---
 
-# 3a. LangChain 缓存需要一个 *不* 解码响应 (decode_responses=False) 的 Redis 客户端
+# 3a. ... (不变) ...
 _redis_cache_client = None
 if config.REDIS_URL:
     try:
@@ -52,22 +57,18 @@ if config.REDIS_URL:
             except (ValueError, IndexError):
                 db_num = 0
 
-        # (*** 关键修复 ***)
-        # LangChain 的 RedisStore 需要一个 *同步* 客户端实例。
         _redis_cache_client = redis.Redis(
             host=parsed_url.hostname,
             port=parsed_url.port,
             password=parsed_url.password,
             db=db_num,
-            decode_responses=False # 缓存需要原始字节
+            decode_responses=False
         )
-        # (*** 修复结束 ***)
     except Exception as e:
         logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False, sync client): %s", e)
         _redis_cache_client = None
 
-# 3b. 基础 Embedding API (不变)
-# (OpenAIEmbeddings 自动支持 aembed_documents/aembed_query)
+# 3b. ... (不变) ...
 _base_embeddings = OpenAIEmbeddings(
     model=config.EMBEDDING_MODEL,
     api_key=config.EMBEDDING_API_TOKEN,
@@ -76,18 +77,20 @@ _base_embeddings = OpenAIEmbeddings(
 
 # 3c. 带缓存的 Embedding 模型
 if _redis_cache_client:
-    # (修改) RedisStore 现在接收一个同步客户端，这是它所期望的
     store = RedisStore(client=_redis_cache_client, namespace="embeddings")
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
-        _base_embeddings, store, namespace=f"emb:{config.EMBEDDING_MODEL}"
+        _base_embeddings,
+        store,
+        namespace=f"emb:{config.EMBEDDING_MODEL}",
+        key_encoder=_sha256_encoder # (*** 修复 2 ***) 消除 SHA-1 警告
     )
-    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient)")
+    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient, SHA256)")
 else:
     embeddings_model = _base_embeddings
     logger.info("LangChain Embedding 缓存未启用")
 
 
-# --- (ASYNC REFACTOR) 4. 重排模型 (Reranker) ---
+# --- 4. 重排模型 (Reranker) ---
 class SiliconFlowReranker(BaseDocumentCompressor):
     """
     (ASYNC REFACTOR) 适配 SiliconFlow API 的异步 Reranker
@@ -99,6 +102,13 @@ class SiliconFlowReranker(BaseDocumentCompressor):
 
     client: httpx.AsyncClient = None
     logger: Any = None
+
+    # (*** 关键修复 1 ***)
+    # 修复 PydanticSchemaGenerationError
+    # 告诉 Pydantic 允许 httpx.AsyncClient 这种"任意"类型
+    class Config:
+        arbitrary_types_allowed = True
+    # (*** 修复结束 ***)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
