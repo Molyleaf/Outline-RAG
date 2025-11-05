@@ -5,9 +5,6 @@ from typing import Sequence
 
 import redis
 import requests
-# (已移除) 'BaseDocumentTransformer' 不再直接使用
-# from langchain_core.documents.transformers import BaseDocumentTransformer
-# (*** 修复 ***) 导入 BaseDocumentCompressor
 from langchain.retrievers.document_compressors.base import BaseDocumentCompressor
 from langchain.storage import CacheBackedEmbeddings
 from langchain_community.storage import RedisStore

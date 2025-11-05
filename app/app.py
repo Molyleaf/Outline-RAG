@@ -20,7 +20,7 @@ app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
 # --- Flask-Assets 配置 ---
 # (这一部分是“轻量级”的，可以在全局安全定义)
 
-# (*** 修复1 ***) 不在此时传入 app，推迟初始化
+# 不在此时传入 app，推迟初始化
 assets = Environment()
 # assets = Environment(app) # <--- 旧代码
 
