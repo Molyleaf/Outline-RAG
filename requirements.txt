@@ -23,6 +23,7 @@ langchain_classic==1.0.0
 fastapi==0.121.0
 uvicorn[standard]==0.38.0
 httpx[http2]==0.28.1
+httpx_retries==0.4.5
 redis[hiredis]==7.0.1
 starlette==0.48.0
 python-multipart==0.0.20
