@@ -17,8 +17,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-# 导入异步 engine, session, 和 redis
-from database import async_engine, AsyncSessionLocal, redis_client
+# (*** 修复 2 ***) 导入 db_url
+from database import async_engine, AsyncSessionLocal, redis_client, db_url
 from llm_services import embeddings_model, reranker
 # (ASYNC REFACTOR)
 from outline_client import outline_list_docs, outline_get_doc
@@ -63,11 +63,11 @@ async def initialize_rag_components():
             raise ValueError("AsyncEngine from database.py is not available")
 
         # --- 1b. 初始化 PGVector 存储 ---
-        # (*** 这是对 Error 1 的核心修复 ***)
+        # (*** 这是对 Error 2 的核心修复 ***)
         try:
-            # 使用 await .create() 而不是 .create_sync()
+            # (*** 修复 2 ***) 使用 db_url 而不是 async_engine
             vector_store = await PGVectorStore.create(
-                async_engine,
+                db_url,
                 table_name="outline_rag_collection",
                 embedding_service=embeddings_model,
             )

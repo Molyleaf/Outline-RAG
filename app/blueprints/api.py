@@ -110,7 +110,8 @@ async def api_get_conversations(
             {"u": uid, "lim": page_size, "off": offset}
         )).mappings().all()
 
-    items = [{"id": r["id"], "title": r["title"], "created_at": r["created_at"], "url": f"/chat/{r['id']}"} for r in rs]
+    # (*** 修复 1 ***) 将 r['created_at'] 转换为 .isoformat()
+    items = [{"id": r["id"], "title": r["title"], "created_at": r['created_at'].isoformat(), "url": f"/chat/{r['id']}"} for r in rs]
     return JSONResponse({"items": items, "total": total, "page": page, "page_size": page_size})
 
 
@@ -467,10 +468,9 @@ async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)): # (
         return JSONResponse({"status": "idle", "message": "空闲"})
 
     try:
-        # (修复 7) 移除了 "refresh:delete_count"
         counts = await redis_client.mget([
             "refresh:total_queued", "refresh:success_count",
-            "skipped_count"
+            "refresh:skipped_count"
         ])
         total_queued = int(counts[0] or 0)
         success_count = int(counts[1] or 0)
