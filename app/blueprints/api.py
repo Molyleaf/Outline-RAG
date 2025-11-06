@@ -1,5 +1,5 @@
 # app/blueprints/api.py
-import asyncio # 确保 asyncio 已导入
+import asyncio
 import json
 import logging
 import time
@@ -23,7 +23,6 @@ from langchain_core.runnables import RunnablePassthrough, RunnableParallel, Runn
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
-# (新) Req 3: 导入 MultiQueryRetriever
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 
 
@@ -53,15 +52,12 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
 
     for i, doc in enumerate(docs):
         title = doc.metadata.get("title", "Untitled")
-
-        # rag.py 中已将 'url' (相对路径) 存入元数据
         url = doc.metadata.get("url")
 
         doc_str = f"--- 参考资料 [{i+1}] ---\n"
         doc_str += f"标题: {title}\n"
 
         if url:
-            # 构造可访问的完整 URL
             if url.startswith('/'):
                 url = f"{base_url}{url}"
             doc_str += f"来源: {url}\n"
@@ -153,18 +149,34 @@ async def api_create_conversation(
 ):
     """创建新对话"""
     uid = user["id"]
+    name = user.get("name")
+    avatar_url = user.get("avatar_url")
     title = body.title or "新会话"
     guid = str(uuid.uuid4())
 
     try:
         async with session.begin():
+            # --- (新) 修复：外键约束错误 ---
+            # 在插入 conversation 之前，确保 user 存在于 users 表中
+            await session.execute(
+                text("""
+                     INSERT INTO users (id, name, avatar_url)
+                     VALUES (:id, :name, :avatar_url)
+                         ON CONFLICT (id) DO UPDATE SET
+                         name = EXCLUDED.name,
+                                                 avatar_url = EXCLUDED.avatar_url
+                     """),
+                {"id": uid, "name": name, "avatar_url": avatar_url}
+            )
+            # --- 修复结束 ---
+
             await session.execute(
                 text("INSERT INTO conversations (id, user_id, title) VALUES (:id, :u, :t)"),
                 {"id": guid, "u": uid, "t": title}
             )
         return JSONResponse({"id": guid, "title": title, "url": f"/chat/{guid}"})
     except Exception as e:
-        if "ForeignKeyViolation" in str(e):
+        if "ForeignKeyViolation" in str(e) or "foreign key constraint" in str(e):
             logger.error(f"ForeignKeyViolation 为 user {uid} 创建对话失败。用户可能不在 users 表中。", exc_info=True)
             raise HTTPException(status_code=403, detail="用户认证数据不同步，请尝试重新登录。")
         logger.error(f"为 user {uid} 创建对话失败: {e}", exc_info=True)
@@ -296,27 +308,21 @@ async def api_ask(
     )
 
     # 2. (新 Req 3) MultiQueryRetriever
-    # 我们遵循用户的示例，在 MultiQuery 中使用完整的 compression_retriever
-    # 这会更慢，但可能会产生更好的（经过重排的）合并结果
     multi_query_retriever = MultiQueryRetriever.from_llm(
         retriever=compression_retriever,
         llm=classifier_llm
     )
 
     # 3. 核心 RAG 链 (Req 3, 5)
-    # (此链不包括最终的 LLM 调用，以便路由可以重用它)
     rag_chain_pre_llm = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x["chat_history"]
             })
-            # (新 Req 3) 使用 MultiQueryRetriever
-            # (新 Req 5) 将 docs 对象传递下去
             | RunnablePassthrough.assign(
         docs=itemgetter("rewritten_query") | multi_query_retriever
     )
-            # (新 Req 5) 使用带元数据的格式化
             | RunnablePassthrough.assign(
         context=lambda x: _format_docs_with_metadata(x["docs"])
     )
@@ -328,18 +334,13 @@ async def api_ask(
             | ChatPromptTemplate.from_messages([
         ("system", config.SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
-        # (新 Req 5) config.py 中的此模板现在要求溯源
         ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
     ])
     )
 
-    # 将 RAG 链与 LLM 结合
     rag_chain = rag_chain_pre_llm | llm_with_options
 
     # 4. (新 Req 6) 智能路由
-    # 输入: {"input": str, "chat_history": list}
-
-    # 4a. 分类器
     classifier_prompt = PromptTemplate.from_template(
         """判断用户问题的类型。只回答 'rag' (需要知识库)、'greeting' (问候) 或 'other' (其他)。
 问题: {input}
@@ -351,13 +352,11 @@ async def api_ask(
             | StrOutputParser()
     )
 
-    # 4b. 问候链
     greeting_chain = (
             PromptTemplate.from_template("你是一个友好的助手。请回复用户的问候。")
             | llm_with_options
     )
 
-    # 4c. 通用链
     general_chain = (
             ChatPromptTemplate.from_messages([
                 ("system", config.SYSTEM_PROMPT),
@@ -367,17 +366,9 @@ async def api_ask(
             | llm_with_options
     )
 
-    # 4d. 组合
-    # 此链将 "classification" 添加到输入字典中
     chain_with_classification = RunnablePassthrough.assign(
         classification=classifier_chain
     )
-
-    # 4e. 最终路由
-    # RunnableBranch 将根据 "classification" 字段选择一个链
-    # 重要的是：所有分支 (greeting, rag, general) 都必须接受相同的输入
-    # (即 {"input": ..., "chat_history": ..., "classification": ...})
-    # 并且所有分支的 *输出* 必须是相同的类型 (AIMessageChunk)
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
         (lambda x: "greeting" in x["classification"].lower(), greeting_chain),
@@ -428,42 +419,36 @@ async def api_ask(
         if r["role"] == "user":
             chat_history.append(HumanMessage(content=r["content"]))
         elif r["role"] == "assistant":
-            # (新 Req 1) 适配 app.js 的 'appendMsg' 格式
             content = r["content"]
             thinking_match = re.search(r"\n(.*?)\n\n\n(.*)", content, re.DOTALL)
             if thinking_match:
-                # 只传递内容部分给历史
                 chat_history.append(AIMessage(content=thinking_match.group(2)))
             else:
                 chat_history.append(AIMessage(content=content))
 
     # --- (修复 1 & 2) 异步 generate 函数 ---
     async def generate():
-        yield ": ping\n\n"  # 初始 ping
+        yield ": ping\n\n"
         full_response = ""
         model_name = model
-        thinking_response = ""  # 累积的思维链状态
-        # (移除 thinking_buffer，不再需要)
+        thinking_response = ""
 
         llm_task = None
         ping_task = None
 
         try:
-            # 1. 设置 LLM 流
             llm_stream = final_chain_streaming.astream({
                 "input": query,
                 "chat_history": chat_history
             })
 
-            # 2. 设置 Ping 流
             async def ping_generator():
                 while True:
-                    await asyncio.sleep(20)  # 每 20 秒
+                    await asyncio.sleep(20)
                     yield "ping"
 
             ping_stream = ping_generator()
 
-            # 3. (核心) 并发执行两个流
             llm_iter = llm_stream.__aiter__()
             ping_iter = ping_stream.__aiter__()
 
@@ -481,30 +466,23 @@ async def api_ask(
                 for task in done:
                     if task == llm_task:
                         try:
-                            # --- LLM 块到达 ---
                             delta_chunk = task.result()
-
                             delta_content = delta_chunk.content or ""
-                            delta_thinking = ""  # 本次要发送的 delta
+                            delta_thinking = ""
                             new_thinking_detected = False
 
                             # (修复 1) 检查 'reasoning_content'
                             if delta_chunk.additional_kwargs:
-                                # 使用 .get() 避免 KeyError
                                 new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
                                 if new_thought and new_thought != thinking_response:
-                                    thinking_response = new_thought  # 更新累积状态
-                                    delta_thinking = new_thought     # 设置本次 delta
+                                    thinking_response = new_thought
+                                    delta_thinking = new_thought
                                     new_thinking_detected = True
 
-                            # (移除 tool_call_chunks 检查，它不适用)
-
-                            # 仅在有新内容或新思维链时 yield
                             if delta_content or new_thinking_detected:
                                 full_response += delta_content
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
-                            # 重新调度 LLM 任务
                             llm_task = asyncio.create_task(llm_iter.__anext__())
                             pending.add(llm_task)
 
@@ -512,56 +490,60 @@ async def api_ask(
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
                             pass  # LLM 流正常结束或被取消
                         except Exception as e:
-                            # LLM 流发生错误
                             logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
                             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
-                            # 停止 ping
                             if ping_task in pending:
                                 pending.remove(ping_task)
                                 ping_task.cancel()
 
                     elif task == ping_task:
                         try:
-                            # --- Ping 块到达 ---
-                            _ = task.result()  # 应该等于 "ping"
-                            yield ": ping\n\n"  # 发送 keep-alive
-                            # 重新调度 Ping 任务
+                            _ = task.result()
+                            yield ": ping\n\n"
                             ping_task = asyncio.create_task(ping_iter.__anext__())
                             pending.add(ping_task)
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            pass # Ping 停止
+                            pass
                         except Exception as e:
                             logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
             yield "data: [DONE]\n\n"
 
+        # (修复 2) 将 except 和 finally 分离
         except Exception as e:
-            logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+            logger.error(f"[{conv_id}] 异步流 generate 协程失败: {e}", exc_info=True)
+            try:
+                yield f"data: {json.dumps({'error': f'异步流 generate 协程失败: {e}'})}\n\n"
+                yield "data: [DONE]\n\n"
+            except Exception:
+                pass
         finally:
-            # 确保任务被清理
+            # (修复 2) 确保任务被清理
             if llm_task and not llm_task.done():
                 llm_task.cancel()
             if ping_task and not ping_task.done():
                 ping_task.cancel()
 
-        # (修复 2) 此块现在应该可以访问了
-        if full_response:
-            async with AsyncSessionLocal.begin() as db_session:
-                # (新 Req 1) 使用 app.js 兼容的格式保存
-                if thinking_response:
-                    full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
-                else:
-                    full_content_with_thinking = full_response
+            # (修复 2) 将数据库保存逻辑移至 finally 块
+            if full_response:
+                try:
+                    async with AsyncSessionLocal.begin() as db_session:
+                        if thinking_response:
+                            full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
+                        else:
+                            full_content_with_thinking = full_response
 
-                await db_session.execute(
-                    text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
-                    {"cid": conv_id, "uid": user["id"], "c": full_content_with_thinking, "m": model_name, "t": temperature, "p": top_p}
-                )
-            if redis_client:
-                await redis_client.delete(f"messages:{conv_id}")
+                        await db_session.execute(
+                            text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
+                            {"cid": conv_id, "uid": user["id"], "c": full_content_with_thinking, "m": model_name, "t": temperature, "p": top_p}
+                        )
+                    if redis_client:
+                        await redis_client.delete(f"messages:{conv_id}")
+                    logger.info(f"[{conv_id}] 成功保存对话 (finally 块)。")
+                except Exception as db_e:
+                    logger.error(f"[{conv_id}] 在 finally 块中保存对话失败: {db_e}", exc_info=True)
+            else:
+                logger.warning(f"[{conv_id}] 响应为空，未保存对话 (finally 块)。")
     # --- 修复结束 ---
 
     return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
