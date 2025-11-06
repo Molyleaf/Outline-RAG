@@ -1,4 +1,5 @@
 # app/blueprints/api.py
+import asyncio
 import json
 import logging
 import time
@@ -436,56 +437,117 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
-
+    # --- (新) 修复 1 & 3: 重写 generate 函数 ---
     async def generate():
-        yield ": ping\n\n"
+        yield ": ping\n\n"  # 初始 ping
         full_response = ""
         model_name = model
-        thinking_response = ""
-        thinking_buffer = "" # 用于不完整的 'thinking' tool_call JSON
+        thinking_response = ""  # 累积的思维链状态
+        thinking_buffer = ""    # 用于不完整的 tool_call JSON
+
+        llm_task = None
+        ping_task = None
 
         try:
-            # (新 Req 6) 调用最终的路由链
-            stream = final_chain_streaming.astream({
+            # 1. 设置 LLM 流
+            llm_stream = final_chain_streaming.astream({
                 "input": query,
                 "chat_history": chat_history
             })
 
-            # 流的输出现在是 AIMessageChunk
-            async for delta_chunk in stream:
-                delta_content = delta_chunk.content or ""
-                delta_thinking = ""
+            # 2. 设置 Ping 流
+            async def ping_generator():
+                while True:
+                    await asyncio.sleep(20)  # 每 20 秒
+                    yield "ping"
 
-                # (新 Req 1) 提取 'thinking' (来自 additional_kwargs)
-                if delta_chunk.additional_kwargs and "thinking" in delta_chunk.additional_kwargs:
-                    delta_thinking = delta_chunk.additional_kwargs["thinking"] or ""
-                    if delta_thinking:
-                        thinking_response = delta_thinking # 覆盖式更新
+            ping_stream = ping_generator()
 
-                # (新 Req 1) 提取 'thinking' (来自 tool_call_chunks)
-                if delta_chunk.tool_call_chunks:
-                    try:
-                        for tc in delta_chunk.tool_call_chunks:
-                            if tc.get("name") == "thinking" and tc.get("args"):
-                                # 累积 args 字符串
-                                thinking_buffer += tc["args"]
+            # 3. (核心) 并发执行两个流
+            llm_iter = llm_stream.__aiter__()
+            ping_iter = ping_stream.__aiter__()
+
+            llm_task = asyncio.create_task(llm_iter.__anext__())
+            ping_task = asyncio.create_task(ping_iter.__anext__())
+
+            pending = {llm_task, ping_task}
+
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending,
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for task in done:
+                    if task == llm_task:
+                        try:
+                            # --- LLM 块到达 ---
+                            delta_chunk = task.result()
+
+                            # (修复 1) 检查思维链和内容的逻辑
+                            delta_content = delta_chunk.content or ""
+                            delta_thinking = ""  # 本次要发送的 delta
+                            new_thinking_detected = False
+
+                            # 检查 additional_kwargs
+                            if delta_chunk.additional_kwargs and "thinking" in delta_chunk.additional_kwargs:
+                                new_thought = delta_chunk.additional_kwargs["thinking"] or ""
+                                if new_thought and new_thought != thinking_response:
+                                    thinking_response = new_thought  # 更新累积状态
+                                    delta_thinking = new_thought     # 设置本次 delta
+                                    new_thinking_detected = True
+
+                            # 检查 tool_call_chunks
+                            if delta_chunk.tool_call_chunks:
                                 try:
-                                    # 尝试解析累积的 buffer
-                                    args_json = json.loads(thinking_buffer)
-                                    delta_thinking_tool = args_json.get("thought", "")
-                                    if delta_thinking_tool:
-                                        thinking_response = delta_thinking_tool # 覆盖式更新
-                                        delta_thinking = delta_thinking_tool
-                                    thinking_buffer = "" # 解析成功，清空 buffer
-                                except json.JSONDecodeError:
-                                    # JSON 不完整，继续累积
-                                    pass
-                    except Exception:
-                        pass # 忽略 tool_call 解析错误
+                                    for tc in delta_chunk.tool_call_chunks:
+                                        if tc.get("name") == "thinking" and tc.get("args"):
+                                            thinking_buffer += tc["args"]
+                                            try:
+                                                args_json = json.loads(thinking_buffer)
+                                                new_thought_tool = args_json.get("thought", "")
+                                                if new_thought_tool and new_thought_tool != thinking_response:
+                                                    thinking_response = new_thought_tool
+                                                    delta_thinking = new_thought_tool
+                                                    new_thinking_detected = True
+                                                thinking_buffer = ""
+                                            except json.JSONDecodeError:
+                                                pass  # JSON 不完整，继续累积
+                                except Exception:
+                                    pass  # 忽略 tool_call 解析错误
 
-                if delta_content or (delta_thinking and delta_thinking != thinking_response):
-                    full_response += delta_content
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
+                            # (修复 1) 仅在有新内容或新思维链时 yield
+                            if delta_content or new_thinking_detected:
+                                full_response += delta_content
+                                yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
+
+                            # 重新调度 LLM 任务
+                            llm_task = asyncio.create_task(llm_iter.__anext__())
+                            pending.add(llm_task)
+
+                        except StopAsyncIteration:
+                            pass  # LLM 流正常结束
+                        except Exception as e:
+                            # LLM 流发生错误
+                            logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
+                            yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
+                            # 停止 ping
+                            if ping_task in pending:
+                                pending.remove(ping_task)
+                                ping_task.cancel()
+
+                    elif task == ping_task:
+                        try:
+                            # --- Ping 块到达 ---
+                            _ = task.result()  # 应该等于 "ping"
+                            yield ": ping\n\n"  # (修复 3) 发送 keep-alive
+                            # 重新调度 Ping 任务
+                            ping_task = asyncio.create_task(ping_iter.__anext__())
+                            pending.add(ping_task)
+                        except StopAsyncIteration:
+                            pass  # 不应发生
+                        except Exception as e:
+                            logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
             yield "data: [DONE]\n\n"
 
@@ -494,10 +556,15 @@ async def api_ask(
             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
             yield "data: [DONE]\n\n"
             return
+        finally:
+            # 确保任务被清理
+            if llm_task and not llm_task.done():
+                llm_task.cancel()
+            if ping_task and not ping_task.done():
+                ping_task.cancel()
 
         if full_response:
             async with AsyncSessionLocal.begin() as db_session:
-
                 # (新 Req 1) 使用 app.js 兼容的格式保存
                 if thinking_response:
                     full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
@@ -510,6 +577,7 @@ async def api_ask(
                 )
             if redis_client:
                 await redis_client.delete(f"messages:{conv_id}")
+    # --- 修复结束 ---
 
     return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
         "Cache-Control": "no-cache",
