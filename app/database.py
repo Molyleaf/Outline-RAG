@@ -1,5 +1,6 @@
 # app/database.py
 import logging
+import os
 import urllib.parse
 
 import redis.asyncio as redis
@@ -10,22 +11,22 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# --- 从环境变量读取向量维度 ---
+VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1536"))
+logger.info(f"Using vector dimension: {VECTOR_DIM}")
+
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-# --- 强制使用 asyncpg 驱动 ---
-if not config.DATABASE_URL.startswith("postgresql+asyncpg"):
-    logger.warning("DATABASE_URL 不是 postgresql+asyncpg，将尝试替换...")
-    db_url = config.DATABASE_URL.replace("postgresql+psycopg://", "postgresql+asyncpg://")
-    db_url = db_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+# --- 自动修复缺少主机名的情况，防止 asyncpg 使用 Unix socket ---
+from urllib.parse import urlparse, urlunparse
+parsed = urlparse(config.DATABASE_URL)
+if not parsed.hostname:
+    logger.warning("DATABASE_URL 缺少主机名，已自动补全为 localhost")
+    fixed_netloc = f"{parsed.username}:{parsed.password}@localhost:{parsed.port or 5432}"
+    db_url = urlunparse(parsed._replace(netloc=fixed_netloc))
 else:
     db_url = config.DATABASE_URL
-
-# 强制客户端编码 UTF8
-if "client_encoding" not in db_url:
-    connector = "&" if "?" in db_url else "?"
-    db_url += f"{connector}client_encoding=utf8"
 
 # --- 创建异步引擎 ---
 async_engine = create_async_engine(db_url, future=True)
@@ -128,31 +129,23 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
-# --- 新增：PGVector 表结构 ---
-# 使用 text-embedding-3-small (1024维)，可自行改成 3072 等
-PGVECTOR_TABLE_SQL = """
-                     CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
-                                                                           langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                         collection_id UUID,
-                         embedding vector(1024),
-                         document TEXT,
-                         cmetadata JSONB,
-                         created_at TIMESTAMPTZ DEFAULT now()
-                         ); \
-                     """
+# --- PGVector 表结构 ---
+PGVECTOR_TABLE_SQL = f"""
+CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
+    langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    collection_id UUID,
+    content TEXT,
+    embedding vector({VECTOR_DIM}),
+    cmetadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+"""
 
 # --- 异步数据库初始化 ---
 async def db_init():
     """异步初始化数据库"""
     async with async_engine.connect() as conn_lock:
         conn_ac = await conn_lock.execution_options(isolation_level="AUTOCOMMIT")
-
-        # 检查数据库编码
-        encoding_row = await conn_ac.execute(text("SHOW SERVER_ENCODING"))
-        encoding_val = encoding_row.scalar_one_or_none()
-        if encoding_val and encoding_val.upper() != "UTF8":
-            logger.warning(f"数据库编码为 {encoding_val}，建议使用 UTF8 以支持中文。")
-
         await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
         logger.info("数据库咨询锁已获取。")
 
@@ -166,7 +159,6 @@ async def db_init():
                     commands = [cmd.strip() for cmd in TX_INIT_SQL.split(';') if cmd.strip()]
                     for sql_command in commands:
                         await conn_tx.execute(text(sql_command))
-
                     # 新增: 确保 PGVector 表存在
                     await conn_tx.execute(text(PGVECTOR_TABLE_SQL))
                     await conn_tx.execute(text("ANALYZE"))

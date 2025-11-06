@@ -11,7 +11,6 @@ from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_postgres import PGVectorStore
-from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
@@ -48,15 +47,10 @@ async def initialize_rag_components():
 
         # --- 1b. 初始化 PGVector 存储 ---
         try:
-            vs_instance = await AsyncPGVectorStore.create(
+            vector_store = await PGVectorStore.create(
                 engine=async_engine,
                 embedding_service=embeddings_model,
                 table_name="langchain_pg_embedding",
-            )
-            vector_store = PGVectorStore(
-                engine=async_engine,
-                key="outline_rag_collection",
-                vs=vs_instance,
             )
             logger.info("PGVectorStore initialized (sync constructor v0.0.16 with psycopg).")
         except Exception as e:
