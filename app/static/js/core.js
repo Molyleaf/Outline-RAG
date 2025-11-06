@@ -238,23 +238,12 @@ function animateIn(el) {
 function appendFadeInChunk(chunk, container) {
     if (!chunk || !container) return;
 
-    // (新) 适配 Thinking 块的换行
-    if (container.classList.contains('thinking-content')) {
-        chunk.split('\n').forEach((line, index) => {
-            if (index > 0) {
-                container.appendChild(document.createElement('br'));
-            }
-            const span = document.createElement('span');
-            span.className = 'fade-in-chunk';
-            span.appendChild(document.createTextNode(line));
-            container.appendChild(span);
-        });
-    } else {
-        const span = document.createElement('span');
-        span.className = 'fade-in-chunk';
-        span.appendChild(document.createTextNode(chunk));
-        container.appendChild(span);
-    }
+    // (新) Req 2: 简化逻辑，移除 .thinking-content 的特殊处理
+    // 始终使用 textNode，让 CSS 'white-space: pre-wrap' 处理换行
+    const span = document.createElement('span');
+    span.className = 'fade-in-chunk';
+    span.appendChild(document.createTextNode(chunk));
+    container.appendChild(span);
 
     // 始终滚动到底部
     chatEl.scrollTop = chatEl.scrollHeight;

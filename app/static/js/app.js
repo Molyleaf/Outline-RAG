@@ -1,4 +1,46 @@
 // app/static/js/app.js
+
+// (新) Req 5: 溯源处理函数
+/**
+ * 查找 [来源 n] 文本并将其包裹在 <span class="citation"> 中
+ * @param {HTMLElement} element - 包含已渲染 Markdown 的 DOM 元素
+ */
+function processCitations(element) {
+    if (!element) return;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodesToReplace = [];
+
+    // 1. 查找所有匹配的文本节点
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (/\[来源 \d+]/.test(node.nodeValue)) {
+            nodesToReplace.push(node);
+        }
+    }
+
+    // 2. 替换节点
+    // (必须在遍历后执行替换，否则会破坏 TreeWalker)
+    nodesToReplace.forEach(node => {
+        if (!node.parentElement) return; // 节点可能已被
+
+        const fragment = document.createDocumentFragment();
+        const parts = node.nodeValue.split(/(\[来源 \d+\])/g);
+
+        parts.forEach(part => {
+            if (/\[来源 \d+\]/.test(part)) {
+                const span = document.createElement('span');
+                span.className = 'citation';
+                span.textContent = part;
+                fragment.appendChild(span);
+            } else if (part) {
+                fragment.appendChild(document.createTextNode(part));
+            }
+        });
+        node.parentElement.replaceChild(fragment, node);
+    });
+}
+
+
 async function loadUser() {
     const data = await api('/chat/api/me');
     if (!data || !data.user) return; // (新) 检查 data 和 data.user
@@ -418,26 +460,37 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
     // (新) 提取 Thinking 内容
     let thinkingText = '';
     let contentText = String(text ?? '');
-    if (role === 'assistant' && contentText.includes('<!-- THINKING -->')) {
-        const match = contentText.match(/<!-- THINKING -->\n([\s\S]*?)\n\n<!-- CONTENT -->\n([\s\S]*)/);
+    // (新 Req 1) 适配后端的 `` 格式
+    if (role === 'assistant' && contentText.includes('')) {
+        const match = contentText.match(/\n([\s\S]*?)\n\n\n([\s\S]*)/);
         if (match) {
-            thinkingText = match[1];
-            contentText = match[2];
+            thinkingText = match[1].trim();
+            contentText = match[2].trim();
         }
     }
 
-    // (新) 如果有 Thinking 内容，则渲染
+    // (新 Req 1) 如果有 Thinking 内容，则渲染 (使用 <details>)
     if (thinkingText) {
-        const thinkingBlock = document.createElement('div');
+        const thinkingBlock = document.createElement('details'); // (新) 使用 <details>
         thinkingBlock.className = 'thinking-block';
-        thinkingBlock.innerHTML =
-            '<div class="thinking-header"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>Thinking</span></div>' +
-            '<div class="thinking-content"></div>';
-        thinkingBlock.querySelector('.thinking-content').appendChild(renderMarkdown(thinkingText));
+
+        const summary = document.createElement('summary'); // (新) 使用 <summary>
+        summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>显示思维链</span>';
+
+        const thinkingContent = document.createElement('div');
+        thinkingContent.className = 'thinking-content';
+        thinkingContent.appendChild(renderMarkdown(thinkingText));
+
+        thinkingBlock.appendChild(summary);
+        thinkingBlock.appendChild(thinkingContent);
         bubbleInner.appendChild(thinkingBlock);
     }
 
     const node = renderMarkdown(contentText);
+
+    // (新 Req 5) 在插入 DOM 之前处理溯源
+    processCitations(node);
+
     bubbleInner.appendChild(node);
     bubble.appendChild(bubbleInner);
 
@@ -576,7 +629,11 @@ async function sendQuestion() {
             const bubbleInner = msgElement.querySelector('.bubble-inner');
             if (bubbleInner) {
                 bubbleInner.innerHTML = ''; // 完全清空
-                bubbleInner.appendChild(renderMarkdown(text)); // 添加新 md-body
+                const node = renderMarkdown(text); // 添加新 md-body
+                // (新 Req 5) 编辑后的内容也需要处理溯源 (虽然用户消息通常没有)
+                processCitations(node);
+                bubbleInner.appendChild(node);
+
                 // (新) 重新附加操作按钮
                 const bubbleActions = document.createElement('div');
                 bubbleActions.className = 'bubble-actions';
@@ -651,10 +708,6 @@ async function sendQuestion() {
         // (新) 非编辑模式才追加新用户消息, 并获取 ID
         const newUserMsgDiv = appendMsg('user', text, {}, `temp-id-${Date.now()}`);
         qEl.value = '';
-
-        // (新) 编辑模式下, 我们不知道新消息的 ID，因此无法立即启用编辑
-        // (新) 只有在非编辑模式下创建新消息时，我们才会在 loadMessages 之后更新 ID
-        // (新) 暂时保持简单：新发送的消息在刷新前无法编辑
     }
 
 
@@ -666,34 +719,41 @@ async function sendQuestion() {
         top_p: currentTopP
     });
 
-    // 1. 获取 .md-body 作为主容器
-    let messageContainer = placeholderDiv.querySelector('.md-body');
-    if (!messageContainer) {
-        const bubbleInner = placeholderDiv.querySelector('.bubble-inner') || placeholderDiv.querySelector('.bubble') || placeholderDiv;
-        const newBody = document.createElement('div');
-        newBody.className = 'md-body';
-        bubbleInner.appendChild(newBody);
-        messageContainer = newBody;
+    // 1. 获取 .bubble-inner 作为根容器
+    const bubbleInner = placeholderDiv.querySelector('.bubble-inner');
+    if (!bubbleInner) {
+        console.error("无法找到 .bubble-inner 来附加流式内容");
+        return;
     }
-    messageContainer.innerHTML = ''; // 清空（appendMsg 可能会创建带空 <p> 的）
-    messageContainer.classList.add('streaming');
+
+    // 2. (新) .md-body 是流式 *内容* 的容器
+    let messageContainer = document.createElement('div');
+    messageContainer.className = 'md-body streaming';
 
     const loaderEl = document.createElement('div');
     loaderEl.className = 'loading-dots';
     loaderEl.innerHTML = '<span></span><span></span><span></span>';
     messageContainer.appendChild(loaderEl);
 
-    // 2. 定义变量
+    // (新) 始终将 .md-body 附加到 .bubble-inner
+    bubbleInner.appendChild(messageContainer);
+
+
+    // 3. 定义变量
     let currentStreamingDiv = document.createElement('div'); // 第一个用于流式输出的 div
     messageContainer.appendChild(currentStreamingDiv);
 
     let currentStreamingBuffer = ''; // 用于当前 div 的原始 Markdown 累积
-    let currentThinkingBuffer = ''; // (新) 用于 thinking 的累积
+    let currentThinkingBuffer = ''; // (新) Req 1: 用于 thinking 的累积
+    // (新) Req 1: 跟踪思维链状态的标志
+    let thinking_block_created = false;
+    let thinking_has_been_collapsed = false;
+
     // 仅在 \n\n (一个或多个新行) 处触发渲染
     const triggerRegex = /(\n\n+)/;
     const parseFn = window.marked.parse || window.marked.default?.parse;
 
-    // 3. 定义一个在流结束时（或出错时）调用的最终化函数
+    // 4. 定义一个在流结束时（或出错时）调用的最终化函数
     const finalizeStream = () => {
         const loader = messageContainer.querySelector('.loading-dots');
         if (loader) loader.remove();
@@ -718,16 +778,15 @@ async function sendQuestion() {
             currentStreamingDiv.remove();
         }
 
+        // (新 Req 1) 移除 finalizeStream 中创建 <details> 的逻辑
+        // 它现在在流式传输期间创建
+
+        // (新 Req 5) 在最终内容上处理溯源
+        processCitations(currentStreamingDiv);
+
         // (新) 最终化后，重新加载消息以获取正确的 ID 并附加按钮
-        // (新) 仅在非编辑模式下才自动刷新
-        if (!editingId) {
-            // (新) 延迟一点点加载，确保数据库已写入
-            setTimeout(loadMessages, 100);
-        } else {
-            // (新) 编辑模式下，手动将 ID 附加到新生成的助手消息上
-            // (新) 这太复杂了，暂时也统一使用 loadMessages
-            setTimeout(loadMessages, 100);
-        }
+        // (新) 延迟一点点加载，确保数据库已写入
+        setTimeout(loadMessages, 100);
     };
 
     // 5. fetch 和 SSE 处理循环
@@ -757,7 +816,7 @@ async function sendQuestion() {
     let buffer = '';
     let modelDetected = false;
     let streamDone = false;
-    let firstChunkReceived = false; // (新) Req 1 标志
+    let firstChunkReceived = false;
 
     try {
         while (true) {
@@ -801,41 +860,61 @@ async function sendQuestion() {
 
                         // --- 流式处理核心逻辑 ---
                         const delta = j.choices?.[0]?.delta?.content;
-                        const thinking = j.choices?.[0]?.delta?.thinking; // (新) Req 2
+                        const thinking = j.choices?.[0]?.delta?.thinking; // (新) Req 1
 
-                        // (新) Req 1: 收到第一个数据块时，移除加载动画
+                        // (新) 收到第一个数据块时，移除加载动画
                         const loader = messageContainer.querySelector('.loading-dots');
                         if (!firstChunkReceived && (typeof delta === 'string' && delta.length > 0) || (typeof thinking === 'string' && thinking.length > 0)) {
                             if (loader) loader.remove();
                             firstChunkReceived = true;
                         }
 
-                        // (新) Req 2: 处理 Thinking
+                        // (新) Req 1: 处理 Thinking (实时渲染)
                         if (typeof thinking === 'string' && thinking.length > 0) {
-                            currentThinkingBuffer = thinking; // (新) Thinking 是状态，直接覆盖
-                            let thinkingBlock = messageContainer.querySelector('.thinking-block');
+                            currentThinkingBuffer = thinking; // Thinking 是状态，直接覆盖
+                            let thinkingBlock = bubbleInner.querySelector('.thinking-block');
+
                             if (!thinkingBlock) {
-                                thinkingBlock = document.createElement('div');
+                                // 创建 <details> 块
+                                thinkingBlock = document.createElement('details');
                                 thinkingBlock.className = 'thinking-block';
-                                thinkingBlock.innerHTML =
-                                    '<div class="thinking-header"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>Thinking</span></div>' +
-                                    '<div class="thinking-content"></div>';
-                                // 插入到 md-body 之前
-                                messageContainer.insertBefore(thinkingBlock, currentStreamingDiv);
+                                thinkingBlock.setAttribute('open', ''); // 默认打开
+
+                                const summary = document.createElement('summary');
+                                summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>思维链</span>';
+
+                                const thinkingContent = document.createElement('div');
+                                thinkingContent.className = 'thinking-content';
+
+                                thinkingBlock.appendChild(summary);
+                                thinkingBlock.appendChild(thinkingContent);
+
+                                // 插入到 .md-body (messageContainer) 之前
+                                bubbleInner.insertBefore(thinkingBlock, messageContainer);
+                                thinking_block_created = true;
                             }
-                            // Thinking 是状态，覆盖
+
+                            // 实时使用 renderMarkdown 更新思维链内容
                             const thinkingContent = thinkingBlock.querySelector('.thinking-content');
-                            thinkingContent.innerHTML = ''; // 清空
-                            appendFadeInChunk(currentThinkingBuffer, thinkingContent); // 使用 append 支持换行
+                            if (thinkingContent) {
+                                const thinkingMd = renderMarkdown(currentThinkingBuffer);
+                                thinkingContent.innerHTML = thinkingMd.innerHTML; // 设置 innerHTML
+                            }
                         }
 
 
                         if (typeof delta === 'string' && delta.length > 0) {
 
-                            // (新) 一旦收到 content，隐藏 thinking
-                            let thinkingBlock = messageContainer.querySelector('.thinking-block');
-                            if (thinkingBlock && thinkingBlock.style.display !== 'none') {
-                                thinkingBlock.style.display = 'none'; // 隐藏
+                            // (新) Req 1: 收到第一个 content 块，折叠思维链
+                            if (thinking_block_created && !thinking_has_been_collapsed) {
+                                const thinkingBlock = bubbleInner.querySelector('.thinking-block');
+                                if (thinkingBlock) {
+                                    thinkingBlock.removeAttribute('open'); // 折叠
+                                    // 更新 <summary> 文本
+                                    const summarySpan = thinkingBlock.querySelector('summary span');
+                                    if (summarySpan) summarySpan.textContent = '显示思维链';
+                                }
+                                thinking_has_been_collapsed = true;
                             }
 
                             // 使用一个小的回看缓冲区来检查跨 delta 的触发器
@@ -872,6 +951,10 @@ async function sendQuestion() {
                                 if (currentStreamingBuffer.trim() !== '') {
                                     const parsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
                                     currentStreamingDiv.innerHTML = parsedHtml;
+
+                                    // (新 Req 5) 在解析块后处理溯源
+                                    processCitations(currentStreamingDiv);
+
                                     if (window.hljs) currentStreamingDiv.querySelectorAll('pre code').forEach(block => {
                                         try { window.hljs.highlightElement(block); } catch(e){}
                                     });

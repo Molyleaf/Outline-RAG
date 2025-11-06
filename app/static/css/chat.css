@@ -1,3 +1,4 @@
+/* app/static/css/chat.css */
 /* 聊天区主体滚动 */
 .chat {
     overflow-y: scroll;
@@ -111,7 +112,6 @@
     position: relative;
     border: 1px solid var(--border);
     min-width: 0;
-    position: relative; /* (新) 为按钮定位 */
 }
 .msg.user .bubble-inner {
     background: var(--bubble-user);
@@ -185,7 +185,7 @@
     height: 14px;
 }
 
-/* (新) Thinking 块样式 */
+/* (新) Req 1: Thinking 块样式 (使用 <details>) */
 .thinking-block {
     border: 1px solid var(--border);
     border-radius: var(--radius-m);
@@ -193,7 +193,7 @@
     margin-bottom: 12px;
     overflow: hidden;
 }
-.thinking-header {
+.thinking-block summary {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -202,18 +202,27 @@
     font-weight: 600;
     color: var(--muted);
     background: color-mix(in srgb, var(--panel) 70%, var(--bg));
-    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
 }
-.thinking-header svg {
+.thinking-block summary:hover {
+    background: color-mix(in srgb, var(--panel) 80%, var(--bg));
+}
+.thinking-block summary svg {
     width: 14px;
     height: 14px;
     color: var(--accent);
 }
+/* 隐藏 <details> 默认的三角箭头 */
+.thinking-block summary::-webkit-details-marker { display: none; }
+.thinking-block summary::marker { display: none; }
+
 .thinking-content {
     padding: 4px 12px 12px;
     font-size: 0.9rem;
     color: var(--text);
     white-space: pre-wrap; /* 允许换行 */
+    border-top: 1px solid var(--border); /* 打开时显示分割线 */
 }
 .thinking-content .md-body {
     line-height: 1.6;
@@ -260,6 +269,22 @@
     animation: geminiFadeIn 0.5s ease forwards;
     /* 让浏览器处理换行 */
     white-space: pre-wrap;
+}
+
+/* (新) Req 5: 溯源引用样式 */
+.citation {
+    display: inline-block;
+    font-size: 0.75rem;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin: 0 2px;
+    vertical-align: super; /* 角标 */
+    text-decoration: none;
+    user-select: none;
 }
 
 /* Markdown 表格样式 */

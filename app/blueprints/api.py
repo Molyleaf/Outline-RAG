@@ -5,22 +5,26 @@ import time
 import uuid
 from operator import itemgetter
 from typing import List, Dict, Any
+import re
 
 import config
 import rag
 from database import AsyncSessionLocal, redis_client
+from llm_services import llm
+from outline_client import verify_outline_signature
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableParallel
-from llm_services import llm
-from outline_client import verify_outline_signature
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
+# (新) Req 3: 导入 MultiQueryRetriever
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
+
 
 logger = logging.getLogger(__name__)
 api_router = APIRouter()
@@ -37,6 +41,37 @@ async def get_db_session():
     """FastAPI 依赖项：获取异步数据库 session。"""
     async with AsyncSessionLocal() as session:
         yield session
+
+# --- (新) Req 5: 溯源格式化函数 ---
+def _format_docs_with_metadata(docs: List[Document]) -> str:
+    """
+    将文档列表格式化为带元数据（标题、来源URL）的字符串，用于 RAG 提示词。
+    """
+    formatted_docs = []
+    base_url = config.OUTLINE_API_URL.replace("/api", "")
+
+    for i, doc in enumerate(docs):
+        title = doc.metadata.get("title", "Untitled")
+
+        # rag.py 中已将 'url' (相对路径) 存入元数据
+        url = doc.metadata.get("url")
+
+        doc_str = f"--- 参考资料 [{i+1}] ---\n"
+        doc_str += f"标题: {title}\n"
+
+        if url:
+            # 构造可访问的完整 URL
+            if url.startswith('/'):
+                url = f"{base_url}{url}"
+            doc_str += f"来源: {url}\n"
+
+        doc_str += f"内容: {doc.page_content}\n"
+        formatted_docs.append(doc_str)
+
+    if not formatted_docs:
+        return "未找到相关参考资料。"
+
+    return "\n\n".join(formatted_docs)
 
 # --- utils ---
 def allowed_file(filename):
@@ -128,7 +163,6 @@ async def api_create_conversation(
             )
         return JSONResponse({"id": guid, "title": title, "url": f"/chat/{guid}"})
     except Exception as e:
-        # 捕捉外键约束失败
         if "ForeignKeyViolation" in str(e):
             logger.error(f"ForeignKeyViolation 为 user {uid} 创建对话失败。用户可能不在 users 表中。", exc_info=True)
             raise HTTPException(status_code=403, detail="用户认证数据不同步，请尝试重新登录。")
@@ -213,8 +247,6 @@ async def api_messages(
     return Response(content=response_json, media_type='application/json')
 
 
-# --- RAG 链定义 (移至 /api/ask 内部以确保组件已初始化) ---
-
 @api_router.post("/api/ask")
 async def api_ask(
         body: AskRequest,
@@ -241,38 +273,51 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 未就绪"}, status_code=503)
 
-    # --- RAG 链定义 (使用异步) ---
+    # --- LCEL 链定义 (Req 1, 3, 5, 6) ---
+
+    llm_with_options = llm.bind(model=model, temperature=temperature, top_p=top_p)
+    # 用于分类器和重写的轻量级 LLM
+    classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
+
+
+    # 1. 查询重写链 (不变)
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
         return "\n".join([f"{m.type}: {m.content}" for m in messages])
 
-    def _format_docs(docs: List[Document]) -> str:
-        return "\n\n---\n\n".join([doc.page_content for doc in docs])
-
-    # 1. 定义查询重写链 (异步)
     rewrite_chain = (
             RunnableParallel({
                 "history": lambda x: _format_history_str(x["chat_history"]),
                 "query": lambda x: x["input"]
             })
             | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-            | llm.bind(temperature=0.0, top_p=1.0)
+            | classifier_llm
             | StrOutputParser()
     )
 
+    # 2. (新 Req 3) MultiQueryRetriever
+    # 我们遵循用户的示例，在 MultiQuery 中使用完整的 compression_retriever
+    # 这会更慢，但可能会产生更好的（经过重排的）合并结果
+    multi_query_retriever = MultiQueryRetriever.from_llm(
+        retriever=compression_retriever,
+        llm=classifier_llm
+    )
 
-    # 2. 定义最终 RAG 链 (异步)
-    rag_chain = (
+    # 3. 核心 RAG 链 (Req 3, 5)
+    # (此链不包括最终的 LLM 调用，以便路由可以重用它)
+    rag_chain_pre_llm = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x["chat_history"]
             })
+            # (新 Req 3) 使用 MultiQueryRetriever
+            # (新 Req 5) 将 docs 对象传递下去
             | RunnablePassthrough.assign(
-        context=(
-                itemgetter("rewritten_query")
-                | compression_retriever
-                | RunnableLambda[List[Document], str](_format_docs)
-        )
+        docs=itemgetter("rewritten_query") | multi_query_retriever
+    )
+            # (新 Req 5) 使用带元数据的格式化
+            | RunnablePassthrough.assign(
+        context=lambda x: _format_docs_with_metadata(x["docs"])
     )
             | RunnableParallel({
         "chat_history": lambda x: x["chat_history"],
@@ -282,10 +327,61 @@ async def api_ask(
             | ChatPromptTemplate.from_messages([
         ("system", config.SYSTEM_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
+        # (新 Req 5) config.py 中的此模板现在要求溯源
         ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
     ])
-            | llm
+    )
+
+    # 将 RAG 链与 LLM 结合
+    rag_chain = rag_chain_pre_llm | llm_with_options
+
+    # 4. (新 Req 6) 智能路由
+    # 输入: {"input": str, "chat_history": list}
+
+    # 4a. 分类器
+    classifier_prompt = PromptTemplate.from_template(
+        """判断用户问题的类型。只回答 'rag' (需要知识库)、'greeting' (问候) 或 'other' (其他)。
+问题: {input}
+类型:"""
+    )
+    classifier_chain = (
+            classifier_prompt
+            | classifier_llm
             | StrOutputParser()
+    )
+
+    # 4b. 问候链
+    greeting_chain = (
+            PromptTemplate.from_template("你是一个友好的助手。请回复用户的问候。")
+            | llm_with_options
+    )
+
+    # 4c. 通用链
+    general_chain = (
+            ChatPromptTemplate.from_messages([
+                ("system", config.SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("user", "{input}")
+            ])
+            | llm_with_options
+    )
+
+    # 4d. 组合
+    # 此链将 "classification" 添加到输入字典中
+    chain_with_classification = RunnablePassthrough.assign(
+        classification=classifier_chain
+    )
+
+    # 4e. 最终路由
+    # RunnableBranch 将根据 "classification" 字段选择一个链
+    # 重要的是：所有分支 (greeting, rag, general) 都必须接受相同的输入
+    # (即 {"input": ..., "chat_history": ..., "classification": ...})
+    # 并且所有分支的 *输出* 必须是相同的类型 (AIMessageChunk)
+
+    final_chain_streaming = chain_with_classification | RunnableBranch(
+        (lambda x: "greeting" in x["classification"].lower(), greeting_chain),
+        (lambda x: "rag" in x["classification"].lower(), rag_chain),
+        general_chain  # 默认
     )
     # --- RAG 链定义结束 ---
 
@@ -331,65 +427,83 @@ async def api_ask(
         if r["role"] == "user":
             chat_history.append(HumanMessage(content=r["content"]))
         elif r["role"] == "assistant":
-            chat_history.append(AIMessage(content=r["content"]))
+            # (新 Req 1) 适配 app.js 的 'appendMsg' 格式
+            content = r["content"]
+            thinking_match = re.search(r"\n(.*?)\n\n\n(.*)", content, re.DOTALL)
+            if thinking_match:
+                # 只传递内容部分给历史
+                chat_history.append(AIMessage(content=thinking_match.group(2)))
+            else:
+                chat_history.append(AIMessage(content=content))
 
-    llm_with_options = llm.bind(model=model, temperature=temperature, top_p=top_p)
-
-    final_chain_streaming = (
-            rag_chain.steps[0]
-            | rag_chain.steps[1]
-            | rag_chain.steps[2]
-            | rag_chain.steps[3]
-            | llm_with_options
-        # | rag_chain.steps[5] # 移除了 StrOutputParser
-    )
 
     async def generate():
         yield ": ping\n\n"
         full_response = ""
         model_name = model
         thinking_response = ""
+        thinking_buffer = "" # 用于不完整的 'thinking' tool_call JSON
 
         try:
+            # (新 Req 6) 调用最终的路由链
             stream = final_chain_streaming.astream({
                 "input": query,
                 "chat_history": chat_history
             })
 
+            # 流的输出现在是 AIMessageChunk
             async for delta_chunk in stream:
                 delta_content = delta_chunk.content or ""
                 delta_thinking = ""
 
+                # (新 Req 1) 提取 'thinking' (来自 additional_kwargs)
                 if delta_chunk.additional_kwargs and "thinking" in delta_chunk.additional_kwargs:
                     delta_thinking = delta_chunk.additional_kwargs["thinking"] or ""
-                    thinking_response = delta_thinking
+                    if delta_thinking:
+                        thinking_response = delta_thinking # 覆盖式更新
 
+                # (新 Req 1) 提取 'thinking' (来自 tool_call_chunks)
                 if delta_chunk.tool_call_chunks:
                     try:
                         for tc in delta_chunk.tool_call_chunks:
                             if tc.get("name") == "thinking" and tc.get("args"):
-                                args_json = json.loads(tc["args"])
-                                delta_thinking = args_json.get("thought", "")
-                                if delta_thinking:
-                                    thinking_response = delta_thinking
+                                # 累积 args 字符串
+                                thinking_buffer += tc["args"]
+                                try:
+                                    # 尝试解析累积的 buffer
+                                    args_json = json.loads(thinking_buffer)
+                                    delta_thinking_tool = args_json.get("thought", "")
+                                    if delta_thinking_tool:
+                                        thinking_response = delta_thinking_tool # 覆盖式更新
+                                        delta_thinking = delta_thinking_tool
+                                    thinking_buffer = "" # 解析成功，清空 buffer
+                                except json.JSONDecodeError:
+                                    # JSON 不完整，继续累积
+                                    pass
                     except Exception:
-                        pass
+                        pass # 忽略 tool_call 解析错误
 
-                if delta_content or delta_thinking:
+                if delta_content or (delta_thinking and delta_thinking != thinking_response):
                     full_response += delta_content
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
             yield "data: [DONE]\n\n"
 
         except Exception as e:
-            logger.error(f"[{conv_id}] LCEL RAG 链执行失败 (async): {e}", exc_info=True)
+            logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
         if full_response:
             async with AsyncSessionLocal.begin() as db_session:
-                full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
+
+                # (新 Req 1) 使用 app.js 兼容的格式保存
+                if thinking_response:
+                    full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
+                else:
+                    full_content_with_thinking = full_response
+
                 await db_session.execute(
                     text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
                     {"cid": conv_id, "uid": user["id"], "c": full_content_with_thinking, "m": model_name, "t": temperature, "p": top_p}
@@ -468,7 +582,6 @@ async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)):
         processed_count = success_count + skipped_count
 
         if total_queued > 0 and processed_count >= total_queued:
-            # ... (消息逻辑不变)
             final_message = "刷新完成。"
             status = {"status": "success", "message": final_message}
 
