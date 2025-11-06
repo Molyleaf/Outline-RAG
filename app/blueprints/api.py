@@ -1,5 +1,5 @@
 # app/blueprints/api.py
-import asyncio
+import asyncio # 确保 asyncio 已导入
 import json
 import logging
 import time
@@ -437,13 +437,13 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
-    # --- (新) 修复 1 & 3: 重写 generate 函数 ---
+    # --- (修复 1 & 2) 异步 generate 函数 ---
     async def generate():
         yield ": ping\n\n"  # 初始 ping
         full_response = ""
         model_name = model
         thinking_response = ""  # 累积的思维链状态
-        thinking_buffer = ""    # 用于不完整的 tool_call JSON
+        # (移除 thinking_buffer，不再需要)
 
         llm_task = None
         ping_task = None
@@ -484,39 +484,22 @@ async def api_ask(
                             # --- LLM 块到达 ---
                             delta_chunk = task.result()
 
-                            # (修复 1) 检查思维链和内容的逻辑
                             delta_content = delta_chunk.content or ""
                             delta_thinking = ""  # 本次要发送的 delta
                             new_thinking_detected = False
 
-                            # 检查 additional_kwargs
-                            if delta_chunk.additional_kwargs and "thinking" in delta_chunk.additional_kwargs:
-                                new_thought = delta_chunk.additional_kwargs["thinking"] or ""
+                            # (修复 1) 检查 'reasoning_content'
+                            if delta_chunk.additional_kwargs:
+                                # 使用 .get() 避免 KeyError
+                                new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
                                 if new_thought and new_thought != thinking_response:
                                     thinking_response = new_thought  # 更新累积状态
                                     delta_thinking = new_thought     # 设置本次 delta
                                     new_thinking_detected = True
 
-                            # 检查 tool_call_chunks
-                            if delta_chunk.tool_call_chunks:
-                                try:
-                                    for tc in delta_chunk.tool_call_chunks:
-                                        if tc.get("name") == "thinking" and tc.get("args"):
-                                            thinking_buffer += tc["args"]
-                                            try:
-                                                args_json = json.loads(thinking_buffer)
-                                                new_thought_tool = args_json.get("thought", "")
-                                                if new_thought_tool and new_thought_tool != thinking_response:
-                                                    thinking_response = new_thought_tool
-                                                    delta_thinking = new_thought_tool
-                                                    new_thinking_detected = True
-                                                thinking_buffer = ""
-                                            except json.JSONDecodeError:
-                                                pass  # JSON 不完整，继续累积
-                                except Exception:
-                                    pass  # 忽略 tool_call 解析错误
+                            # (移除 tool_call_chunks 检查，它不适用)
 
-                            # (修复 1) 仅在有新内容或新思维链时 yield
+                            # 仅在有新内容或新思维链时 yield
                             if delta_content or new_thinking_detected:
                                 full_response += delta_content
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
@@ -525,8 +508,9 @@ async def api_ask(
                             llm_task = asyncio.create_task(llm_iter.__anext__())
                             pending.add(llm_task)
 
-                        except StopAsyncIteration:
-                            pass  # LLM 流正常结束
+                        # (修复 2) 捕获 BaseException
+                        except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
+                            pass  # LLM 流正常结束或被取消
                         except Exception as e:
                             # LLM 流发生错误
                             logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
@@ -540,12 +524,12 @@ async def api_ask(
                         try:
                             # --- Ping 块到达 ---
                             _ = task.result()  # 应该等于 "ping"
-                            yield ": ping\n\n"  # (修复 3) 发送 keep-alive
+                            yield ": ping\n\n"  # 发送 keep-alive
                             # 重新调度 Ping 任务
                             ping_task = asyncio.create_task(ping_iter.__anext__())
                             pending.add(ping_task)
-                        except StopAsyncIteration:
-                            pass  # 不应发生
+                        except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
+                            pass # Ping 停止
                         except Exception as e:
                             logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
@@ -563,6 +547,7 @@ async def api_ask(
             if ping_task and not ping_task.done():
                 ping_task.cancel()
 
+        # (修复 2) 此块现在应该可以访问了
         if full_response:
             async with AsyncSessionLocal.begin() as db_session:
                 # (新 Req 1) 使用 app.js 兼容的格式保存
