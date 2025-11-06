@@ -19,7 +19,8 @@ logger.info(f"Using vector dimension: {VECTOR_DIM}")
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
+
 parsed = urlparse(config.DATABASE_URL)
 db_url = config.DATABASE_URL
 

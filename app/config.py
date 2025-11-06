@@ -3,6 +3,7 @@
 import os
 
 # --- 基本配置 ---
+APP_NAME = os.getenv("APP_NAME", "Pigeon Chat")
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

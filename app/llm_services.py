@@ -1,17 +1,17 @@
 # app/llm_services.py
+import hashlib
 import logging
 import urllib.parse
 from typing import Sequence, Any
-import hashlib
 
-import redis
 import httpx
+import redis
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
-from langchain_community.storage import RedisStore
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
-from langchain_core.documents import Document
+from langchain_community.storage import RedisStore
 from langchain_core.documents import BaseDocumentCompressor
+from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 import config
