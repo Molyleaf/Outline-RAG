@@ -10,20 +10,20 @@ from langchain_classic.retrievers.document_compressors.base import DocumentCompr
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from langchain_postgres import PGVectorStore
+from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
+from langchain_postgres.v2.engine import PGEngine
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-# (保持不变) 我们需要从 database 导入 async_engine (现在是 psycopg 驱动)
 from database import async_engine, AsyncSessionLocal, redis_client
 from llm_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc
 
 logger = logging.getLogger(__name__)
 
-# --- 1. 延迟初始化 LangChain 组件 ---
-vector_store: Optional[PGVectorStore] = None
+# 延迟初始化 LangChain 组件
+vector_store: Optional[AsyncPGVectorStore] = None
 base_retriever: Optional[BaseRetriever] = None
 compression_retriever: Optional[ContextualCompressionRetriever] = None
 
@@ -40,30 +40,37 @@ async def initialize_rag_components():
         if vector_store:
             return
 
-        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v0.0.16)...")
+        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v2)...")
 
         if not async_engine:
             raise ValueError("AsyncEngine from database.py is not available")
 
-        # --- 1b. 初始化 PGVector 存储 ---
+        # 创建 v2 API 需要的 PGEngine 包装器
+        # async_engine 是原始的 SQLAlchemy 引擎
+        # v2 的 create 方法需要 PGEngine 包装器
+        pg_engine_wrapper = PGEngine.from_engine(async_engine)
+
+        # 初始化 PGVector 存储
         try:
-            vector_store = await PGVectorStore.create(
-                engine=async_engine,
+            # 使用 AsyncPGVectorStore.create (v2 API)
+            # 传入 PGEngine 包装器
+            vector_store = await AsyncPGVectorStore.create(
+                engine=pg_engine_wrapper,
                 embedding_service=embeddings_model,
                 table_name="langchain_pg_embedding",
             )
-            logger.info("PGVectorStore initialized (sync constructor v0.0.16 with psycopg).")
+            logger.info("AsyncPGVectorStore (v2) initialized.")
         except Exception as e:
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
-        # --- 1c. 初始化基础检索器 ---
+        # 初始化基础检索器
         base_retriever = vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": config.TOP_K}
         )
 
-        # --- 1d. 初始化压缩/重排检索器 ---
+        # 初始化压缩/重排检索器
         pipeline_compressor = DocumentCompressorPipeline(
             transformers=[
                 EmbeddingsRedundantFilter(embeddings=embeddings_model),
@@ -79,7 +86,7 @@ async def initialize_rag_components():
         logger.info("RAG components initialization complete.")
 
 
-# 1e. 初始化文本分割器 (不变)
+# 初始化文本分割器
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -87,7 +94,7 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
-# --- 2. 数据库同步任务 (不变) ---
+# 数据库同步任务
 
 async def process_doc_batch_task(doc_ids: list):
     """
@@ -142,20 +149,16 @@ async def process_doc_batch_task(doc_ids: list):
 
             ids_to_delete = []
             try:
-                # 你的 SQL 逻辑现在与 PGVectorStore 的初始化完全匹配
+                # v2 API 不使用 collection_id，直接按 cmetadata 过滤
                 async with AsyncSessionLocal.begin() as session:
-                    coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
-                    coll_id = coll_id_row[0] if coll_id_row else None
-
-                    if coll_id:
-                        ids_to_delete_rows = (await session.execute(
-                            text("""
-                                 SELECT uuid FROM langchain_pg_embedding
-                                 WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') = ANY(:source_ids)
-                                 """),
-                            {"coll_id": coll_id, "source_ids": list(successful_ids)}
-                        )).fetchall()
-                        ids_to_delete = [row[0] for row in ids_to_delete_rows]
+                    ids_to_delete_rows = (await session.execute(
+                        text("""
+                             SELECT langchain_id FROM langchain_pg_embedding
+                             WHERE (cmetadata ->> 'source_id') = ANY(:source_ids)
+                             """),
+                        {"source_ids": list(successful_ids)}
+                    )).fetchall()
+                    ids_to_delete = [row[0] for row in ids_to_delete_rows]
             except Exception as e:
                 logger.error(f"查询旧分块 UUIDs 时出错 (async): {e}，将跳过删除，尝试直接 Upsert。")
                 ids_to_delete = []
@@ -163,11 +166,13 @@ async def process_doc_batch_task(doc_ids: list):
             if ids_to_delete:
                 logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
                 try:
+                    # v2 API (async_vectorstore.py) 的 adelete 使用 langchain_id
                     await vector_store.adelete(ids=ids_to_delete)
                 except Exception as e:
                     logger.error(f"调用 vector_store.adelete (async) 删除 chunks: {ids_to_delete} 时失败: {e}。继续尝试添加...")
 
             try:
+                # v2 API (async_vectorstore.py) 的 aadd_documents
                 await vector_store.aadd_documents(chunks)
             except Exception as e:
                 logger.error(f"调用 vector_store.aadd_documents (async) 添加 {len(chunks)} 个 chunks 时失败: {e}。")
@@ -200,25 +205,18 @@ async def refresh_all_task():
 
         local_docs_map = {}
         try:
-            # 你的 SQL 逻辑现在与 PGVectorStore 的初始化完全匹配
+            # v2 API 不使用 collection_id，直接查询
             async with AsyncSessionLocal.begin() as session:
-                coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
-                coll_id = coll_id_row[0] if coll_id_row else None
-
-                if coll_id:
-                    local_docs_raw = (await session.execute(
-                        text("""
-                             SELECT DISTINCT ON ((cmetadata ->> 'source_id'))
-                                 (cmetadata ->> 'source_id') as id,
-                                 (cmetadata ->> 'outline_updated_at_str') as outline_updated_at_str
-                             FROM langchain_pg_embedding
-                             WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') IS NOT NULL
-                             """),
-                        {"coll_id": coll_id}
-                    )).mappings().all()
-                    local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('id') and doc.get('outline_updated_at_str')}
-                else:
-                    logger.info("未找到 PGVectorStore 集合，假定本地为空。")
+                local_docs_raw = (await session.execute(
+                    text("""
+                         SELECT DISTINCT ON ((cmetadata ->> 'source_id'))
+                             (cmetadata ->> 'source_id') as id,
+                             (cmetadata ->> 'outline_updated_at_str') as outline_updated_at_str
+                         FROM langchain_pg_embedding
+                         WHERE (cmetadata ->> 'source_id') IS NOT NULL
+                         """)
+                )).mappings().all()
+                local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('id') and doc.get('outline_updated_at_str')}
         except Exception as e:
             logger.error(f"从 PGVectorStore 读取元数据失败 (async): {e}")
 
@@ -285,20 +283,14 @@ async def delete_doc(doc_id):
 
     ids_to_delete = []
     try:
+        # v2 API 不使用 collection_id，直接按 cmetadata 过滤
         async with AsyncSessionLocal.begin() as session:
-            coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
-            if not coll_id_row:
-                logger.warning(f"删除 {doc_id} 失败：未找到集合。")
-                return
-
-            coll_id = coll_id_row[0]
-
             ids_to_delete_rows = (await session.execute(
                 text("""
-                     SELECT uuid FROM langchain_pg_embedding
-                     WHERE collection_id = :coll_id AND (cmetadata ->> 'source_id') = :source_id
+                     SELECT langchain_id FROM langchain_pg_embedding
+                     WHERE (cmetadata ->> 'source_id') = :source_id
                      """),
-                {"coll_id": coll_id, "source_id": doc_id}
+                {"source_id": doc_id}
             )).fetchall()
             ids_to_delete = [row[0] for row in ids_to_delete_rows]
     except Exception as e:
@@ -307,6 +299,7 @@ async def delete_doc(doc_id):
 
     if ids_to_delete:
         try:
+            # v2 API (async_vectorstore.py) 的 adelete 使用 langchain_id
             await vector_store.adelete(ids=ids_to_delete)
             logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
         except Exception as e:

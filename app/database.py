@@ -11,14 +11,15 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# --- 从环境变量读取向量维度 ---
+
+# 从环境变量读取向量维度
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1536"))
 logger.info(f"Using vector dimension: {VECTOR_DIM}")
 
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-# --- 自动修复缺少主机名的情况，防止 asyncpg 使用 Unix socket ---
+# 自动修复缺少主机名的情况，防止 asyncpg 使用 Unix socket
 from urllib.parse import urlparse, urlunparse
 parsed = urlparse(config.DATABASE_URL)
 if not parsed.hostname:
@@ -28,29 +29,11 @@ if not parsed.hostname:
 else:
     db_url = config.DATABASE_URL
 
-# --- 创建异步引擎 ---
-async_engine = create_async_engine(db_url, future=True)
+# 异步引擎
+async_engine: AsyncEngine = create_async_engine(db_url, pool_recycle=3600)
+logger.info("AsyncEngine (psycopg3) created.")
 
-# --- 兼容 langchain_postgres (_pool.connect) 的包装 ---
-class EngineCompatProxy(AsyncEngine):
-    """兼容 langchain_postgres v0.0.16 使用 _pool.connect() 的包装"""
-    def __init__(self, engine: AsyncEngine):
-        self._engine = engine
-
-    def __getattr__(self, name):
-        if name == "_pool":
-            class _PoolShim:
-                def __init__(self, engine):
-                    self._engine = engine
-                def connect(self):
-                    return self._engine.connect()
-            return _PoolShim(self._engine)
-        return getattr(self._engine, name)
-
-async_engine = EngineCompatProxy(async_engine)
-logger.info("Wrapped async_engine with EngineCompatProxy for legacy _pool support.")
-
-# --- Session 工厂 ---
+# Session 工厂 (必须在 async_engine 定义之后)
 AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -59,7 +42,7 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
-# --- 异步 Redis 连接 ---
+# 异步 Redis 连接
 redis_client = None
 if config.REDIS_URL:
     try:
@@ -85,7 +68,7 @@ if config.REDIS_URL:
 else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
-# --- 基础表结构 SQL ---
+# 基础表结构 SQL
 PRE_TX_SQL = "CREATE EXTENSION IF NOT EXISTS vector;"
 
 TX_INIT_SQL = f"""
@@ -129,11 +112,12 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 """
 
-# --- PGVector 表结构 ---
+# PGVector 表结构
 PGVECTOR_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
     langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    collection_id UUID,
+    -- 移除 collection_id，v2 API (async_vectorstore.py) 不使用它
+    -- collection_id UUID, 
     content TEXT,
     embedding vector({VECTOR_DIM}),
     cmetadata JSONB,
@@ -141,7 +125,7 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
 );
 """
 
-# --- 异步数据库初始化 ---
+# 异步数据库初始化
 async def db_init():
     """异步初始化数据库"""
     async with async_engine.connect() as conn_lock:
