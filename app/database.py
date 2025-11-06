@@ -19,15 +19,9 @@ logger.info(f"Using vector dimension: {VECTOR_DIM}")
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-# 自动修复缺少主机名的情况，防止 asyncpg 使用 Unix socket
 from urllib.parse import urlparse, urlunparse
 parsed = urlparse(config.DATABASE_URL)
-if not parsed.hostname:
-    logger.warning("DATABASE_URL 缺少主机名，已自动补全为 localhost")
-    fixed_netloc = f"{parsed.username}:{parsed.password}@localhost:{parsed.port or 5432}"
-    db_url = urlunparse(parsed._replace(netloc=fixed_netloc))
-else:
-    db_url = config.DATABASE_URL
+db_url = config.DATABASE_URL
 
 # 异步引擎
 async_engine: AsyncEngine = create_async_engine(db_url, pool_recycle=3600)
