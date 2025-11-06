@@ -110,8 +110,6 @@ CREATE TABLE IF NOT EXISTS attachments (
 PGVECTOR_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
     langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- 移除 collection_id，v2 API (async_vectorstore.py) 不使用它
-    -- collection_id UUID, 
     content TEXT,
     embedding vector({VECTOR_DIM}),
     cmetadata JSONB,

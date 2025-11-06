@@ -35,15 +35,6 @@ assets.register('js_all', js_bundle)
 assets.register('css_all', css_bundle)
 # --- Assets 配置结束 ---
 
-# --- (已移除) archive_old_messages_task ---
-# --- (已移除) _startup_self_check ---
-# --- (已移除) register_blueprints ---
-# --- (已移除) healthz ---
-# --- (已移除) task_worker ---
-# --- (已移除) webhook_watcher ---
-# --- (已移除) _init_runtime_app ---
-
-
 # --- 4. 命令行执行逻辑 ---
 if __name__ == "__main__":
     # (此逻辑仅用于本地开发 `python app/app.py`)
@@ -67,7 +58,7 @@ if __name__ == "__main__":
 else:
     # Gunicorn 或 'flask' 命令导入时
 
-    # (不变) 检查我们是否在 'flask assets' 命令上下文中
+    # 检查我们是否在 'flask assets' 命令上下文中
     is_assets_command = False
     if 'flask' in sys.argv[0] and len(sys.argv) > 1 and sys.argv[1] == 'assets':
         is_assets_command = True
@@ -76,7 +67,7 @@ else:
     if is_assets_command:
         # 'flask assets build' 命令也需要一个初始化的 assets 环境
         app.config['DEBUG'] = False # 确保 build 在 prod 模式下运行
-        assets.init_app(app) # <--- 在此为 build 命令初始化
+        assets.init_app(app)
     else:
         # 如果被 Gunicorn (或其他) 导入，则什么也不做
         # Gunicorn 应该启动 main:app

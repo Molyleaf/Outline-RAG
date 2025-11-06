@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI 应用启动...")
 
     # --- Startup ---
-    # 1. 配置检查 (不变)
+    # 1. 配置检查
     if not config.SECRET_KEY:
         logger.critical("SECRET_KEY 未设置，拒绝启动。")
         sys.exit(1)
@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
         logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
         sys.exit(1)
 
-    # 2. 创建目录 (不变)
+    # 2. 创建目录
     os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
 
     # 3. 初始化数据库
@@ -115,8 +115,7 @@ async def lifespan(app: FastAPI):
         await db_init()
         logger.info(f"Worker (pid: {os.getpid()}) db_init() 完成。")
 
-        # 4. 启动后台任务 (原逻辑)
-        # (此逻辑在 'try' 块内，'if/else' 块之外，保持不变)
+        # 4. 启动后台任务
         if redis_client:
             asyncio.create_task(task_worker())
             asyncio.create_task(webhook_watcher())
@@ -129,7 +128,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # --- Shutdown --- (不变)
+    # --- Shutdown ---
     logger.info("FastAPI 应用关闭...")
     if async_engine:
         await async_engine.dispose()
