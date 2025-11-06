@@ -3,45 +3,36 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-# (*** 新增 ***) 导入类型提示
 from typing import Optional
 
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
-# (*** 新增 ***) 导入 BaseRetriever 类型
 from langchain_core.retrievers import BaseRetriever
+# (修复 1) 使用 v0.0.16 兼容的正确导入
 from langchain_postgres import PGVectorStore
+from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-# (*** 修复 2 ***) 导入 db_url
-from database import async_engine, AsyncSessionLocal, redis_client, db_url
+# (保持不变) 我们需要从 database 导入 async_engine (现在是 psycopg 驱动)
+from database import async_engine, AsyncSessionLocal, redis_client
 from llm_services import embeddings_model, reranker
-# (ASYNC REFACTOR)
 from outline_client import outline_list_docs, outline_get_doc
 
 logger = logging.getLogger(__name__)
 
-# --- (*** 修改 ***) ---
-# 1. 延迟初始化 LangChain 组件
-# 将所有需要I/O的组件在全局设为 None
-# 它们将在 initialize_rag_components() 中被真正初始化
-
-# 删除了此文件中的 async_engine 定义，我们将使用 database.py 中的
+# --- 1. 延迟初始化 LangChain 组件 ---
 vector_store: Optional[PGVectorStore] = None
 base_retriever: Optional[BaseRetriever] = None
 compression_retriever: Optional[ContextualCompressionRetriever] = None
 
-# (*** 新增 ***)
 # 使用 asyncio.Lock
 _rag_lock = asyncio.Lock()
 
 
-# (*** 新增 ***)
-# 转换为 async def
 async def initialize_rag_components():
     """
     延迟初始化 RAG 组件。
@@ -51,29 +42,30 @@ async def initialize_rag_components():
     if vector_store:
         return
 
-    # (ASYNC REFACTOR)
     async with _rag_lock:
         if vector_store:
             return
 
-        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore)...")
+        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v0.0.16)...")
 
-        # --- 1a. (已移除) AsyncEngine 现在从 database.py 导入
         if not async_engine:
             raise ValueError("AsyncEngine from database.py is not available")
 
         # --- 1b. 初始化 PGVector 存储 ---
-        # (*** 这是对 Error 2 的核心修复 ***)
         try:
-            # (*** 修复 2 ***) 使用 db_url 而不是 async_engine
-            vector_store = await PGVectorStore.create(
-                db_url,
-                table_name="outline_rag_collection",
+            vs_instance = await AsyncPGVectorStore.create(
+                engine=async_engine,
                 embedding_service=embeddings_model,
+                table_name="langchain_pg_embedding",
             )
-            logger.info("PGVectorStore initialized (async).")
+            vector_store = PGVectorStore(
+                engine=async_engine,
+                key="outline_rag_collection",
+                vs=vs_instance,
+            )
+            logger.info("PGVectorStore initialized (sync constructor v0.0.16 with psycopg).")
         except Exception as e:
-            logger.critical(f"Failed to initialize PGVectorStore (async): {e}", exc_info=True)
+            logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
         # --- 1c. 初始化基础检索器 ---
@@ -106,21 +98,17 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", " ", ""],
 )
 
-# --- 2. 数据库同步任务 ---
+# --- 2. 数据库同步任务 (不变) ---
 
 async def process_doc_batch_task(doc_ids: list):
     """
     异步处理文档批次
     """
-    # (ASYNC REFACTOR)
     await initialize_rag_components()
 
-    # (*** 新增 ***) 修复 Linter 警告
-    # 添加此断言以向静态分析器证明 vector_store 不是 None
     if not vector_store:
         logger.critical("Vector store 未在 process_doc_batch_task 中初始化！")
         raise RuntimeError("RAG components (vector_store) not initialized")
-    # (*** 修复结束 ***)
 
     if not doc_ids:
         return
@@ -130,7 +118,6 @@ async def process_doc_batch_task(doc_ids: list):
     skipped_ids = set()
 
     for doc_id in doc_ids:
-        # (ASYNC REFACTOR)
         info = await outline_get_doc(doc_id)
         if not info:
             logger.warning(f"无法获取文档 {doc_id} 的内容，跳过。")
@@ -166,7 +153,7 @@ async def process_doc_batch_task(doc_ids: list):
 
             ids_to_delete = []
             try:
-                # (ASYNC REFACTOR)
+                # 你的 SQL 逻辑现在与 PGVectorStore 的初始化完全匹配
                 async with AsyncSessionLocal.begin() as session:
                     coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
                     coll_id = coll_id_row[0] if coll_id_row else None
@@ -187,15 +174,11 @@ async def process_doc_batch_task(doc_ids: list):
             if ids_to_delete:
                 logger.info(f"正在从 PGVectorStore 删除 {len(ids_to_delete)} 个与 {len(successful_ids)} 篇文档关联的旧分块...")
                 try:
-                    # (ASYNC REFACTOR)
-                    # Linter 现在知道 vector_store 不是 None
                     await vector_store.adelete(ids=ids_to_delete)
                 except Exception as e:
                     logger.error(f"调用 vector_store.adelete (async) 删除 chunks: {ids_to_delete} 时失败: {e}。继续尝试添加...")
 
             try:
-                # (ASYNC REFACTOR)
-                # Linter 现在知道 vector_store 不是 None
                 await vector_store.aadd_documents(chunks)
             except Exception as e:
                 logger.error(f"调用 vector_store.aadd_documents (async) 添加 {len(chunks)} 个 chunks 时失败: {e}。")
@@ -203,7 +186,6 @@ async def process_doc_batch_task(doc_ids: list):
 
     if redis_client:
         try:
-            # (ASYNC REFACTOR)
             p = redis_client.pipeline()
             if successful_ids:
                 p.incrby("refresh:success_count", len(successful_ids))
@@ -218,11 +200,9 @@ async def process_doc_batch_task(doc_ids: list):
 
 async def refresh_all_task():
     """异步优雅刷新任务"""
-    # (ASYNC REFACTOR)
     await initialize_rag_components()
 
     try:
-        # (ASYNC REFACTOR)
         remote_docs_raw = await outline_list_docs()
         if remote_docs_raw is None:
             raise ConnectionError("无法从 Outline API 获取文档列表。")
@@ -231,7 +211,7 @@ async def refresh_all_task():
 
         local_docs_map = {}
         try:
-            # (ASYNC REFACTOR)
+            # 你的 SQL 逻辑现在与 PGVectorStore 的初始化完全匹配
             async with AsyncSessionLocal.begin() as session:
                 coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
                 coll_id = coll_id_row[0] if coll_id_row else None
@@ -264,7 +244,6 @@ async def refresh_all_task():
         if to_delete_ids:
             logger.warning(f"发现 {len(to_delete_ids)} 篇在本地存在但在远程不存在的文档，将被删除。")
             for doc_id in to_delete_ids:
-                # (ASYNC REFACTOR)
                 await delete_doc(doc_id)
 
         docs_to_process_ids = to_add_ids + to_update_ids
@@ -272,13 +251,11 @@ async def refresh_all_task():
             final_message = f"刷新完成。删除了 {len(to_delete_ids)} 篇陈旧文档。" if to_delete_ids else "刷新完成，数据已是最新。"
             if redis_client:
                 status = {"status": "success", "message": final_message}
-                # (ASYNC REFACTOR)
                 await redis_client.set("refresh:status", json.dumps(status), ex=300)
             return
 
         if redis_client:
             try:
-                # (ASYNC REFACTOR)
                 p = redis_client.pipeline()
                 p.set("refresh:total_queued", len(docs_to_process_ids))
                 p.set("refresh:success_count", 0)
@@ -296,7 +273,6 @@ async def refresh_all_task():
         for i in range(0, len(docs_to_process_ids), batch_size):
             batch = docs_to_process_ids[i:i+batch_size]
             task = {"task": "process_doc_batch", "doc_ids": batch}
-            # (ASYNC REFACTOR)
             await redis_client.lpush("task_queue", json.dumps(task))
 
         logger.info(f"已将 {len(docs_to_process_ids)} 个文档的新增/更新任务加入处理队列。")
@@ -305,28 +281,21 @@ async def refresh_all_task():
         logger.exception("refresh_all_task (async) failed: %s", e)
         if redis_client:
             status = {"status": "error", "message": f"刷新失败: {e}"}
-            # (ASYNC REFACTOR)
             await redis_client.set("refresh:status", json.dumps(status), ex=300)
     finally:
         if redis_client and not (await redis_client.exists("refresh:total_queued")):
-            # (ASYNC REFACTOR)
             await redis_client.delete("refresh:lock")
 
 async def delete_doc(doc_id):
     """从 PGVectorStore 中异步删除文档"""
-    # (ASYNC REFACTOR)
     await initialize_rag_components()
 
-    # (*** 新增 ***) 修复 Linter 警告
-    # 添加此断言以向静态分析器证明 vector_store 不是 None
     if not vector_store:
         logger.critical("Vector store 未在 delete_doc 中初始化！")
         raise RuntimeError("RAG components (vector_store) not initialized")
-    # (*** 修复结束 ***)
 
     ids_to_delete = []
     try:
-        # (ASYNC REFACTOR)
         async with AsyncSessionLocal.begin() as session:
             coll_id_row = (await session.execute(text("SELECT uuid FROM langchain_pg_collection WHERE name = :coll_name"), {"coll_name": "outline_rag_collection"})).first()
             if not coll_id_row:
@@ -349,8 +318,6 @@ async def delete_doc(doc_id):
 
     if ids_to_delete:
         try:
-            # (ASYNC REFACTOR)
-            # Linter 现在知道 vector_store 不是 None
             await vector_store.adelete(ids=ids_to_delete)
             logger.info("已从 PGVectorStore 删除文档: %s (共 %d 个分块)", doc_id, len(ids_to_delete))
         except Exception as e:

@@ -2,9 +2,7 @@
 import logging
 import urllib.parse
 
-# (ASYNC REFACTOR) 导入 redis.asyncio
 import redis.asyncio as redis
-# (*** 修复 ***) 导入 text
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -15,18 +13,22 @@ logger = logging.getLogger(__name__)
 if not config.DATABASE_URL:
     raise SystemExit("缺少 DATABASE_URL 环境变量")
 
-# (ASYNC REFACTOR) 确保 URL 是 asyncpg
-if not config.DATABASE_URL.startswith("postgresql+asyncpg"):
-    logger.warning("DATABASE_URL 不是 postgresql+asyncpg，将尝试替换...")
-    db_url = config.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+# (*** 核心修改: 切换到 Psycopg 3 ***)
+# 确保 URL 是 postgresql+psycopg
+if not config.DATABASE_URL.startswith("postgresql+psycopg"):
+    logger.warning("DATABASE_URL 不是 postgresql+psycopg，将尝试替换...")
+    # 替换掉所有其他可能的驱动
+    db_url = config.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+    db_url = db_url.replace("postgresql+psycopg2://", "postgresql+psycopg://")
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg://")
 else:
     db_url = config.DATABASE_URL
 
-# (ASYNC REFACTOR) 创建异步引擎
+# (*** 核心修改 ***)
+# create_async_engine 现在会查找并使用 'psycopg' (Psycopg 3)
 async_engine = create_async_engine(db_url, future=True)
 
-# (ASYNC REFACTOR) 创建异步 Session
+# (以下代码保持不变)
 AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
@@ -35,7 +37,7 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
-# --- (ASYNC REFACTOR) 异步 Redis 连接 ---
+# --- 异步 Redis 连接 (不变) ---
 redis_client = None
 if config.REDIS_URL:
     try:
@@ -47,7 +49,6 @@ if config.REDIS_URL:
             except (ValueError, IndexError):
                 db_num = 0
 
-        # (ASYNC REFACTOR) 使用 redis.asyncio.Redis
         redis_client = redis.Redis(
             host=parsed_url.hostname,
             port=parsed_url.port,
@@ -55,7 +56,6 @@ if config.REDIS_URL:
             db=db_num,
             decode_responses=True
         )
-        # (ASYNC REFACTOR) ping() 现在是异步的，在 main.py 的 startup 中检查
         logger.info("Redis (asyncio) 客户端已配置。")
     except Exception as e:
         logger.critical("Failed to configure async Redis: %s", e)
@@ -63,11 +63,9 @@ if config.REDIS_URL:
 else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
-# --- (*** 修复 ***) 分离 DDL ---
-# 1. 必须在事务外 (AUTOCOMMIT 模式) 执行的命令
+# --- DDL (不变) ---
 PRE_TX_SQL = "CREATE EXTENSION IF NOT EXISTS vector;"
 
-# 2. 应该在事务内执行的命令
 TX_INIT_SQL = f"""
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -107,17 +105,14 @@ CREATE TABLE IF NOT EXISTS attachments (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
   content TEXT NOT NULL,
-  
-  -- (*** 最终修复 ***) 纠正这里的拼写错误
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 """
 
-# (ASYNC REFACTOR)
+# --- db_init (不变) ---
 async def db_init():
     """异步初始化数据库"""
 
-    # 1. (AUTOCOMMIT) 获取咨询锁
     async with async_engine.connect() as conn_lock:
 
         conn_ac = await conn_lock.execution_options(isolation_level="AUTOCOMMIT")
@@ -125,22 +120,17 @@ async def db_init():
         logger.info("数据库咨询锁已获取。")
 
         try:
-            # 3. (AUTOCOMMIT) 创建扩展
             await conn_ac.execute(text(PRE_TX_SQL))
 
-            # 4. (TRANSACTIONAL) 执行所有 DDL
             async with async_engine.connect() as conn_tx:
                 async with conn_tx.begin():
                     logger.info("数据库事务已开始，正在执行 INIT_SQL...")
 
-                    # 按 ';' 拆分 DDL 字符串，并单独执行每个命令
                     commands = [cmd.strip() for cmd in TX_INIT_SQL.split(';') if cmd.strip()]
 
                     for sql_command in commands:
-                        # 逐个异步执行每个 DDL 命令
                         await conn_tx.execute(text(sql_command))
 
-                    # 异步执行 ANALYZE
                     await conn_tx.execute(text("ANALYZE"))
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")
@@ -150,6 +140,5 @@ async def db_init():
             raise
 
         finally:
-            # 5. (AUTOCOMMIT) 释放锁
             logger.info("释放数据库咨询锁...")
             await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))

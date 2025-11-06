@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
     # 2. 创建目录 (不变)
     os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
 
-    # 3. 初始化数据库 (*** 修改 ***)
+    # 3. 初始化数据库
     try:
         # 移除了 Redis 启动锁。
         # db_init() 内部的 pg_advisory_lock 已足够保证 DDL 安全。
@@ -150,9 +150,8 @@ app = FastAPI(
 # --- 3. 注册中间件 ---
 
 # 3a. 修复代理后的 HTTPS (mixed content)
-# (修复) 使用 Starlette/FastAPI 兼容的 ProxyHeadersMiddleware
+# 使用 Starlette/FastAPI 兼容的 ProxyHeadersMiddleware
 # trusted_hosts="*" 表示信任来自任何上游代理的 X-Forwarded-* 头
-# 即使 IDE 报错，此行在运行时也是正确的
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # 3b. Session 中间件

@@ -32,7 +32,7 @@ CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
 # CHAT_MODEL 变量现在作为 RAG 链的默认后备，但主要模型列表来自 CHAT_MODELS_JSON
 CHAT_MODEL = os.getenv("CHAT_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp")
 
-# --- (新) 模型列表配置 ---
+# 模型列表配置
 DEFAULT_MODELS_JSON = """
 [
   {"id": "deepseek-ai/DeepSeek-V3.2-Exp", "name": "Deepseek", "icon": "/chat/static/img/DeepSeek.svg", "temp": 0.7, "top_p": 0.7, "beta": false},
@@ -45,7 +45,7 @@ DEFAULT_MODELS_JSON = """
 """
 CHAT_MODELS_JSON = os.getenv("CHAT_MODELS_JSON", DEFAULT_MODELS_JSON)
 
-# --- (新) Beta 用户授权 ---
+# Beta 用户授权
 # 逗号分隔的 user_id 列表
 BETA_AUTHORIZED_USER_IDS = os.getenv("BETA_AUTHORIZED_USER_IDS", "")
 
@@ -85,4 +85,3 @@ ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FIL
 
 # --- 持久化目录 ---
 ATTACHMENTS_DIR = os.getenv("ATTACHMENTS_DIR", "/app/data/attachments")
-# ARCHIVE_DIR 已移除

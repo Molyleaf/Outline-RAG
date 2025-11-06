@@ -9,7 +9,6 @@ from typing import List, Dict, Any
 import config
 import rag
 from database import AsyncSessionLocal, redis_client
-# (修复) APRouter -> APIRouter
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
@@ -24,7 +23,6 @@ from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
 logger = logging.getLogger(__name__)
-# (修复) APRouter -> APIRouter
 api_router = APIRouter()
 
 # --- 依赖注入：用户认证 ---
@@ -42,11 +40,9 @@ async def get_db_session():
 
 # --- utils ---
 def allowed_file(filename):
-    """(修复 8) 检查文件名后缀是否在允许列表中。"""
+    """检查文件名后缀是否在允许列表中。"""
     return "." in filename and \
         filename.rsplit(".", 1)[1].lower() in config.ALLOWED_FILE_EXTENSIONS
-# --- 合并结束 ---
-
 
 @api_router.get("/api/me")
 async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
@@ -90,7 +86,6 @@ class AskRequest(BaseModel):
 
 @api_router.get("/api/conversations")
 async def api_get_conversations(
-        # (修复 3) 移除了未使用的 'request'
         page: int = 1,
         page_size: int = 20,
         user: Dict[str, Any] = Depends(get_current_user),
@@ -110,7 +105,6 @@ async def api_get_conversations(
             {"u": uid, "lim": page_size, "off": offset}
         )).mappings().all()
 
-    # (*** 修复 1 ***) 将 r['created_at'] 转换为 .isoformat()
     items = [{"id": r["id"], "title": r["title"], "created_at": r['created_at'].isoformat(), "url": f"/chat/{r['id']}"} for r in rs]
     return JSONResponse({"items": items, "total": total, "page": page, "page_size": page_size})
 
@@ -280,14 +274,14 @@ async def api_ask(
             | RunnablePassthrough.assign(
         context=(
                 itemgetter("rewritten_query")
-                | RunnableLambda(_run_retriever) # Linter 误报 (1)
-                | RunnableLambda[List[Document], str](_format_docs) # Linter 误报 (2)
+                | RunnableLambda(_run_retriever)
+                | RunnableLambda[List[Document], str](_format_docs)
         )
     )
             | RunnableParallel({
         "chat_history": lambda x: x["chat_history"],
         "context": lambda x: x["context"],
-        "query": lambda x: x["input"] # Linter 误报 (4)
+        "query": lambda x: x["input"]
     })
             | ChatPromptTemplate.from_messages([
         ("system", config.SYSTEM_PROMPT),
@@ -304,7 +298,7 @@ async def api_ask(
         if not (await session.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": user["id"]})).scalar():
             raise HTTPException(status_code=403, detail="无权限")
 
-        rs = [] # Linter 误报 (5) - 'rs' 在下面被使用
+        rs = []
         if edit_source_message_id:
             try:
                 user_msg_id = int(edit_source_message_id)
@@ -331,7 +325,7 @@ async def api_ask(
             await session.execute(text("INSERT INTO messages (conv_id, user_id, role, content) VALUES (:cid, :uid, 'user', :c)"),
                                   {"cid": conv_id, "uid": user["id"], "c": query})
 
-        chat_history_db = reversed(rs) # 'rs' 在这里被使用
+        chat_history_db = reversed(rs)
 
     if redis_client:
         await redis_client.delete(f"messages:{conv_id}")
@@ -416,7 +410,7 @@ async def api_ask(
 @api_router.post("/api/upload")
 async def upload(
         request: Request,
-        user: Dict[str, Any] = Depends(get_current_user), # 'user' 在此被使用
+        user: Dict[str, Any] = Depends(get_current_user),
         session = Depends(get_db_session)
 ):
     form = await request.form()
@@ -427,7 +421,6 @@ async def upload(
     if not name or len(name) > 200 or not allowed_file(name):
         raise HTTPException(status_code=400, detail="invalid filename or type")
 
-    # read() 是同步的，但在 FastAPI 中可接受
     content_bytes = await f.read()
     content = content_bytes.decode("utf-8", errors="ignore")
 
@@ -440,7 +433,7 @@ async def upload(
 
 # --- /update/all ---
 @api_router.post("/update/all")
-async def update_all(_user: Dict[str, Any] = Depends(get_current_user)): # (修复 6)
+async def update_all(_user: Dict[str, Any] = Depends(get_current_user)):
     if not redis_client:
         return JSONResponse({"ok": False, "error": "任务队列服务未配置"}, status_code=503)
     if not await redis_client.set("refresh:lock", "1", ex=3600, nx=True):
@@ -456,7 +449,7 @@ async def update_all(_user: Dict[str, Any] = Depends(get_current_user)): # (修�
 
 # --- /api/refresh/status ---
 @api_router.get("/api/refresh/status")
-async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)): # (修复 6)
+async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)):
     if not redis_client:
         return JSONResponse({"status": "disabled", "message": "Redis not configured"})
 
@@ -475,7 +468,6 @@ async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)): # (
         total_queued = int(counts[0] or 0)
         success_count = int(counts[1] or 0)
         skipped_count = int(counts[2] or 0)
-        # (修复 7) 移除了 'delete_count'
 
         processed_count = success_count + skipped_count
 
@@ -486,7 +478,6 @@ async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)): # (
 
             p = redis_client.pipeline()
             p.set("refresh:status", json.dumps(status), ex=300)
-            # (修复 7) 移除了 "refresh:delete_count"
             p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count")
             await p.execute()
 
