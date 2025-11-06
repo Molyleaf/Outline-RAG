@@ -89,6 +89,7 @@ _base_embeddings = OpenAIEmbeddings(
     model=config.EMBEDDING_MODEL,
     api_key=config.EMBEDDING_API_TOKEN,
     base_url=f"{config.EMBEDDING_API_URL}/v1",
+    chunk_size=64
 )
 
 # 3c. 带缓存的 Embedding 模型
@@ -165,8 +166,16 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         for res in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
             original_index = res.get("index")
             if original_index is not None and 0 <= original_index < len(documents):
+
+                # 检查 Reranker 返回的是 dict (如 {'text': '...'}) 还是 str
+                doc_content_raw = res.get("document", doc_texts[original_index])
+                if isinstance(doc_content_raw, dict):
+                    page_content = doc_content_raw.get("text", "")
+                else:
+                    page_content = str(doc_content_raw)
+
                 new_doc = Document(
-                    page_content=res.get("document", doc_texts[original_index]),
+                    page_content=page_content, # 使用修复后的 page_content
                     metadata=documents[original_index].metadata.copy()
                 )
                 new_doc.metadata["relevance_score"] = res.get("relevance_score")

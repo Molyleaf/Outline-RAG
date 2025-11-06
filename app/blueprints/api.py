@@ -259,10 +259,6 @@ async def api_ask(
             | StrOutputParser()
     )
 
-    # 必须显式调用 aget_relevant_documents
-    # 否则 LCEL 会调用同步的 get_relevant_documents
-    async def _run_retriever(query: str) -> List[Document]:
-        return await compression_retriever.aget_relevant_documents(query)
 
     # 2. 定义最终 RAG 链 (异步)
     rag_chain = (
@@ -274,7 +270,7 @@ async def api_ask(
             | RunnablePassthrough.assign(
         context=(
                 itemgetter("rewritten_query")
-                | RunnableLambda(_run_retriever)
+                | compression_retriever
                 | RunnableLambda[List[Document], str](_format_docs)
         )
     )
