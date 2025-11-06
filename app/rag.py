@@ -10,7 +10,6 @@ from langchain_classic.retrievers.document_compressors.base import DocumentCompr
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-# (修复 1) 使用 v0.0.16 兼容的正确导入
 from langchain_postgres import PGVectorStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -34,11 +33,7 @@ _rag_lock = asyncio.Lock()
 
 
 async def initialize_rag_components():
-    """
-    延迟初始化 RAG 组件。
-    """
     global vector_store, base_retriever, compression_retriever
-
     if vector_store:
         return
 
