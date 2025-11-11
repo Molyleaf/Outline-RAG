@@ -286,8 +286,26 @@ async def api_ask(
 
     # --- LCEL 链定义 ---
 
-    llm_with_options = llm.bind(model=model, temperature=temperature, top_p=top_p)
+    # (*** 修复 ***)
+    # 修复：根据模型名称动态添加 reasoning=True
+    # 参考: https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning
+    llm_params = {
+        "model": model,
+        "temperature": temperature,
+        "top_p": top_p
+    }
+    # 检查模型ID中是否包含 "thinking" (不区分大小写)，以启用思维链
+    if "thinking" in model.lower():
+        llm_params["reasoning"] = True
+        logger.info(f"[{conv_id}] 已为模型 {model} 启用 'reasoning=True'")
+
+    # 使用解包操作符传递参数
+    llm_with_options = llm.bind(**llm_params)
+
+    # 分类器（用于路由）不需要 reasoning
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
+    # (*** 修复结束 ***)
+
 
     # 1. 查询重写链 (不变)
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
@@ -414,6 +432,7 @@ async def api_ask(
             chat_history.append(HumanMessage(content=r["content"]))
         elif r["role"] == "assistant":
             content = r["content"]
+            # 适配前端的 \n\n\n 分隔符
             thinking_match = re.search(r"\n(.*?)\n\n\n(.*)", content, re.DOTALL)
             if thinking_match:
                 chat_history.append(AIMessage(content=thinking_match.group(2)))
@@ -468,15 +487,21 @@ async def api_ask(
                             delta_thinking = ""
                             new_thinking_detected = False
 
+                            # (*** 关键逻辑 ***)
+                            # 检查 LLM 块中的 additional_kwargs
                             if delta_chunk.additional_kwargs:
+                                # 对应 SiliconFlow 文档的 "reasoning_content"
                                 new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
                                 if new_thought and new_thought != thinking_response:
                                     thinking_response = new_thought
+                                    # 将其放入 "thinking" 字段，供 app.js 消费
                                     delta_thinking = new_thought
                                     new_thinking_detected = True
 
                             if delta_content or new_thinking_detected:
                                 full_response += delta_content
+                                # (*** 关键逻辑 ***)
+                                # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
                             llm_task = asyncio.create_task(llm_iter.__anext__())
@@ -484,21 +509,12 @@ async def api_ask(
 
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
                             llm_is_done = True
-
-                            # --- (关键修复) ---
-                            # LLM 任务已结束，立即取消 ping 任务，
-                            # 而不是等待它 20 秒后自行检查。
                             if ping_task:
                                 ping_task.cancel()
-                            # --- (修复结束) ---
-
                         except Exception as e:
                             logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
                             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
-
-                            llm_is_done = True # 在出错时也设置标志
-
-                            # 立即取消 ping 任务
+                            llm_is_done = True
                             if ping_task:
                                 ping_task.cancel()
                             if ping_task in pending:
@@ -508,11 +524,9 @@ async def api_ask(
                         try:
                             _ = task.result() # 如果被取消，这里会 raise CancelledError
                             yield ": ping\n\n"
-
                             if not llm_is_done:
                                 ping_task = asyncio.create_task(ping_iter.__anext__())
                                 pending.add(ping_task)
-
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
                             pass # Ping 任务被取消或停止，这是预期的
                         except Exception as e:
@@ -536,6 +550,8 @@ async def api_ask(
             if stream_started:
                 try:
                     async with AsyncSessionLocal.begin() as db_session:
+                        # (*** 关键逻辑 ***)
+                        # 保持与 app.js 兼容的格式保存到数据库
                         if thinking_response:
                             full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
                         else:
