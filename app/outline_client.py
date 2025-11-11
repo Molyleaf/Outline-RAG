@@ -119,6 +119,13 @@ async def outline_get_doc(doc_id):
     data = await http_post_json_raw(u, {"id": doc_id}, headers=outline_headers())
     return data.get("data") if data else None
 
+async def outline_export_doc(doc_id):
+    """获取文档的完整内容 (Export)"""
+    u = f"{config.OUTLINE_API_URL}/api/documents.export"
+    # 注意：export API 也使用 'id' 字段
+    data = await http_post_json_raw(u, {"id": doc_id}, headers=outline_headers())
+    return data.get("data") if data else None
+
 # --- Webhook 验证 ---
 def verify_outline_signature(raw_body, signature_hex: str) -> bool:
     if not config.OUTLINE_WEBHOOK_SIGN: return True

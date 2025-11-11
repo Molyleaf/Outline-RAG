@@ -28,7 +28,7 @@ import config
 # 修复：导入 *异步* redis_client (用于任务队列) 和 async_engine
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
 from llm_services import embeddings_model, reranker
-from outline_client import outline_list_docs, outline_get_doc
+from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
 
 logger = logging.getLogger(__name__)
 
@@ -172,30 +172,39 @@ async def process_doc_batch_task(doc_ids: list):
 
     # 1. 从 Outline API 批量获取文档内容
     for doc_id in doc_ids:
+        # (*** 步骤 1: 获取元数据 ***)
         info = await outline_get_doc(doc_id)
         if not info:
-            logger.warning(f"Failed to get content for doc {doc_id}, skipping.")
+            logger.warning(f"无法获取文档 {doc_id} 的 *信息* (metadata)，跳过。")
             skipped_ids.add(doc_id)
             continue
 
-        content = info.get("text") or ""
+        # (*** 步骤 2: 获取完整内容 ***)
+        export_data = await outline_export_doc(doc_id)
+        if not export_data:
+            logger.warning(f"无法获取文档 {doc_id} 的 *内容* (export)，跳过。")
+            skipped_ids.add(doc_id)
+            continue
+
+        # (*** 步骤 3: 组合数据 ***)
+        content = export_data.get("text") or "" # 从 export 获取完整内容
         if not content.strip():
-            logger.info(f"Document {doc_id} is empty, skipping.")
+            logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
             skipped_ids.add(doc_id)
             continue
 
-        updated_at_str = info.get("updatedAt")
+        updated_at_str = info.get("updatedAt") # 从 info 获取元数据
         if not updated_at_str:
             now_dt = datetime.now(timezone.utc)
             updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
 
         doc = Document(
-            page_content=content,
+            page_content=content, # (*** 使用 'export' 的 'text' ***)
             metadata={
                 "source_id": doc_id,
-                "title": info.get("title") or "",
+                "title": info.get("title") or "", # (*** 使用 'info' 的 'title' ***)
                 "outline_updated_at_str": updated_at_str,
-                "url": info.get("url")
+                "url": info.get("url") # (*** 使用 'info' 的 'url' ***)
             }
         )
         docs_to_process_lc.append(doc)
