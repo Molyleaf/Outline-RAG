@@ -294,20 +294,23 @@ async def api_ask(
         "temperature": temperature,
         "top_p": top_p
     }
+    additional_kwargs = {}
     # 检查模型ID中是否包含 "thinking" (不区分大小写)，以启用思维链
     if "thinking" in model.lower():
-        llm_params["reasoning"] = True
-        logger.info(f"[{conv_id}] 已为模型 {model} 启用 'reasoning=True'")
+        additional_kwargs["reasoning"] = True
+        logger.info(f"[{conv_id}] 已为模型 {model} 启用 'additional_kwargs.reasoning=True'")
 
-    # 使用解包操作符传递参数
-    llm_with_options = llm.bind(**llm_params)
+    llm_with_options = llm.bind(
+        model=model,
+        temperature=temperature,
+        top_p=top_p,
+        additional_kwargs=additional_kwargs # <--- 关键修复
+    )
 
     # 分类器（用于路由）不需要 reasoning
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
-    # (*** 修复结束 ***)
 
-
-    # 1. 查询重写链 (不变)
+    # 1. 查询重写链
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
         return "\n".join([f"{m.type}: {m.content}" for m in messages])
 
