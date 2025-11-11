@@ -23,8 +23,6 @@ from langchain_core.runnables import RunnablePassthrough, RunnableParallel, Runn
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
-from langchain_classic.retrievers.multi_query import MultiQueryRetriever
-
 
 logger = logging.getLogger(__name__)
 api_router = APIRouter()
@@ -156,7 +154,7 @@ async def api_create_conversation(
 
     try:
         async with session.begin():
-            # --- (新) 修复：外键约束错误 ---
+            # --- (修复 3) 修复：外键约束错误 ---
             # 在插入 conversation 之前，确保 user 存在于 users 表中
             await session.execute(
                 text("""
@@ -286,12 +284,10 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 未就绪"}, status_code=503)
 
-    # --- LCEL 链定义 (Req 1, 3, 5, 6) ---
+    # --- LCEL 链定义 ---
 
     llm_with_options = llm.bind(model=model, temperature=temperature, top_p=top_p)
-    # 用于分类器和重写的轻量级 LLM
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
-
 
     # 1. 查询重写链 (不变)
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
@@ -307,21 +303,19 @@ async def api_ask(
             | StrOutputParser()
     )
 
-    # 2. (新 Req 3) MultiQueryRetriever
-    multi_query_retriever = MultiQueryRetriever.from_llm(
-        retriever=compression_retriever,
-        llm=classifier_llm
-    )
+    # 2. (修复 2) 移除 MultiQueryRetriever
+    #    我们现在直接将重写后的查询传递给 compression_retriever
 
-    # 3. 核心 RAG 链 (Req 3, 5)
+    # 3. 核心 RAG 链 (修复 2)
     rag_chain_pre_llm = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x["chat_history"]
             })
+            # (修复 2) 将 rewritten_query 直接传递给 compression_retriever
             | RunnablePassthrough.assign(
-        docs=itemgetter("rewritten_query") | multi_query_retriever
+        docs=itemgetter("rewritten_query") | compression_retriever
     )
             | RunnablePassthrough.assign(
         context=lambda x: _format_docs_with_metadata(x["docs"])
@@ -340,7 +334,7 @@ async def api_ask(
 
     rag_chain = rag_chain_pre_llm | llm_with_options
 
-    # 4. (新 Req 6) 智能路由
+    # 4. 智能路由 (不变)
     classifier_prompt = PromptTemplate.from_template(
         """判断用户问题的类型。只回答 'rag' (需要知识库)、'greeting' (问候) 或 'other' (其他)。
 问题: {input}
@@ -373,7 +367,7 @@ async def api_ask(
     final_chain_streaming = chain_with_classification | RunnableBranch(
         (lambda x: "greeting" in x["classification"].lower(), greeting_chain),
         (lambda x: "rag" in x["classification"].lower(), rag_chain),
-        general_chain  # 默认
+        general_chain
     )
     # --- RAG 链定义结束 ---
 
@@ -426,12 +420,14 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
-    # --- (修复 1 & 2) 异步 generate 函数 ---
+    # --- 异步 generate 函数 ---
     async def generate():
         yield ": ping\n\n"
         full_response = ""
         model_name = model
         thinking_response = ""
+        stream_started = False
+        llm_is_done = False
 
         llm_task = None
         ping_task = None
@@ -441,6 +437,7 @@ async def api_ask(
                 "input": query,
                 "chat_history": chat_history
             })
+            stream_started = True  # (修复 1) 设置 flag
 
             async def ping_generator():
                 while True:
@@ -471,7 +468,6 @@ async def api_ask(
                             delta_thinking = ""
                             new_thinking_detected = False
 
-                            # (修复 1) 检查 'reasoning_content'
                             if delta_chunk.additional_kwargs:
                                 new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
                                 if new_thought and new_thought != thinking_response:
@@ -486,30 +482,34 @@ async def api_ask(
                             llm_task = asyncio.create_task(llm_iter.__anext__())
                             pending.add(llm_task)
 
-                        # (修复 2) 捕获 BaseException
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            pass  # LLM 流正常结束或被取消
+                            llm_is_done = True # <--- 修复：设置 LLM 完成标志
                         except Exception as e:
                             logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
                             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
+                            llm_is_done = True # <--- 修复：在出错时也设置标志
+                            # 立即取消 ping 任务
+                            if ping_task:
+                                ping_task.cancel()
                             if ping_task in pending:
                                 pending.remove(ping_task)
-                                ping_task.cancel()
 
                     elif task == ping_task:
                         try:
                             _ = task.result()
                             yield ": ping\n\n"
-                            ping_task = asyncio.create_task(ping_iter.__anext__())
-                            pending.add(ping_task)
+
+                            # <--- 修复：仅当 LLM 仍在运行时才重新启动 ping 任务
+                            if not llm_is_done:
+                                ping_task = asyncio.create_task(ping_iter.__anext__())
+                                pending.add(ping_task)
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            pass
+                            pass # Ping 任务被取消或正常停止
                         except Exception as e:
                             logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
             yield "data: [DONE]\n\n"
 
-        # (修复 2) 将 except 和 finally 分离
         except Exception as e:
             logger.error(f"[{conv_id}] 异步流 generate 协程失败: {e}", exc_info=True)
             try:
@@ -518,14 +518,13 @@ async def api_ask(
             except Exception:
                 pass
         finally:
-            # (修复 2) 确保任务被清理
             if llm_task and not llm_task.done():
                 llm_task.cancel()
             if ping_task and not ping_task.done():
                 ping_task.cancel()
 
-            # (修复 2) 将数据库保存逻辑移至 finally 块
-            if full_response:
+            # (修复 1) 更改此处的逻辑
+            if stream_started:
                 try:
                     async with AsyncSessionLocal.begin() as db_session:
                         if thinking_response:
@@ -543,7 +542,7 @@ async def api_ask(
                 except Exception as db_e:
                     logger.error(f"[{conv_id}] 在 finally 块中保存对话失败: {db_e}", exc_info=True)
             else:
-                logger.warning(f"[{conv_id}] 响应为空，未保存对话 (finally 块)。")
+                logger.warning(f"[{conv_id}] 流未启动，未保存对话 (finally 块)。")
     # --- 修复结束 ---
 
     return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
