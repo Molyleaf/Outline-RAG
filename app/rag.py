@@ -2,23 +2,31 @@
 import asyncio
 import json
 import logging
+import pickle
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
 
+# 修复：导入 *同步* redis 库
+import redis
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
+from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_classic.retrievers import ParentDocumentRetriever
+# 修复：导入 RedisStore 和 EncoderBackedStore
 from langchain_community.storage import RedisStore
+from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-from database import async_engine, AsyncSessionLocal, redis_client
+# 修复：导入 *异步* redis_client (用于任务队列) 和 async_engine
+from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
 from llm_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc
 
@@ -26,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 # LangChain 组件将按需延迟初始化
 vector_store: Optional[AsyncPGVectorStore] = None
-# 修复：ParentDocumentRetriever 的 docstore 将使用持久化的 RedisStore
-parent_store: Optional[RedisStore] = None
+# 修复：parent_store 必须是 BaseStore[str, Document] 类型
+parent_store: Optional[BaseStore[str, Document]] = None
 base_retriever: Optional[BaseRetriever] = None
 compression_retriever: Optional[ContextualCompressionRetriever] = None
 
@@ -42,13 +50,10 @@ async def initialize_rag_components():
     """
     global vector_store, base_retriever, compression_retriever, parent_store
 
-    # 如果已初始化，则快速返回
     if vector_store:
         return
 
-    # 异步锁，防止并发初始化
     async with _rag_lock:
-        # 再次检查，可能在等待锁时另一个协程已完成初始化
         if vector_store:
             return
 
@@ -56,17 +61,48 @@ async def initialize_rag_components():
 
         if not async_engine:
             raise ValueError("AsyncEngine from database.py is not available")
+        if not config.REDIS_URL:
+            raise ValueError("REDIS_URL is not set, but is required for ParentStore")
 
-        # 修复：为 ParentStore (docstore) 初始化 RedisStore
-        # 我们使用 database.py 中定义的共享的 *异步* redis_client
-        if not redis_client:
-            raise ValueError("Redis (async_client) from database.py is not available, but is required for ParentStore")
+        # 修复：为 RedisStore 创建一个 *同步* Redis 客户端
+        # 这解决了 "TypeError: Expected Redis client, got Redis instead" 的问题
+        try:
+            parsed_url = urllib.parse.urlparse(config.REDIS_URL)
+            db_num = 0
+            if parsed_url.path and parsed_url.path.startswith('/'):
+                try:
+                    db_num = int(parsed_url.path[1:])
+                except (ValueError, IndexError):
+                    db_num = 0
 
-        parent_store = RedisStore(
-            client=redis_client,
-            namespace="rag:parent_store" # 使用专用命名空间
+            # 必须使用同步 client，且 decode_responses=False 来存储 pickle 字节
+            sync_redis_client = redis.Redis(
+                host=parsed_url.hostname,
+                port=parsed_url.port,
+                password=parsed_url.password,
+                db=db_num,
+                decode_responses=False
+            )
+            sync_redis_client.ping() # 确认连接
+            logger.info("Sync Redis client for ParentStore connected.")
+        except Exception as e:
+            logger.critical(f"Failed to create *Sync* Redis client for ParentStore: {e}", exc_info=True)
+            raise
+
+        # 1. 创建基础的字节存储 (RedisStore)
+        base_redis_store = RedisStore(
+            client=sync_redis_client,
+            namespace="rag:parent_store:bytes"
         )
-        logger.info("ParentStore configured (RedisStore).")
+
+        # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
+        parent_store = EncoderBackedStore[str, Document](
+            base_redis_store,
+            encoder=pickle.dumps,
+            decoder=pickle.loads
+        )
+        logger.info("ParentStore configured (EncoderBackedStore over RedisStore).")
+
 
         # 初始化 PGVectorStore (子块存储)
         pg_engine_wrapper = PGEngine.from_engine(async_engine)
@@ -82,12 +118,11 @@ async def initialize_rag_components():
             raise
 
         # 初始化基础检索器 (ParentDocumentRetriever)
-        # 它使用 vector_store 检索子块，并使用 parent_store (Redis) 查找父文档
         base_retriever = ParentDocumentRetriever(
             vectorstore=vector_store,
-            docstore=parent_store,
-            child_splitter=text_splitter, # text_splitter 用于即时分割
-            id_key="source_id" # 使用 'source_id' 作为父文档的键
+            docstore=parent_store, # 使用持久化、多进程安全的 Redis docstore
+            child_splitter=text_splitter,
+            id_key="source_id"
         )
         logger.info("Base retriever configured (ParentDocumentRetriever).")
 
@@ -154,14 +189,13 @@ async def process_doc_batch_task(doc_ids: list):
             now_dt = datetime.now(timezone.utc)
             updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
 
-        # 构建 LangChain Document 对象
         doc = Document(
             page_content=content,
             metadata={
-                "source_id": doc_id, # PDR 将使用此 ID 作为 docstore 键
+                "source_id": doc_id,
                 "title": info.get("title") or "",
                 "outline_updated_at_str": updated_at_str,
-                "url": info.get("url") # 用于 RAG 溯源
+                "url": info.get("url")
             }
         )
         docs_to_process_lc.append(doc)
@@ -200,19 +234,21 @@ async def process_doc_batch_task(doc_ids: list):
             # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
             try:
                 # 4a. 将父文档存入 RedisStore
+                # 修复：必须使用 asyncio.to_thread 运行 *同步* mset
                 parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
-                await parent_store.amset(parent_docs_tuples)
+                await asyncio.to_thread(parent_store.mset, parent_docs_tuples)
 
-                # 4b. 将新的子块存入 PGVectorStore
+                # 4b. 将新的子块存入 PGVectorStore (adelete 已经是异步)
                 await vector_store.aadd_documents(chunks)
 
             except Exception as e:
                 logger.error(f"Failed (async) to add {len(chunks)} chunks or {len(docs_to_process_lc)} parent docs: {e}.", exc_info=True)
 
-    # 5. 更新 Redis 中的任务计数器
-    if redis_client:
+
+    # 5. 更新 Redis 中的任务计数器 (使用异步 client)
+    if async_redis_client:
         try:
-            p = redis_client.pipeline()
+            p = async_redis_client.pipeline()
             if successful_ids:
                 p.incrby("refresh:success_count", len(successful_ids))
             if skipped_ids:
@@ -232,14 +268,12 @@ async def refresh_all_task():
     await initialize_rag_components()
 
     try:
-        # 1. 获取远程所有文档的元数据
         remote_docs_raw = await outline_list_docs()
         if remote_docs_raw is None:
             raise ConnectionError("Failed to retrieve document list from Outline API.")
 
         remote_docs_map = {doc['id']: doc['updatedAt'] for doc in remote_docs_raw if doc.get('id') and doc.get('updatedAt')}
 
-        # 2. 获取本地所有文档的元数据 (通过查询子块的元数据)
         local_docs_map = {}
         try:
             async with AsyncSessionLocal.begin() as session:
@@ -256,7 +290,6 @@ async def refresh_all_task():
         except Exception as e:
             logger.error(f"Failed to read metadata from PGVectorStore (async): {e}", exc_info=True)
 
-        # 3. 计算差异
         remote_ids = set(remote_docs_map.keys())
         local_ids = set(local_docs_map.keys())
 
@@ -264,39 +297,34 @@ async def refresh_all_task():
         to_delete_ids = list(local_ids - remote_ids)
         to_check_ids = remote_ids.intersection(local_ids)
 
-        # 如果远程更新时间与本地存储的更新时间不同，则更新
         to_update_ids = [doc_id for doc_id in to_check_ids if remote_docs_map[doc_id] != local_docs_map.get(doc_id)]
 
-        # 4. 执行删除
         if to_delete_ids:
             logger.warning(f"Found {len(to_delete_ids)} docs locally that are not remote. Deleting...")
             for doc_id in to_delete_ids:
-                await delete_doc(doc_id) # delete_doc 会同时清理 vector 和 parent store
+                await delete_doc(doc_id)
 
-        # 5. 检查是否需要处理
         docs_to_process_ids = to_add_ids + to_update_ids
         if not docs_to_process_ids:
             final_message = f"Refresh complete. Removed {len(to_delete_ids)} old docs." if to_delete_ids else "Refresh complete. Data is up to date."
             logger.info(final_message)
-            if redis_client:
+            if async_redis_client:
                 status = {"status": "success", "message": final_message}
-                await redis_client.set("refresh:status", json.dumps(status), ex=300)
+                await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
             return
 
-        # 6. 初始化 Redis 任务计数器
-        if redis_client:
+        if async_redis_client:
             try:
-                p = redis_client.pipeline()
+                p = async_redis_client.pipeline()
                 p.set("refresh:total_queued", len(docs_to_process_ids))
                 p.set("refresh:success_count", 0)
                 p.set("refresh:skipped_count", 0)
                 p.set("refresh:delete_count", len(to_delete_ids))
-                p.delete("refresh:status") # 清除旧的 "success" 状态
+                p.delete("refresh:status")
                 await p.execute()
             except Exception as e:
                 logger.error("Failed to initialize Redis refresh counters (async): %s", e)
 
-        # 7. 将要处理的 ID 分批推送到任务队列
         batch_size = config.REFRESH_BATCH_SIZE
         num_batches = (len(docs_to_process_ids) + batch_size - 1) // batch_size
         logger.info(f"{len(docs_to_process_ids)} docs need update/add, splitting into {num_batches} batches.")
@@ -304,19 +332,19 @@ async def refresh_all_task():
         for i in range(0, len(docs_to_process_ids), batch_size):
             batch = docs_to_process_ids[i:i+batch_size]
             task = {"task": "process_doc_batch", "doc_ids": batch}
-            await redis_client.lpush("task_queue", json.dumps(task))
+            # 使用异步 client 推送任务
+            await async_redis_client.lpush("task_queue", json.dumps(task))
 
         logger.info(f"Queued {len(docs_to_process_ids)} doc processing tasks.")
 
     except Exception as e:
         logger.exception("refresh_all_task (async) failed: %s", e)
-        if redis_client:
+        if async_redis_client:
             status = {"status": "error", "message": f"Refresh failed: {e}"}
-            await redis_client.set("refresh:status", json.dumps(status), ex=300)
+            await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
     finally:
-        # 确保在任务完成后（即使是空的）释放锁
-        if redis_client and not (await redis_client.exists("refresh:total_queued")):
-            await redis_client.delete("refresh:lock")
+        if async_redis_client and not (await async_redis_client.exists("refresh:total_queued")):
+            await async_redis_client.delete("refresh:lock")
 
 
 async def delete_doc(doc_id):
@@ -333,7 +361,6 @@ async def delete_doc(doc_id):
     ids_to_delete = []
     try:
         async with AsyncSessionLocal.begin() as session:
-            # 查找所有与该 source_id 关联的子块的 UUID
             ids_to_delete_rows = (await session.execute(
                 text("""
                      SELECT langchain_id FROM langchain_pg_embedding
@@ -357,7 +384,8 @@ async def delete_doc(doc_id):
 
     # 2. 从 ParentStore (Redis) 删除父文档
     try:
-        await parent_store.amdelete([doc_id])
+        # 修复：必须使用 asyncio.to_thread 运行 *同步* mdelete
+        await asyncio.to_thread(parent_store.mdelete, [doc_id])
         logger.info(f"Deleted from ParentStore (RedisStore): {doc_id}")
     except Exception as e:
-        logger.error(f"parent_store.amdelete (async) failed for {doc_id}: {e}", exc_info=True)
+        logger.error(f"parent_store.mdelete (async) failed for {doc_id}: {e}", exc_info=True)
