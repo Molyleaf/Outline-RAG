@@ -11,7 +11,6 @@ from typing import Optional
 import redis
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
-from langchain_community.document_transformers import EmbeddingsRedundantFilter
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
@@ -129,7 +128,6 @@ async def initialize_rag_components():
         # 初始化压缩/重排管线
         pipeline_compressor = DocumentCompressorPipeline(
             transformers=[
-                EmbeddingsRedundantFilter(embeddings=embeddings_model),
                 reranker # 异步 Reranker
             ]
         )
@@ -187,7 +185,8 @@ async def process_doc_batch_task(doc_ids: list):
             continue
 
         # (*** 步骤 3: 组合数据 ***)
-        content = export_data.get("text") or "" # 从 export 获取完整内容
+        # export_data 本身就是字符串
+        content = export_data or ""
         if not content.strip():
             logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
             skipped_ids.add(doc_id)

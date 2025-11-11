@@ -1,6 +1,5 @@
 # app/database.py
 import logging
-import os
 import urllib.parse
 
 import redis.asyncio as redis
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 # 从环境变量读取向量维度
-VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1536"))
+VECTOR_DIM = config.VECTOR_DIM
 logger.info(f"Using vector dimension: {VECTOR_DIM}")
 
 if not config.DATABASE_URL:
