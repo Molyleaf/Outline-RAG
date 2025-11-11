@@ -93,10 +93,9 @@ async def initialize_rag_components():
         )
 
         # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
-        # (*** 修复 ***) 显式添加 'key_encoder'
         parent_store = EncoderBackedStore[str, Document](
             store=base_redis_store,
-            key_encoder=lambda k: k, # 显式传入恒等函数
+            key_encoder=lambda k: k,
             value_serializer=pickle.dumps,
             value_deserializer=pickle.loads
         )
@@ -117,13 +116,15 @@ async def initialize_rag_components():
             raise
 
         # 初始化基础检索器 (ParentDocumentRetriever)
+        # (*** 修复 ***) 使用 'search_kwargs' 替换 'child_search_kwargs'
         base_retriever = ParentDocumentRetriever(
             vectorstore=vector_store,
-            docstore=parent_store, # 使用持久化、多进程安全的 Redis docstore
+            docstore=parent_store,
             child_splitter=text_splitter,
-            id_key="source_id"
+            id_key="source_id",
+            search_kwargs={"k": config.TOP_K} # 将 k=4 覆盖为 k=12
         )
-        logger.info("Base retriever configured (ParentDocumentRetriever).")
+        logger.info(f"Base retriever configured (ParentDocumentRetriever, search_kwargs k={config.TOP_K}).")
 
         # 初始化压缩/重排管线
         pipeline_compressor = DocumentCompressorPipeline(
@@ -232,12 +233,11 @@ async def process_doc_batch_task(doc_ids: list):
 
             # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
             try:
-                # 4a. 将父文档存入 RedisStore
-                # 修复：必须使用 asyncio.to_thread 运行 *同步* mset
+                # 4a. 将父文档存入 RedisStore (使用 asyncio.to_thread 运行同步 mset)
                 parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
                 await asyncio.to_thread(parent_store.mset, parent_docs_tuples)
 
-                # 4b. 将新的子块存入 PGVectorStore (adelete 已经是异步)
+                # 4b. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
                 await vector_store.aadd_documents(chunks)
 
             except Exception as e:
@@ -331,7 +331,6 @@ async def refresh_all_task():
         for i in range(0, len(docs_to_process_ids), batch_size):
             batch = docs_to_process_ids[i:i+batch_size]
             task = {"task": "process_doc_batch", "doc_ids": batch}
-            # 使用异步 client 推送任务
             await async_redis_client.lpush("task_queue", json.dumps(task))
 
         logger.info(f"Queued {len(docs_to_process_ids)} doc processing tasks.")
