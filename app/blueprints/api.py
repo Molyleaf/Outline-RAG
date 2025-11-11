@@ -294,17 +294,11 @@ async def api_ask(
         "temperature": temperature,
         "top_p": top_p
     }
-    additional_kwargs = {}
-    # 检查模型ID中是否包含 "thinking" (不区分大小写)，以启用思维链
-    if "thinking" in model.lower():
-        additional_kwargs["reasoning"] = True
-        logger.info(f"[{conv_id}] 已为模型 {model} 启用 'additional_kwargs.reasoning=True'")
 
     llm_with_options = llm.bind(
         model=model,
         temperature=temperature,
         top_p=top_p,
-        additional_kwargs=additional_kwargs # <--- 关键修复
     )
 
     # 分类器（用于路由）不需要 reasoning
