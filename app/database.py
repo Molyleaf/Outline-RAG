@@ -105,6 +105,12 @@ CREATE TABLE IF NOT EXISTS attachments (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+/* (新) Req 1: 为 ParentDocumentRetriever (AsyncPGStore) 添加持久化存储 */
+CREATE TABLE IF NOT EXISTS rag_parent_store (
+    key_ TEXT PRIMARY KEY,
+    value_ BYTEA
+);
 """
 
 # PGVector 表结构

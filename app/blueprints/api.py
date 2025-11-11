@@ -286,21 +286,20 @@ async def api_ask(
 
     # --- LCEL 链定义 ---
 
-    # (*** 修复 ***)
     # 修复：根据模型名称动态添加 reasoning=True
     # 参考: https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning
     llm_params = {
         "model": model,
         "temperature": temperature,
-        "top_p": top_p
+        "top_p": top_p,
+        "stream": True
     }
 
-    llm_with_options = llm.bind(
-        model=model,
-        temperature=temperature,
-        top_p=top_p,
-        stream=True,
-    )
+    # 仅当模型名称包含 "thinking" (不区分大小写) 时，才启用 include_reasoning
+    if "thinking" in model.lower():
+        llm_params["stream_options"] = {"include_reasoning": True}
+
+    llm_with_options = llm.bind(**llm_params)
 
     # 分类器（用于路由）不需要 reasoning
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
