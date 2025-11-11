@@ -420,14 +420,14 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
-    # --- 异步 generate 函数 ---
+    # --- (修复 2) 异步 generate 函数 ---
     async def generate():
         yield ": ping\n\n"
         full_response = ""
         model_name = model
         thinking_response = ""
         stream_started = False
-        llm_is_done = False
+        llm_is_done = False # LLM 完成标志
 
         llm_task = None
         ping_task = None
@@ -437,7 +437,7 @@ async def api_ask(
                 "input": query,
                 "chat_history": chat_history
             })
-            stream_started = True  # (修复 1) 设置 flag
+            stream_started = True
 
             async def ping_generator():
                 while True:
@@ -483,11 +483,21 @@ async def api_ask(
                             pending.add(llm_task)
 
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            llm_is_done = True # <--- 修复：设置 LLM 完成标志
+                            llm_is_done = True
+
+                            # --- (关键修复) ---
+                            # LLM 任务已结束，立即取消 ping 任务，
+                            # 而不是等待它 20 秒后自行检查。
+                            if ping_task:
+                                ping_task.cancel()
+                            # --- (修复结束) ---
+
                         except Exception as e:
                             logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
                             yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
-                            llm_is_done = True # <--- 修复：在出错时也设置标志
+
+                            llm_is_done = True # 在出错时也设置标志
+
                             # 立即取消 ping 任务
                             if ping_task:
                                 ping_task.cancel()
@@ -496,15 +506,15 @@ async def api_ask(
 
                     elif task == ping_task:
                         try:
-                            _ = task.result()
+                            _ = task.result() # 如果被取消，这里会 raise CancelledError
                             yield ": ping\n\n"
 
-                            # <--- 修复：仅当 LLM 仍在运行时才重新启动 ping 任务
                             if not llm_is_done:
                                 ping_task = asyncio.create_task(ping_iter.__anext__())
                                 pending.add(ping_task)
+
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            pass # Ping 任务被取消或正常停止
+                            pass # Ping 任务被取消或停止，这是预期的
                         except Exception as e:
                             logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
@@ -523,7 +533,6 @@ async def api_ask(
             if ping_task and not ping_task.done():
                 ping_task.cancel()
 
-            # (修复 1) 更改此处的逻辑
             if stream_started:
                 try:
                     async with AsyncSessionLocal.begin() as db_session:
