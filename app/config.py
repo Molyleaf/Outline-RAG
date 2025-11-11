@@ -63,13 +63,12 @@ DEFAULT_REWRITE_PROMPT_TEMPLATE = """根据下方提供的“对话历史”和�
 REWRITE_PROMPT_TEMPLATE = os.getenv("REWRITE_PROMPT_TEMPLATE", DEFAULT_REWRITE_PROMPT_TEMPLATE)
 
 # RAG 问答模板
-# (新) 修改为支持溯源 (Req 5)
 DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE = """参考资料：
 {context}
 
 ---
 请根据以上参考资料，并结合你的知识，回答以下问题。
-在您的回答中，必须使用 `[来源 n]` 的格式来引用您所使用的具体参考资料。
+在回答中，必须使用 `[来源 n]` 的格式来引用使用的具体参考资料。
 例如：根据文档 [来源 1] 和 [来源 3]，...
 
 问题：

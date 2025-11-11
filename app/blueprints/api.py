@@ -299,6 +299,7 @@ async def api_ask(
         model=model,
         temperature=temperature,
         top_p=top_p,
+        stream=True,
     )
 
     # 分类器（用于路由）不需要 reasoning

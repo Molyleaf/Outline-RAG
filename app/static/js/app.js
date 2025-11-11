@@ -870,7 +870,7 @@ async function sendQuestion() {
                         }
 
                         // (新) Req 1: 处理 Thinking (实时渲染)
-                        if (typeof thinking === 'string' && thinking.length > 0) {
+                        if (typeof thinking === 'string' && thinking.trim().length > 0) { // [!code ++] (修复 1: 增加 .trim() 检查)
                             currentThinkingBuffer = thinking; // Thinking 是状态，直接覆盖
                             let thinkingBlock = bubbleInner.querySelector('.thinking-block');
 
@@ -898,7 +898,9 @@ async function sendQuestion() {
                             const thinkingContent = thinkingBlock.querySelector('.thinking-content');
                             if (thinkingContent) {
                                 const thinkingMd = renderMarkdown(currentThinkingBuffer);
-                                thinkingContent.innerHTML = thinkingMd.innerHTML; // 设置 innerHTML
+                                // (保持 DOM 结构与 appendMsg 一致)
+                                thinkingContent.innerHTML = ''; // [!code ++]
+                                thinkingContent.appendChild(thinkingMd); // [!code ++]
                             }
                         }
 

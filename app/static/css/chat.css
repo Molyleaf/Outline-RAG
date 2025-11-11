@@ -245,7 +245,7 @@
 }
 .md-body h1, .md-body h2, .md-body h3 { margin: .9em 0 .5em; }
 .md-body p { margin: 8px 5px; }
-.msg.assistant .md-body > p { text-indent: 1em; }
+.msg.assistant .md-body > p, .msg.assistant .md-body > div > p { text-indent: 1em; }
 .md-body ul, .md-body ol { padding-left: 1.2em; margin: .6em 0; }
 .md-body code {
     background: color-mix(in srgb, var(--panel) 65%, var(--bg));
