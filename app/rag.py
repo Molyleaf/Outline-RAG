@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 # LangChain 组件将按需延迟初始化
 vector_store: Optional[AsyncPGVectorStore] = None
-# 修复：parent_store 必须是 BaseStore[str, Document] 类型
 parent_store: Optional[BaseStore[str, Document]] = None
 base_retriever: Optional[BaseRetriever] = None
 compression_retriever: Optional[ContextualCompressionRetriever] = None
@@ -65,7 +64,6 @@ async def initialize_rag_components():
             raise ValueError("REDIS_URL is not set, but is required for ParentStore")
 
         # 修复：为 RedisStore 创建一个 *同步* Redis 客户端
-        # 这解决了 "TypeError: Expected Redis client, got Redis instead" 的问题
         try:
             parsed_url = urllib.parse.urlparse(config.REDIS_URL)
             db_num = 0
@@ -81,7 +79,6 @@ async def initialize_rag_components():
                 port=parsed_url.port,
                 password=parsed_url.password,
                 db=db_num,
-                decode_responses=False
             )
             sync_redis_client.ping() # 确认连接
             logger.info("Sync Redis client for ParentStore connected.")
@@ -96,10 +93,12 @@ async def initialize_rag_components():
         )
 
         # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
+        # (*** 修复 ***) 显式添加 'key_encoder'
         parent_store = EncoderBackedStore[str, Document](
-            base_redis_store,
-            encoder=pickle.dumps,
-            decoder=pickle.loads
+            store=base_redis_store,
+            key_encoder=lambda k: k, # 显式传入恒等函数
+            value_serializer=pickle.dumps,
+            value_deserializer=pickle.loads
         )
         logger.info("ParentStore configured (EncoderBackedStore over RedisStore).")
 
