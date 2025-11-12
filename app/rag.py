@@ -15,6 +15,7 @@ from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
@@ -105,10 +106,19 @@ headers_to_split_on = [
     ("###", "Header 3"),
 ]
 
-text_splitter = MarkdownHeaderTextSplitter(
+markdown_splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=headers_to_split_on,
     strip_headers=False,
     return_each_line=False
+)
+
+# --- 第二层拆分器 (细分) ---
+# 用于拆分过长的 Markdown 块
+# 我们使用 Python 默认的换行符作为主要分隔符
+child_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1024, # 示例值：1024 个字符
+    chunk_overlap=100, # 示例值：100 个字符
+    separators=["\n\n", "\n", " ", ""] # 适用于通用文本
 )
 
 
@@ -179,21 +189,41 @@ async def process_doc_batch_task(doc_ids: list):
                 # 获取父文档标题
                 parent_title = parent_doc.metadata.get("title") or ""
 
-                child_chunks = text_splitter.split_text(parent_doc.page_content)
+                # 1. [粗分]：首先按 Markdown 标题拆分
+                # 这会产生一些 Document，可能有的很长，有的很短
+                # 它们已经包含了 chunk.metadata (例如 {'Header 1': '共和国之辉'})
+                md_chunks = markdown_splitter.split_text(parent_doc.page_content)
 
-                for chunk in child_chunks:
-                    parent_metadata = parent_doc.metadata.copy()
-                    merged_metadata = {**chunk.metadata, **parent_metadata}
-                    chunk.metadata = merged_metadata
+                for md_chunk in md_chunks:
+                    # 2. [细分]：检查每个块是否过长，如果过长，则再次拆分
+                    # 我们将 md_chunk 的元数据（包含标题信息）传递给子块
 
-                    # 2. 将父标题强行注入 page_content，以确保它被向量化
-                    if parent_title:
-                        chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
+                    if len(md_chunk.page_content) > child_splitter._chunk_size:
+                        # 这个块太长了，使用 RecursiveCharacterTextSplitter 进一步细分
+                        sub_chunks = child_splitter.create_documents(
+                            [md_chunk.page_content],
+                            metadatas=[md_chunk.metadata]
+                        )
+                    else:
+                        # 这个块长度合适，直接使用
+                        sub_chunks = [md_chunk]
 
-                    if not chunk.page_content.strip():
-                        continue
+                    # 3. [处理子块]：处理所有细分后的块
+                    for chunk in sub_chunks:
+                        # 合并父文档元数据 (source_id, title, url...)
+                        # 和块元数据 (Header 1, Header 2...)
+                        parent_metadata = parent_doc.metadata.copy()
+                        merged_metadata = {**chunk.metadata, **parent_metadata}
+                        chunk.metadata = merged_metadata
 
-                    chunks_to_add.append(chunk)
+                        # 2. 将父标题强行注入 page_content (保持不变)
+                        if parent_title:
+                            chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
+
+                        if not chunk.page_content.strip():
+                            continue
+
+                        chunks_to_add.append(chunk)
 
             if chunks_to_add:
                 logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
