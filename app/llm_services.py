@@ -1,22 +1,35 @@
 # app/llm_services.py
 import hashlib
 import logging
-import urllib.parse
 from typing import Sequence, Any
 
 import httpx
-import redis
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
-from langchain_community.storage import RedisStore
+from langchain_community.storage import SQLStore
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+import tiktoken
 
 import config
+from database import async_engine
 
 logger = logging.getLogger(__name__)
+
+# 预加载 tiktoken tokenizer
+# OpenAIEmbeddings 会在 *首次* 异步调用时 *同步* 下载
+# cl100k_base.tiktoken，这会导致在 asyncio 事件循环中
+# 发生阻塞 I/O，引发死锁。
+# 我们在模块加载时 (Uvicorn worker 启动时) 强制
+# 同步下载它，以避免在异步任务中触发此问题。
+try:
+    logger.info("Pre-caching tiktoken tokenizer model (cl100k_base)...")
+    tiktoken.get_encoding("cl100k_base")
+    logger.info("Tiktoken model (cl100k_base) is cached.")
+except Exception as e:
+    logger.warning("Failed to pre-cache tiktoken model: %s", e)
 
 # --- 缓存键配置 ---
 _cache_prefix = f"emb:{config.EMBEDDING_MODEL}"
@@ -62,28 +75,6 @@ llm = ChatOpenAI(
 
 # --- 嵌入模型 (Embedding) ---
 
-# 3a. (同步) Redis 客户端 (仅用于 LangChain 缓存)
-_redis_cache_client = None
-if config.REDIS_URL:
-    try:
-        parsed_url = urllib.parse.urlparse(config.REDIS_URL)
-        db_num = 0
-        if parsed_url.path and parsed_url.path.startswith('/'):
-            try:
-                db_num = int(parsed_url.path[1:])
-            except (ValueError, IndexError):
-                db_num = 0
-
-        _redis_cache_client = redis.Redis(
-            host=parsed_url.hostname,
-            port=parsed_url.port,
-            password=parsed_url.password,
-            db=db_num,
-        )
-    except Exception as e:
-        logger.warning("无法为 LangChain 缓存连接到 Redis (decode=False, sync client): %s", e)
-        _redis_cache_client = None
-
 # 3b. 基础 Embedding API
 _base_embeddings = OpenAIEmbeddings(
     model=config.EMBEDDING_MODEL,
@@ -93,18 +84,32 @@ _base_embeddings = OpenAIEmbeddings(
 )
 
 # 3c. 带缓存的 Embedding 模型
-if _redis_cache_client:
-    store = RedisStore(client=_redis_cache_client, namespace="embeddings")
+# 3c. 带缓存的 Embedding 模型 (*** 修复 ***)
+# 使用 SQLStore 替换 RedisStore 来解决 sync/async 冲突
+try:
+    if not async_engine:
+        raise ValueError("database.py 中的 async_engine 不可用")
 
+    # 1. 实例化 SQLStore，用于 Embedding 缓存
+    #    我们重用 database.py 中定义的 'langchain_key_value_stores' 表
+    #    但使用一个唯一的 namespace。
+    store = SQLStore(
+        engine=async_engine,
+        namespace="embedding_cache", # <--- 为 embedding cache 使用一个唯一的 namespace
+    )
+
+    # 2. 创建带缓存的模型
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
         _base_embeddings,
         store,
         key_encoder=_sha256_encoder
     )
-    logger.info("LangChain Embedding 缓存已启用 (Redis-SyncClient, SHA256+Prefix)")
-else:
+    logger.info("LangChain Embedding 缓存已启用 (SQLStore-Async, SHA256+Prefix, namespace='embedding_cache')")
+
+except Exception as e:
+    logger.warning("无法为 LangChain 缓存配置 SQLStore: %s", e, exc_info=True)
     embeddings_model = _base_embeddings
-    logger.info("LangChain Embedding 缓存未启用")
+    logger.info("LangChain Embedding 缓存未启用 (SQLStore 初始化失败)")
 
 
 # --- 重排模型 (Reranker) ---
@@ -146,7 +151,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             "query": query,
             "documents": doc_texts,
             "top_n": self.top_n,
-            "return_documents": True
         }
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
