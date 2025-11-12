@@ -81,7 +81,13 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
         return []
 
     try:
-        reranked_chunks = await rag.compression_retriever.aget_relevant_documents(query)
+        # (调用公共的 *sync* 方法，并用 to_thread 包装)
+        # 这避免了调用 internal _aget_relevant_documents (需要 run_manager)
+        # 也避开了 public aget_relevant_documents (在 classic 包中可能缺失)
+        reranked_chunks = await asyncio.to_thread(
+            rag.compression_retriever.get_relevant_documents,
+            query
+        )
     except Exception as e:
         logger.error(f"Failed during chunk retrieval/reranking: {e}", exc_info=True)
         return []
