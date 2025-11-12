@@ -33,8 +33,8 @@ class IdempotentSQLStore(SQLStore):
     def __init__(self, **kwargs: Any):
         # 1. 确保序列化器为 None，因为我们用于 bytes 存储
         #    (CacheBackedEmbeddings.from_bytes_store)
-        kwargs['serializer'] = None
-        kwargs['deserializer'] = None
+        kwargs.pop('serializer', None)
+        kwargs.pop('deserializer', None)
 
         # 2. pop 出 'value_serializer' (如果存在)，
         #    因为父类 SQLStore (0.2.1+) 不认识它。
