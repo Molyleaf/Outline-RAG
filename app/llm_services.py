@@ -35,6 +35,14 @@ class IdempotentSQLStore(SQLStore):
         """
         显式调用父类 __init__ 来设置 self._serializer 和 self._deserializer。
         """
+        # (*** 修复 ***)
+        # 1. 从 kwargs 中提取序列化器，并设置默认值
+        #    CacheBackedEmbeddings.from_bytes_store 内部会使用 pickle
+        self._serializer = kwargs.pop('value_serializer', pickle.dumps)
+        self._deserializer = kwargs.pop('value_deserializer', pickle.loads)
+
+        # 2. 将剩余的 kwargs (不含序列化器) 传递给父类
+        #    这样父类 (SQLStore) 就不会收到意外的参数
         super().__init__(**kwargs)
 
     async def amset(self, key_value_pairs: List[Tuple[str, Any]]) -> None:
@@ -54,7 +62,7 @@ class IdempotentSQLStore(SQLStore):
                 for k, v in key_value_pairs
             ]
 
-            stmt = pg_insert(self.table).values(serialized_pairs)
+            stmt = pg_insert(self._table).values(serialized_pairs)
             safe_stmt = stmt.on_conflict_do_nothing(
                 index_elements=['key', 'namespace']
             )
@@ -73,7 +81,7 @@ class IdempotentSQLStore(SQLStore):
         try:
             with self.engine.begin() as conn:
                 for k, v in key_value_pairs:
-                    stmt = pg_insert(self.table).values(
+                    stmt = pg_insert(self._table).values(
                         key=k, value=self._serializer(v), namespace=self.namespace
                     )
                     safe_stmt = stmt.on_conflict_do_nothing(
@@ -141,8 +149,6 @@ try:
     store = IdempotentSQLStore(
         engine=async_engine,
         namespace="embedding_cache",
-        value_serializer=pickle.dumps,   # <--- 添加此行
-        value_deserializer=pickle.loads  # <--- 添加此行
     )
 
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
