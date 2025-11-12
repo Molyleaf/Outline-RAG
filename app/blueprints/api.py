@@ -19,7 +19,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
@@ -49,6 +49,7 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
     base_url = config.OUTLINE_API_URL.replace("/api", "")
 
     for i, doc in enumerate(docs):
+        # (*** 修复：现在 docs 是父文档，元数据在 metadata 属性中 ***)
         title = doc.metadata.get("title", "Untitled")
         url = doc.metadata.get("url")
 
@@ -67,6 +68,48 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
         return "未找到相关参考资料。"
 
     return "\n\n".join(formatted_docs)
+
+# (*** 新增辅助函数：用于获取父文档 ***)
+async def _get_reranked_parent_docs(query: str) -> List[Document]:
+    """
+    异步检索链，执行 块检索 -> 块重排 -> 父文档获取
+    """
+    # 1. 使用 rag.compression_retriever (已在 rag.py 中配置为 rerank chunks)
+    #    获取 Top K (6) 个最相关的 *块*
+    if not rag.compression_retriever or not rag.parent_store:
+        logger.error("RAG components (compression_retriever or parent_store) not initialized.")
+        return []
+
+    try:
+        reranked_chunks = await rag.compression_retriever.aget_relevant_documents(query)
+    except Exception as e:
+        logger.error(f"Failed during chunk retrieval/reranking: {e}", exc_info=True)
+        return []
+
+    # 2. 从块中提取父文档 ID (保持顺序并去重)
+    parent_ids = []
+    seen_ids = set()
+    for chunk in reranked_chunks:
+        source_id = chunk.metadata.get("source_id")
+        if source_id and source_id not in seen_ids:
+            parent_ids.append(source_id)
+            seen_ids.add(source_id)
+
+    if not parent_ids:
+        logger.warning(f"Reranked chunks found, but no source_ids. Query: {query}")
+        return []
+
+    # 3. 从 ParentStore (SQLStore) 异步获取唯一的父文档
+    #    rag.parent_store.amget() 是异步的
+    try:
+        parent_docs = await rag.parent_store.amget(parent_ids)
+
+        # 过滤掉 None (以防万一) 并保持顺序
+        final_docs = [doc for doc in parent_docs if doc is not None]
+        return final_docs
+    except Exception as e:
+        logger.error(f"Failed to amget parent docs ({parent_ids}) from store: {e}", exc_info=True)
+        return []
 
 # --- utils ---
 def allowed_file(filename):
@@ -279,10 +322,12 @@ async def api_ask(
         logger.critical(f"[{conv_id}] 无法初始化 RAG 组件: {e}", exc_info=True)
         return JSONResponse({"error": f"RAG 服务初始化失败: {e}"}, status_code=503)
 
+    # (*** 修复：现在 compression_retriever 返回 *块* ***)
+    # (*** parent_store 用于手动获取父文档 ***)
     compression_retriever = rag.compression_retriever
-    if compression_retriever is None:
-        logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 未能初始化。")
-        return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 未就绪"}, status_code=503)
+    if compression_retriever is None or rag.parent_store is None:
+        logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 或 'parent_store' 未能初始化。")
+        return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 或 'parent_store' 未就绪"}, status_code=503)
 
     # --- LCEL 链定义 ---
 
@@ -318,20 +363,25 @@ async def api_ask(
             | StrOutputParser()
     )
 
-    # 2. (修复 2) 移除 MultiQueryRetriever
-    #    我们现在直接将重写后的查询传递给 compression_retriever
 
-    # 3. 核心 RAG 链 (修复 2)
+    # 3. 核心 RAG 链 (*** 新架构 ***)
+    # <--- 2. 将异步函数包装为 RunnableLambda
+    get_docs_runnable = RunnableLambda(_get_reranked_parent_docs)
+
     rag_chain_pre_llm = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x["chat_history"]
             })
-            # (修复 2) 将 rewritten_query 直接传递给 compression_retriever
+            # (*** 修复 ***)
+            # 1. 将重写后的查询传递给新的异步函数 _get_reranked_parent_docs
+            #    它处理: 块检索 (k=12) -> 块重排 (k=6) -> 父文档获取
             | RunnablePassthrough.assign(
-        docs=itemgetter("rewritten_query") | compression_retriever
+        # <--- 3. 在管道中使用包装后的 RunnableLambda
+        docs=itemgetter("rewritten_query") | get_docs_runnable
     )
+            # 2. 格式化父文档
             | RunnablePassthrough.assign(
         context=lambda x: _format_docs_with_metadata(x["docs"])
     )

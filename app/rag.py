@@ -14,7 +14,6 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
-from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
@@ -29,8 +28,8 @@ logger = logging.getLogger(__name__)
 # LangChain 组件将按需延迟初始化
 vector_store: Optional[AsyncPGVectorStore] = None
 parent_store: Optional[BaseStore[str, Document]] = None
-base_retriever: Optional[BaseRetriever] = None
-compression_retriever: Optional[ContextualCompressionRetriever] = None
+base_retriever: Optional[BaseRetriever] = None # (*** 修改：现在是块检索器 ***)
+compression_retriever: Optional[ContextualCompressionRetriever] = None # (*** 修改：现在是块重排器 ***)
 
 # 确保 RAG 组件在多进程环境中只初始化一次的锁
 _rag_lock = asyncio.Lock()
@@ -99,29 +98,32 @@ async def initialize_rag_components():
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
-        # 4. 初始化基础检索器 (ParentDocumentRetriever)
-        base_retriever = ParentDocumentRetriever(
-            vectorstore=vector_store,
-            docstore=parent_store,
-            child_splitter=text_splitter,
-            id_key="source_id", # id_key 必须匹配元数据中的 "source_id"
-            search_kwargs={"k": config.TOP_K} # 使用 'search_kwargs' 定义检索的 K 值
+        # (*** 关键修复：修改检索器架构 ***)
+
+        # 4. 初始化基础 *块* 检索器 (k=12)
+        #    不再使用 ParentDocumentRetriever
+        base_retriever = vector_store.as_retriever(
+            search_kwargs={"k": config.TOP_K}
         )
-        logger.info(f"Base retriever configured (ParentDocumentRetriever, search_kwargs k={config.TOP_K}).")
+        logger.info(f"Base chunk retriever configured (PGVectorStore.as_retriever, k={config.TOP_K}).")
 
         # 5. 初始化压缩/重排管线
         pipeline_compressor = DocumentCompressorPipeline(
             transformers=[
-                reranker # 异步 Reranker
+                reranker # 异步 Reranker (top_n=K=6)
             ]
         )
 
+        # 6. 创建一个 reranker 包装的 *块* 检索器
+        #    这个检索器现在返回 Top K (6) 个最相关的 *块*
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=pipeline_compressor,
             base_retriever=base_retriever
         )
 
-        logger.info("RAG components initialization complete.")
+        # (*** 修复结束 ***)
+
+        logger.info("RAG components initialization complete (Reranking Chunks).")
 
 
 # 这个分割器将由 ParentDocumentRetriever 在索引时用于创建子块
@@ -195,12 +197,32 @@ async def process_doc_batch_task(doc_ids: list):
 
     if docs_to_process_lc:
         # 2. 将父文档分割为子块
-        # PGVectorStore (v2) 会自动从父文档元数据中
-        # 提取 'metadata_columns' 中定义的键，并将其传递给子块。
-        chunks = text_splitter.split_documents(docs_to_process_lc)
+        # (*** 关键修复：使用 `split_documents_for_indexing` ***)
+        #    我们需要手动将 'source_id' 复制到子块中，
+        #    因为我们不再使用 ParentDocumentRetriever 的索引逻辑。
 
-        if chunks:
-            logger.info(f"Processing {len(chunks)} chunks for {len(successful_ids)} documents...")
+        chunks_to_add = []
+        parents_to_add = []
+
+        for parent_doc in docs_to_process_lc:
+            source_id = parent_doc.metadata.get("source_id")
+            if not source_id:
+                logger.warning(f"Skipping document with no source_id: {parent_doc.metadata.get('title')}")
+                continue
+
+            parents_to_add.append((source_id, parent_doc))
+
+            # 分割子块
+            child_chunks = text_splitter.split_documents([parent_doc])
+
+            # (*** 关键 ***) 确保子块继承了正确的元数据
+            for chunk in child_chunks:
+                # 复制所有元数据
+                chunk.metadata = parent_doc.metadata.copy()
+                chunks_to_add.append(chunk)
+
+        if chunks_to_add:
+            logger.info(f"Processing {len(chunks_to_add)} chunks for {len(successful_ids)} documents...")
 
             # 3. 手动从 PGVector 删除旧的子块
             ids_to_delete = []
@@ -226,7 +248,7 @@ async def process_doc_batch_task(doc_ids: list):
                 except Exception as e:
                     logger.error(f"vector_store.adelete (async) failed for chunks {ids_to_delete}: {e}. Continuing...", exc_info=True)
 
-            # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
+            # 4. 异步手动执行索引逻辑
             try:
                 # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
                 if embedding_cache_store:
@@ -237,7 +259,7 @@ async def process_doc_batch_task(doc_ids: list):
                     # key_encoder 是在 llm_services.py 中附加到实例上的
                     if hasattr(embeddings_model, "key_encoder"):
                         key_encoder = embeddings_model.key_encoder
-                        keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks]
+                        keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks_to_add]
 
                         if keys_to_delete:
                             logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
@@ -247,16 +269,15 @@ async def process_doc_batch_task(doc_ids: list):
 
 
                 # 4b. 将父文档存入 SQLStore (使用原生异步 amset)
-                parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
-                await parent_store.amset(parent_docs_tuples)
+                await parent_store.amset(parents_to_add)
 
                 # 4c. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
                 #     由于缓存已清除，这将强制调用 OpenAIEmbeddings API
                 #     v2 引擎会自动将元数据映射到正确的列
-                await vector_store.aadd_documents(chunks)
+                await vector_store.aadd_documents(chunks_to_add)
 
             except Exception as e:
-                logger.error(f"Failed (async) to add {len(chunks)} chunks or {len(docs_to_process_lc)} parent docs: {e}.", exc_info=True)
+                logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
 
 
     # 5. 更新 Redis 中的任务计数器 (使用异步 client)
