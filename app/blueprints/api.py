@@ -47,7 +47,8 @@ def _format_docs_with_metadata(docs: List[Document]) -> dict:
     返回: {"context": str, "sources_map": dict}
     """
     formatted_docs = []
-    base_url = config.OUTLINE_API_URL.replace("/api", "")
+    api_base_url = config.OUTLINE_API_URL.replace("/api", "")
+    display_base_url = config.OUTLINE_DISPLAY_URL.replace("/api", "") if config.OUTLINE_DISPLAY_URL else api_base_url
 
     # 收集每条文档的最终 URL，供后续 [来源 n] 超链接引用
     resolved_urls: list[str] = []
@@ -58,8 +59,13 @@ def _format_docs_with_metadata(docs: List[Document]) -> dict:
 
         # 归一化 URL
         if url:
-            if url.startswith('/'):
-                url = f"{base_url}{url}"
+            # [MODIFIED] 替换 internal URL 为 external display URL
+            # 检查 config.OUTLINE_DISPLAY_URL 是否已设置
+            if config.OUTLINE_DISPLAY_URL and api_base_url and url.startswith(api_base_url):
+                url = url.replace(api_base_url, display_base_url, 1)
+            elif url.startswith('/'):
+                # (回退逻辑) 如果 URL 是相对路径，使用 display_base_url
+                url = f"{display_base_url}{url}"
         else:
             url = ""
 

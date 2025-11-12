@@ -9,7 +9,7 @@
 function processCitations(element) {
     if (!element) return;
 
-    // 1) 从当前消息 DOM 中提取 SourcesMap（在同一 .bubble-inner 内部的文本里）
+    // 从当前消息 DOM 中提取 SourcesMap（在同一 .bubble-inner 内部的文本里）
     // 向上寻找最近的 .bubble-inner 作为消息作用域
     const scope = element.closest('.bubble-inner') || element;
     let sourcesMap = {};
@@ -22,7 +22,7 @@ function processCitations(element) {
         } catch (_) { /* ignore */ }
     }
 
-    // 2) 将 [来源 n] 转为链接
+    // 将 [来源 n] 转为链接
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const nodesToReplace = [];
     const citationTestRegex = /\[(来源|参考|参考资料)\s*(\d+)]/;
@@ -62,15 +62,26 @@ function processCitations(element) {
         node.parentElement.replaceChild(fragment, node);
     });
 
-    // 3) 清理作用域中残留的 “[SourcesMap]: {...}” 文本（不影响已生成的链接）
-    // 仅清理显示，不去改原始消息
-    Array.from(scope.querySelectorAll('.md-body, .thinking-content, .bubble-inner')).forEach(block => {
-        block.childNodes.forEach(n => {
-            if (n.nodeType === Node.TEXT_NODE && /\[SourcesMap]:\s*\{/.test(n.nodeValue)) {
-                // 仅移除这一段标记行
-                n.nodeValue = n.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
-            }
-        });
+    // 清理作用域中残留的 “[SourcesMap]: {...}” 文本（不影响已生成的链接）
+    // 使用 TreeWalker 深度清理，确保 <p> 标签内的也能被移除
+    const cleanupWalker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    const nodesToClean = [];
+    const mapRegex = /\[SourcesMap]:\s*\{/;
+
+    while (cleanupWalker.nextNode()) {
+        const node = cleanupWalker.currentNode;
+        if (mapRegex.test(node.nodeValue)) {
+            nodesToClean.push(node);
+        }
+    }
+
+    nodesToClean.forEach(node => {
+        // 仅移除这一段标记行
+        node.nodeValue = node.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
+        // (新) 如果清理后 P 标签变空，则移除 P 标签
+        if (node.parentElement && node.parentElement.tagName === 'P' && !node.parentElement.textContent.trim()) {
+            node.parentElement.remove();
+        }
     });
 }
 
