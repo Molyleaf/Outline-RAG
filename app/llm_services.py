@@ -33,17 +33,43 @@ class IdempotentSQLStore(SQLStore):
 
     def __init__(self, **kwargs: Any):
         """
-        显式调用父类 __init__ 来设置 self._serializer 和 self._deserializer。
+        显式调用父类 __init__ 来设置 self._serializer 和 self._deserializer，
+        并确保 engine 和 namespace 被传递。
         """
-        # (*** 修复 ***)
-        # 1. 从 kwargs 中提取序列化器，并设置默认值
-        #    CacheBackedEmbeddings.from_bytes_store 内部会使用 pickle
+
+        # (*** 修复 v2 ***)
+
+        # 1. 显式地从 kwargs 中提取 engine 和 namespace。
+        #    这是调用父类所必需的。
+        try:
+            engine = kwargs.pop('engine')
+            namespace = kwargs.pop('namespace')
+        except KeyError as e:
+            # 如果 store = IdempotentSQLStore() 被错误调用（没有 engine/namespace），
+            # 我们希望它立即失败，而不是在 amset() 中才失败。
+            raise ValueError(f"IdempotentSQLStore __init__ 缺少必需参数: {e}") from e
+
+        # 2. (*** 原始修复逻辑 ***)
+        #    从 *剩余* 的 kwargs 中 pop 出序列化器。
+        #    这可以防止 'value_serializer' 被意外传递给
+        #    不支持它的旧版 SQLStore (0.0.1)。
         self._serializer = kwargs.pop('value_serializer', pickle.dumps)
         self._deserializer = kwargs.pop('value_deserializer', pickle.loads)
 
-        # 2. 将剩余的 kwargs (不含序列化器) 传递给父类
-        #    这样父类 (SQLStore) 就不会收到意外的参数
-        super().__init__(**kwargs)
+        # 3. (*** 关键修复 ***)
+        #    使用提取的 engine 和 namespace 显式调用 super().__init__。
+        #
+        #    - 对于 SQLStore (0.0.1, __init__(self, engine, namespace)):
+        #      这将调用 super(engine=..., namespace=...)。
+        #      剩余的 **kwargs (现在为空) 被安全地忽略。
+        #
+        #    - 对于 SQLStore (0.2.1+, __init__(self, engine, namespace, *, ...)):
+        #      这将调用 super(engine=..., namespace=...)。
+        #      (我们已经 pop 了序列化器，所以 0.2.1 将使用其默认值)
+        #
+        #    这种方式确保了 SQLStore.__init__ 总能被正确调用并设置 self._table。
+        super().__init__(engine=engine, namespace=namespace, **kwargs)
+
 
     async def amset(self, key_value_pairs: List[Tuple[str, Any]]) -> None:
         """
