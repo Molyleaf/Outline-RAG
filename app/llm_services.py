@@ -2,6 +2,7 @@
 import hashlib
 import logging
 from typing import Sequence, Any, List, Tuple
+import pickle
 
 import httpx
 from httpx import Response
@@ -140,6 +141,8 @@ try:
     store = IdempotentSQLStore(
         engine=async_engine,
         namespace="embedding_cache",
+        value_serializer=pickle.dumps,   # <--- 添加此行
+        value_deserializer=pickle.loads  # <--- 添加此行
     )
 
     embeddings_model = CacheBackedEmbeddings.from_bytes_store(
