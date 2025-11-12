@@ -105,6 +105,9 @@ try:
         store,
         key_encoder=_sha256_encoder
     )
+
+    embeddings_model.key_encoder = _sha256_encoder
+
     logger.info("LangChain Embedding 缓存已启用 (SQLStore-Async, SHA256+Prefix, namespace='embedding_cache')")
 
 except Exception as e:

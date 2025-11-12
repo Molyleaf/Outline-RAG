@@ -116,15 +116,25 @@ CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
 CREATE INDEX IF NOT EXISTS idx_langchain_kv_namespace ON langchain_key_value_stores(namespace);
 """
 
-# PGVector 表结构
+# PGVector 表结构 (v2 显式列)
+# 移除了 cmetadata JSONB 列
 PGVECTOR_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
     langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT,
     embedding vector({VECTOR_DIM}),
-    cmetadata JSONB,
+    
+    /* v2 显式元数据列 */
+    source_id TEXT,
+    title TEXT,
+    outline_updated_at_str TEXT,
+    url TEXT,
+    
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+/* 为最常用的元数据字段 source_id 创建索引 */
+CREATE INDEX IF NOT EXISTS idx_langchain_embedding_source_id ON langchain_pg_embedding(source_id);
 """
 
 # 异步数据库初始化

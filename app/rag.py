@@ -14,6 +14,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
+# (*** 1. 添加 Column 导入 ***)
+from langchain_postgres import Column
 from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -77,6 +79,7 @@ async def initialize_rag_components():
         logger.info("ParentStore configured (EncoderBackedStore over SQLStore).")
 
 
+        # (*** 2. 修改 PGVectorStore 初始化 ***)
         # 3. 初始化 PGVectorStore (子块存储)
         pg_engine_wrapper = PGEngine.from_engine(async_engine)
         try:
@@ -84,8 +87,16 @@ async def initialize_rag_components():
                 engine=pg_engine_wrapper,
                 embedding_service=embeddings_model,
                 table_name="langchain_pg_embedding",
+
+                # 告知 v2 存储引擎我们正在使用的显式元数据列
+                metadata_columns=[
+                    Column("source_id", "TEXT"),
+                    Column("title", "TEXT"),
+                    Column("outline_updated_at_str", "TEXT"),
+                    Column("url", "TEXT"),
+                ],
             )
-            logger.info("AsyncPGVectorStore (v2) initialized.")
+            logger.info("AsyncPGVectorStore (v2) initialized (using explicit metadata columns).")
         except Exception as e:
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
@@ -95,7 +106,7 @@ async def initialize_rag_components():
             vectorstore=vector_store,
             docstore=parent_store,
             child_splitter=text_splitter,
-            id_key="source_id",
+            id_key="source_id", # id_key 必须匹配元数据中的 "source_id"
             search_kwargs={"k": config.TOP_K} # 使用 'search_kwargs' 定义检索的 K 值
         )
         logger.info(f"Base retriever configured (ParentDocumentRetriever, search_kwargs k={config.TOP_K}).")
@@ -160,7 +171,7 @@ async def process_doc_batch_task(doc_ids: list):
             continue
 
         # (*** 步骤 3: 组合数据 ***)
-        content = export_data or ""
+        content = export_data.get("text") or "" # (*** 修复: export_data 是一个 dict, 我们需要 'text' 字段 ***)
         if not content.strip():
             logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
             skipped_ids.add(doc_id)
@@ -185,6 +196,8 @@ async def process_doc_batch_task(doc_ids: list):
 
     if docs_to_process_lc:
         # 2. 将父文档分割为子块
+        # PGVectorStore (v2) 会自动从父文档元数据中
+        # 提取 'metadata_columns' 中定义的键，并将其传递给子块。
         chunks = text_splitter.split_documents(docs_to_process_lc)
 
         if chunks:
@@ -197,7 +210,8 @@ async def process_doc_batch_task(doc_ids: list):
                     ids_to_delete_rows = (await session.execute(
                         text("""
                              SELECT langchain_id FROM langchain_pg_embedding
-                             WHERE (cmetadata ->> 'source_id') = ANY(:source_ids)
+                             /* (*** 3. 修改SQL查询 (A) ***) */
+                             WHERE source_id = ANY(:source_ids)
                              """),
                         {"source_ids": list(successful_ids)}
                     )).fetchall()
@@ -214,18 +228,24 @@ async def process_doc_batch_task(doc_ids: list):
                     logger.error(f"vector_store.adelete (async) failed for chunks {ids_to_delete}: {e}. Continuing...", exc_info=True)
 
             # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
-            # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
             try:
                 # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
                 if embedding_cache_store:
                     # 我们需要访问 CacheBackedEmbeddings 内部的 key_encoder
                     # 来正确生成用于删除的哈希键。
-                    key_encoder = embeddings_model.key_encoder
-                    keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks]
 
-                    if keys_to_delete:
-                        logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
-                        await embedding_cache_store.amdelete(keys_to_delete)
+                    # (*** 修复 AttributeError ***)
+                    # key_encoder 是在 llm_services.py 中附加到实例上的
+                    if hasattr(embeddings_model, "key_encoder"):
+                        key_encoder = embeddings_model.key_encoder
+                        keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks]
+
+                        if keys_to_delete:
+                            logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
+                            await embedding_cache_store.amdelete(keys_to_delete)
+                    else:
+                        logger.warning("embeddings_model missing 'key_encoder' attribute, skipping embedding cache deletion.")
+
 
                 # 4b. 将父文档存入 SQLStore (使用原生异步 amset)
                 parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
@@ -233,6 +253,7 @@ async def process_doc_batch_task(doc_ids: list):
 
                 # 4c. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
                 #     由于缓存已清除，这将强制调用 OpenAIEmbeddings API
+                #     v2 引擎会自动将元数据映射到正确的列
                 await vector_store.aadd_documents(chunks)
 
             except Exception as e:
@@ -273,11 +294,12 @@ async def refresh_all_task():
             async with AsyncSessionLocal.begin() as session:
                 local_docs_raw = (await session.execute(
                     text("""
-                         SELECT DISTINCT ON ((cmetadata ->> 'source_id'))
-                             (cmetadata ->> 'source_id') as id,
-                             (cmetadata ->> 'outline_updated_at_str') as outline_updated_at_str
+                         /* (*** 3. 修改SQL查询 (B) ***) */
+                         SELECT DISTINCT ON (source_id)
+                             source_id as id,
+                             outline_updated_at_str
                          FROM langchain_pg_embedding
-                         WHERE (cmetadata ->> 'source_id') IS NOT NULL
+                         WHERE source_id IS NOT NULL
                          """)
                 )).mappings().all()
                 local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('id') and doc.get('outline_updated_at_str')}
@@ -357,7 +379,8 @@ async def delete_doc(doc_id):
             ids_to_delete_rows = (await session.execute(
                 text("""
                      SELECT langchain_id FROM langchain_pg_embedding
-                     WHERE (cmetadata ->> 'source_id') = :source_id
+                     /* (*** 3. 修改SQL查询 (C) ***) */
+                     WHERE source_id = :source_id
                      """),
                 {"source_id": doc_id}
             )).fetchall()
