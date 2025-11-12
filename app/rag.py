@@ -201,7 +201,7 @@ async def process_doc_batch_task(doc_ids: list):
 
                 # [分割]：使用 child_splitter (Recursive) 对 *整个文档* 进行分割
                 #    split_document 会自动将 parent_doc.metadata 复制到所有子块中。
-                sub_chunks = child_splitter.split_documents(parent_doc)
+                sub_chunks = child_splitter.split_documents([parent_doc])
 
                 # [处理子块]：
                 for chunk in sub_chunks:
