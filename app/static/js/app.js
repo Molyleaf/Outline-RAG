@@ -1,6 +1,6 @@
 // app/static/js/app.js
 
-// (新) Req 5: 溯源处理函数
+// Req 5: 溯源处理函数
 /**
  * 将 [来源 n] 文本包裹为可点击的 <a class="citation">，链接到后端提供的 URL
  * 需要从同一消息块内的 “[SourcesMap]: {...}” 提示中读取编号到 URL 的映射
@@ -76,11 +76,22 @@ function processCitations(element) {
     }
 
     nodesToClean.forEach(node => {
-        // 仅移除这一段标记行
-        node.nodeValue = node.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
-        // (新) 如果清理后 P 标签变空，则移除 P 标签
-        if (node.parentElement && node.parentElement.tagName === 'P' && !node.parentElement.textContent.trim()) {
-            node.parentElement.remove();
+        // 检查父元素 (通常是 <p>) 是否只包含 SourcesMap
+        if (node.parentElement) {
+            const parentText = node.parentElement.textContent || '';
+            // 如果父元素的纯文本内容以 [SourcesMap] 开头（允许前面有空格）
+            // 并且它是一个 <p> 标签，我们就直接隐藏这个 <p>
+            // (这是你请求的修复：隐藏父 <p> 标签)
+            if (node.parentElement.tagName === 'P' && parentText.trim().startsWith('[SourcesMap]:')) {
+                node.parentElement.style.display = 'none';
+            } else {
+                // 回退：如果它混合在其他内容中（不太可能），
+                // 只清理文本节点本身，并尝试旧的删除逻辑
+                node.nodeValue = node.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
+                if (node.parentElement.tagName === 'P' && !node.parentElement.textContent.trim()) {
+                    node.parentElement.style.display = 'none';
+                }
+            }
         }
     });
 }
@@ -88,14 +99,14 @@ function processCitations(element) {
 
 async function loadUser() {
     const data = await api('/chat/api/me');
-    if (!data || !data.user) return; // (新) 检查 data 和 data.user
+    if (!data || !data.user) return; // 检查 data 和 data.user
     userInfo = data.user;
-    MODELS = data.models || {}; // (新) 填充全局 MODELS
+    MODELS = data.models || {}; // 填充全局 MODELS
 
     // 主界面右上角仍显示用户头像
     avatar.style.backgroundImage = 'url(\'' + (userInfo.avatar_url || '') + '\')';
 
-    // (新) 验证 currentModelId 并设置默认值
+    // 验证 currentModelId 并设置默认值
     const availableModelIds = Object.keys(MODELS);
     if (!currentModelId || !MODELS[currentModelId]) {
         currentModelId = availableModelIds[0]; // 使用列表中的第一个作为默认
@@ -104,7 +115,7 @@ async function loadUser() {
         }
     }
 
-    // (新) 设置 T 和 P
+    // 设置 T 和 P
     if (currentModelId && MODELS[currentModelId]) {
         currentTemperature = MODELS[currentModelId].temp;
         currentTopP = MODELS[currentModelId].top_p;
@@ -115,7 +126,7 @@ async function loadUser() {
         currentTemperature = MODELS[currentModelId].temp;
         currentTopP = MODELS[currentModelId].top_p;
     } else {
-        // (新) 没有可用模型
+        // 没有可用模型
         console.error("没有可用的模型。");
         currentModelId = null;
     }
@@ -468,16 +479,16 @@ async function loadMessages() {
     const res = await api('/chat/api/messages?conv_id=' + currentConvId);
     const msgs = res?.items || [];
 
-    msgs.forEach(m => appendMsg(m.role, m.content, m, m.id)); // (新) 传入 m.id
+    msgs.forEach(m => appendMsg(m.role, m.content, m, m.id)); // 传入 m.id
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-// (新) 增加 messageId 参数
+// 增加 messageId 参数
 function appendMsg(role, text, metadata = {}, messageId = null) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
     if (messageId) {
-        div.dataset.messageId = messageId; // (新) 存储消息 ID
+        div.dataset.messageId = messageId; // 存储消息 ID
     }
 
     const avatarEl = document.createElement('div');
@@ -502,7 +513,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
     const bubbleInner = document.createElement('div');
     bubbleInner.className = 'bubble-inner';
 
-    // (新) 提取 Thinking 内容
+    // 提取 Thinking 内容
     let thinkingText = '';
     let contentText = String(text ?? '');
     // (新 Req 1) 适配后端的 `` 格式
@@ -516,10 +527,10 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
 
     // (新 Req 1) 如果有 Thinking 内容，则渲染 (使用 <details>)
     if (thinkingText) {
-        const thinkingBlock = document.createElement('details'); // (新) 使用 <details>
+        const thinkingBlock = document.createElement('details'); // 使用 <details>
         thinkingBlock.className = 'thinking-block';
 
-        const summary = document.createElement('summary'); // (新) 使用 <summary>
+        const summary = document.createElement('summary'); // 使用 <summary>
         summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>显示思维链</span>';
 
         const thinkingContent = document.createElement('div');
@@ -539,18 +550,18 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
     bubbleInner.appendChild(node);
     bubble.appendChild(bubbleInner);
 
-    // (新) 创建操作按钮容器
+    // 创建操作按钮容器
     const bubbleActions = document.createElement('div');
     bubbleActions.className = 'bubble-actions';
 
-    // (新) 复制按钮 (Req 5)
+    // 复制按钮 (Req 5)
     const copyBtn = document.createElement('button');
     copyBtn.className = 'btn-icon copy-btn';
     copyBtn.title = '复制';
     copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
     copyBtn.onclick = (e) => {
         e.stopPropagation();
-        const textToCopy = contentText; // (新) 复制解析后的 content
+        const textToCopy = contentText; // 复制解析后的 content
         const ta = document.createElement('textarea');
         ta.value = textToCopy;
         ta.style.position = 'absolute';
@@ -567,7 +578,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
     };
     bubbleActions.appendChild(copyBtn);
 
-    // (新) 编辑按钮 (Req 4)
+    // 编辑按钮 (Req 4)
     if (role === 'user' && messageId) {
         const editBtn = document.createElement('button');
         editBtn.className = 'btn-icon edit-btn';
@@ -576,7 +587,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
 
         editBtn.onclick = (e) => {
             e.stopPropagation();
-            qEl.value = contentText; // (新) 复制解析后的 content
+            qEl.value = contentText; // 复制解析后的 content
             qEl.focus();
             qEl.dataset.editingMessageId = messageId; // 存储 ID
 
@@ -605,7 +616,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
         bubbleActions.appendChild(editBtn);
     }
 
-    // (新) 将按钮容器添加到气泡中
+    // 将按钮容器添加到气泡中
     if (role === 'user') {
         bubble.appendChild(bubbleActions);
     } else {
@@ -652,25 +663,25 @@ async function sendQuestion() {
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = 'none';
 
-    // (新) 检查是否处于编辑模式
+    // 检查是否处于编辑模式
     const editingId = qEl.dataset.editingMessageId;
 
     qEl.value = '';
     const ev = new Event('input');
     qEl.dispatchEvent(ev);
 
-    // (新) 如果在编辑，清理 UI
+    // 如果在编辑，清理 UI
     if (editingId) {
         delete qEl.dataset.editingMessageId;
         const inputInner = document.querySelector('.input-inner');
         inputInner.querySelector('.cancel-edit-btn')?.remove();
         inputInner.classList.remove('is-editing');
 
-        // (新) 编辑模式下，清空该消息之后的所有 DOM 元素
+        // 编辑模式下，清空该消息之后的所有 DOM 元素
         let msgElement = document.querySelector(`.msg[data-message-id="${editingId}"]`);
         if (msgElement) {
             // 更新该消息的内容
-            // (新) 清空旧内容（包括 thinking 和 md-body）
+            // 清空旧内容（包括 thinking 和 md-body）
             const bubbleInner = msgElement.querySelector('.bubble-inner');
             if (bubbleInner) {
                 bubbleInner.innerHTML = ''; // 完全清空
@@ -679,7 +690,7 @@ async function sendQuestion() {
                 processCitations(node);
                 bubbleInner.appendChild(node);
 
-                // (新) 重新附加操作按钮
+                // 重新附加操作按钮
                 const bubbleActions = document.createElement('div');
                 bubbleActions.className = 'bubble-actions';
                 // ... 复制按钮 ...
@@ -689,7 +700,7 @@ async function sendQuestion() {
                 copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
                 copyBtn.onclick = (e) => {
                     e.stopPropagation();
-                    const textToCopy = text; // (新) 复制新文本
+                    const textToCopy = text; // 复制新文本
                     const ta = document.createElement('textarea');
                     ta.value = textToCopy;
                     ta.style.position = 'absolute';
@@ -723,7 +734,7 @@ async function sendQuestion() {
                     }
                 };
                 bubbleActions.appendChild(editBtn);
-                // (新) user 消息的操作按钮在 .bubble 外部
+                // user 消息的操作按钮在 .bubble 外部
                 const bubble = msgElement.querySelector('.bubble');
                 if (bubble) bubble.appendChild(bubbleActions);
             }
@@ -737,7 +748,7 @@ async function sendQuestion() {
             }
         }
     } else {
-        // (新) 非编辑模式才可能创建新会话
+        // 非编辑模式才可能创建新会话
         if (!currentConvId) {
             const c = await api('/chat/api/conversations', {method:'POST', body: JSON.stringify({title: text.slice(0,30) || '新会话'})});
             const newId = c?.id;
@@ -750,7 +761,7 @@ async function sendQuestion() {
             try { history.replaceState(null, '', newUrl); } catch(_) { location.href = newUrl; return; }
             try { await loadConvs(); } catch(_) {}
         }
-        // (新) 非编辑模式才追加新用户消息, 并获取 ID
+        // 非编辑模式才追加新用户消息, 并获取 ID
         const newUserMsgDiv = appendMsg('user', text, {}, `temp-id-${Date.now()}`);
         qEl.value = '';
     }
@@ -771,7 +782,7 @@ async function sendQuestion() {
         return;
     }
 
-    // 2. (新) .md-body 是流式 *内容* 的容器
+    // 2. .md-body 是流式 *内容* 的容器
     let messageContainer = document.createElement('div');
     messageContainer.className = 'md-body streaming';
 
@@ -780,7 +791,7 @@ async function sendQuestion() {
     loaderEl.innerHTML = '<span></span><span></span><span></span>';
     messageContainer.appendChild(loaderEl);
 
-    // (新) 始终将 .md-body 附加到 .bubble-inner
+    // 始终将 .md-body 附加到 .bubble-inner
     bubbleInner.appendChild(messageContainer);
 
 
@@ -789,8 +800,8 @@ async function sendQuestion() {
     messageContainer.appendChild(currentStreamingDiv);
 
     let currentStreamingBuffer = ''; // 用于当前 div 的原始 Markdown 累积
-    let currentThinkingBuffer = ''; // (新) Req 1: 用于 thinking 的累积
-    // (新) Req 1: 跟踪思维链状态的标志
+    let currentThinkingBuffer = ''; // Req 1: 用于 thinking 的累积
+    // Req 1: 跟踪思维链状态的标志
     let thinking_block_created = false;
     let thinking_has_been_collapsed = false;
 
@@ -829,8 +840,8 @@ async function sendQuestion() {
         // (新 Req 5) 在最终内容上处理溯源
         processCitations(currentStreamingDiv);
 
-        // (新) 最终化后，重新加载消息以获取正确的 ID 并附加按钮
-        // (新) 延迟一点点加载，确保数据库已写入
+        // 最终化后，重新加载消息以获取正确的 ID 并附加按钮
+        // 延迟一点点加载，确保数据库已写入
         setTimeout(loadMessages, 100);
     };
 
@@ -843,7 +854,7 @@ async function sendQuestion() {
             model: currentModelId,
             temperature: currentTemperature,
             top_p: currentTopP,
-            edit_source_message_id: editingId || null // (新) 发送 ID
+            edit_source_message_id: editingId || null // 发送 ID
         }),
         headers: {'Content-Type':'application/json'},
         credentials: 'include'
@@ -905,16 +916,16 @@ async function sendQuestion() {
 
                         // --- 流式处理核心逻辑 ---
                         const delta = j.choices?.[0]?.delta?.content;
-                        const thinking = j.choices?.[0]?.delta?.thinking; // (新) Req 1
+                        const thinking = j.choices?.[0]?.delta?.thinking; // Req 1
 
-                        // (新) 收到第一个数据块时，移除加载动画
+                        // 收到第一个数据块时，移除加载动画
                         const loader = messageContainer.querySelector('.loading-dots');
                         if (!firstChunkReceived && (typeof delta === 'string' && delta.length > 0) || (typeof thinking === 'string' && thinking.length > 0)) {
                             if (loader) loader.remove();
                             firstChunkReceived = true;
                         }
 
-                        // (新) Req 1: 处理 Thinking (实时渲染)
+                        // Req 1: 处理 Thinking (实时渲染)
                         if (typeof thinking === 'string' && thinking.trim().length > 0) { // [!code ++] (修复 1: 增加 .trim() 检查)
                             currentThinkingBuffer = thinking; // Thinking 是状态，直接覆盖
                             let thinkingBlock = bubbleInner.querySelector('.thinking-block');
@@ -952,7 +963,7 @@ async function sendQuestion() {
 
                         if (typeof delta === 'string' && delta.length > 0) {
 
-                            // (新) Req 1: 收到第一个 content 块，折叠思维链
+                            // Req 1: 收到第一个 content 块，折叠思维链
                             if (thinking_block_created && !thinking_has_been_collapsed) {
                                 const thinkingBlock = bubbleInner.querySelector('.thinking-block');
                                 if (thinkingBlock) {
