@@ -15,6 +15,7 @@ REDIS_URL = os.getenv("REDIS_URL")
 
 # --- Outline ---
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
+OUTLINE_DISPLAY_URL = os.getenv("OUTLINE_DISPLAY_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
 OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "123").strip()
 OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "true").lower() == "true"

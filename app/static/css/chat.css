@@ -273,7 +273,7 @@
 
 /* (新) Req 5: 溯源引用样式 */
 .citation {
-    display: inline-block;
+    display: inline;
     font-size: 0.75rem;
     line-height: 1;
     font-weight: 700;

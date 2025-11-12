@@ -452,7 +452,7 @@ async def api_ask(
          }
          ),
         # RAG 分支 (rag_chain) 已符合此格式
-        rag_chain
+        rag_chain_pre_llm | rag_chain
     )
     # --- RAG 链定义结束 ---
 
