@@ -40,22 +40,23 @@ async def get_db_session():
     async with AsyncSessionLocal() as session:
         yield session
 
-# --- (新) Req 5: 溯源格式化函数 ---
-def _format_docs_with_metadata(docs: List[Document]) -> str:
+# --- 溯源格式化函数 ---
+def _format_docs_with_metadata(docs: List[Document]) -> dict:
     """
-    将文档列表格式化为带元数据（标题、来源URL）的字符串，用于 RAG 提示词。
+    将文档列表格式化为 RAG 提示词，并单独返回溯源 URL Map。
+    返回: {"context": str, "sources_map": dict}
     """
     formatted_docs = []
     base_url = config.OUTLINE_API_URL.replace("/api", "")
 
-    # 先收集每条文档的最终 URL，供后续 [来源 n] 超链接引用
+    # 收集每条文档的最终 URL，供后续 [来源 n] 超链接引用
     resolved_urls: list[str] = []
 
     for i, doc in enumerate(docs):
         title = doc.metadata.get("title", "Untitled")
         url = doc.metadata.get("url")
 
-        # 归一化 URL（后端负责补全 base）
+        # 归一化 URL
         if url:
             if url.startswith('/'):
                 url = f"{base_url}{url}"
@@ -72,36 +73,32 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
         formatted_docs.append(doc_str)
 
     if not formatted_docs:
-        return "未找到相关参考资料。"
+        context_str = "未找到相关参考资料。"
+    else:
+        context_str = "\n\n".join(formatted_docs)
 
-    # 在末尾追加一个可解析的 JSON 块，供前端提取编号到 URL 的映射，实现 [来源 n] 可点击
+    # 单独创建 SourcesMap
     try:
         mapping = {str(i + 1): (resolved_urls[i] or "") for i in range(len(resolved_urls))}
-        formatted_docs.append(f"\n[SourcesMap]: {json.dumps(mapping, ensure_ascii=False)}")
     except Exception:
-        # 安全兜底，即使序列化失败也不影响 QA
-        pass
+        mapping = {}
 
-    return "\n\n".join(formatted_docs)
+    return {
+        "context": context_str,
+        "sources_map": mapping
+    }
 
-# (*** 新增辅助函数：用于获取父文档 ***)
+# 辅助函数：用于获取父文档
 async def _get_reranked_parent_docs(query: str) -> List[Document]:
     """
     异步检索链，执行 块检索 -> 块重排 -> 父文档获取
     """
-    # 1. 使用 rag.compression_retriever (已在 rag.py 中配置为 rerank chunks)
-    #    获取 Top K (6) 个最相关的 *块*
     if not rag.compression_retriever or not rag.parent_store:
         logger.error("RAG components (compression_retriever or parent_store) not initialized.")
         return []
 
     try:
-        # (*** 修复 ***)
-        # 'ContextualCompressionRetriever' 继承自 'BaseRetriever',
-        # 'BaseRetriever' 实现了 'Runnable' 接口。
-        # 我们应该使用 'ainvoke' (LCEL) 方法来调用它，
-        # 'ainvoke' 会正确处理内部的 RunManager。
-        # aget_relevant_documents 在这个 Pydantic/Classic 组合中似乎有问题。
+        # 1. 获取 Top K (6) 个最相关的 *块*
         reranked_chunks = await rag.compression_retriever.ainvoke(
             query
         )
@@ -123,10 +120,8 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
         return []
 
     # 3. 从 ParentStore (SQLStore) 异步获取唯一的父文档
-    #    rag.parent_store.amget() 是异步的
     try:
         parent_docs = await rag.parent_store.amget(parent_ids)
-
         # 过滤掉 None (以防万一) 并保持顺序
         final_docs = [doc for doc in parent_docs if doc is not None]
         return final_docs
@@ -220,7 +215,6 @@ async def api_create_conversation(
 
     try:
         async with session.begin():
-            # --- (修复 3) 修复：外键约束错误 ---
             # 在插入 conversation 之前，确保 user 存在于 users 表中
             await session.execute(
                 text("""
@@ -232,7 +226,6 @@ async def api_create_conversation(
                      """),
                 {"id": uid, "name": name, "avatar_url": avatar_url}
             )
-            # --- 修复结束 ---
 
             await session.execute(
                 text("INSERT INTO conversations (id, user_id, title) VALUES (:id, :u, :t)"),
@@ -345,8 +338,6 @@ async def api_ask(
         logger.critical(f"[{conv_id}] 无法初始化 RAG 组件: {e}", exc_info=True)
         return JSONResponse({"error": f"RAG 服务初始化失败: {e}"}, status_code=503)
 
-    # (*** 修复：现在 compression_retriever 返回 *块* ***)
-    # (*** parent_store 用于手动获取父文档 ***)
     compression_retriever = rag.compression_retriever
     if compression_retriever is None or rag.parent_store is None:
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 或 'parent_store' 未能初始化。")
@@ -355,21 +346,16 @@ async def api_ask(
     # --- LCEL 链定义 ---
 
     # 修复：根据模型名称动态添加 reasoning=True
-    # 参考: https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning
     llm_params = {
         "model": model,
         "temperature": temperature,
         "top_p": top_p,
         "stream": True
     }
-
-    # 仅当模型名称包含 "thinking" (不区分大小写) 时，才启用 include_reasoning
     if "thinking" in model.lower():
         llm_params["stream_options"] = {"include_reasoning": True}
 
     llm_with_options = llm.bind(**llm_params)
-
-    # 分类器（用于路由）不需要 reasoning
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
 
     # 1. 查询重写链
@@ -387,8 +373,7 @@ async def api_ask(
     )
 
 
-    # 3. 核心 RAG 链 (*** 新架构 ***)
-    # <--- 2. 将异步函数包装为 RunnableLambda
+    # 3. 核心 RAG 链 (新架构：分离元数据)
     get_docs_runnable = RunnableLambda(_get_reranked_parent_docs)
 
     rag_chain_pre_llm = (
@@ -397,32 +382,38 @@ async def api_ask(
                 "input": lambda x: x["input"],
                 "chat_history": lambda x: x["chat_history"]
             })
-            # (*** 修复 ***)
-            # 1. 将重写后的查询传递给新的异步函数 _get_reranked_parent_docs
-            #    它处理: 块检索 (k=12) -> 块重排 (k=6) -> 父文档获取
+            # 1. 检索重排块 -> 获取父文档
             | RunnablePassthrough.assign(
-        # <--- 3. 在管道中使用包装后的 RunnableLambda
         docs=itemgetter("rewritten_query") | get_docs_runnable
     )
-            # 2. 格式化父文档
+            # 2. 格式化父文档，返回 {"context": ..., "sources_map": ...}
             | RunnablePassthrough.assign(
-        context=lambda x: _format_docs_with_metadata(x["docs"])
+        formatted_data=lambda x: _format_docs_with_metadata(x["docs"])
     )
+            # 3. 准备 Prompt 输入，并暂存 sources_map
             | RunnableParallel({
         "chat_history": lambda x: x["chat_history"],
-        "context": lambda x: x["context"],
-        "query": lambda x: x["input"]
+        "context": lambda x: x["formatted_data"]["context"], # 仅 Context
+        "query": lambda x: x["input"],
+        "sources_map": lambda x: x["formatted_data"]["sources_map"] # 暂存 Map
     })
-            | ChatPromptTemplate.from_messages([
-        ("system", config.SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
-    ])
+            # 4. 并行传递 Prompt 和 Map
+            | {
+                "prompt": ChatPromptTemplate.from_messages([
+                    ("system", config.SYSTEM_PROMPT),
+                    MessagesPlaceholder(variable_name="chat_history"),
+                    ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
+                ]),
+                "sources_map": itemgetter("sources_map") # 绕过 LLM 传递 Map
+            }
     )
 
-    rag_chain = rag_chain_pre_llm | llm_with_options
+    rag_chain = {
+        "llm_output": itemgetter("prompt") | llm_with_options, # LLM 只处理 prompt
+        "sources_map": itemgetter("sources_map") # Map 被传递
+    }
 
-    # 4. 智能路由 (不变)
+    # 4. 智能路由
     classifier_prompt = PromptTemplate.from_template(
         """判断用户问题的类型。只回答 'rag' (需要知识库)、'greeting' (问候) 或 'other' (其他)。
 问题: {input}
@@ -453,8 +444,14 @@ async def api_ask(
     )
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
-        (lambda x: "greeting" in x["classification"].lower(), greeting_chain),
-        # 如果不是问候语，则默认使用 RAG 链 (包含 'rag' 和 'other' 分类)
+        # 问候分支：也必须返回 {llm_output, sources_map} 格式
+        (lambda x: "greeting" in x["classification"].lower(),
+         {
+             "llm_output": greeting_chain,
+             "sources_map": lambda x: {} # 问候语没有 sources
+         }
+         ),
+        # RAG 分支 (rag_chain) 已符合此格式
         rag_chain
     )
     # --- RAG 链定义结束 ---
@@ -509,10 +506,11 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
-    # --- (修复 2) 异步 generate 函数 ---
+    # 异步 generate 协程
     async def generate():
         yield ": ping\n\n"
         full_response = ""
+        sources_map = {} # 暂存 SourcesMap
         model_name = model
         thinking_response = ""
         stream_started = False
@@ -552,25 +550,37 @@ async def api_ask(
                 for task in done:
                     if task == llm_task:
                         try:
-                            delta_chunk = task.result()
+                            # 结果现在是一个字典 {"llm_output": ..., "sources_map": ...}
+                            delta_chunk_dict = task.result()
+
+                            # 捕获 sources_map (它通常在第一个块中完整到达)
+                            if "sources_map" in delta_chunk_dict:
+                                map_chunk = delta_chunk_dict.get("sources_map")
+                                if map_chunk: # (map_chunk 可能是 {} 或 dict)
+                                    sources_map = map_chunk
+
+                            # 捕获 LLM 输出
+                            delta_chunk = delta_chunk_dict.get("llm_output")
+                            if not delta_chunk:
+                                # 这个块只包含 map，没有 LLM 内容，跳过
+                                llm_task = asyncio.create_task(llm_iter.__anext__())
+                                pending.add(llm_task)
+                                continue
+
+                            # --- 从这里开始，逻辑和以前一样，使用 delta_chunk ---
                             delta_content = delta_chunk.content or ""
                             delta_thinking = ""
                             new_thinking_detected = False
 
-                            # (*** 关键逻辑 ***)
-                            # 检查 LLM 块中的 additional_kwargs
                             if delta_chunk.additional_kwargs:
-                                # 对应 SiliconFlow 文档的 "reasoning_content"
                                 new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
                                 if new_thought and new_thought != thinking_response:
                                     thinking_response = new_thought
-                                    # 将其放入 "thinking" 字段，供 app.js 消费
                                     delta_thinking = new_thought
                                     new_thinking_detected = True
 
                             if delta_content or new_thinking_detected:
                                 full_response += delta_content
-                                # (*** 关键逻辑 ***)
                                 # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
@@ -592,13 +602,13 @@ async def api_ask(
 
                     elif task == ping_task:
                         try:
-                            _ = task.result() # 如果被取消，这里会 raise CancelledError
+                            _ = task.result()
                             yield ": ping\n\n"
                             if not llm_is_done:
                                 ping_task = asyncio.create_task(ping_iter.__anext__())
                                 pending.add(ping_task)
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
-                            pass # Ping 任务被取消或停止，这是预期的
+                            pass
                         except Exception as e:
                             logger.warning(f"[{conv_id}] Ping generator 失败: {e}", exc_info=True)
 
@@ -620,12 +630,24 @@ async def api_ask(
             if stream_started:
                 try:
                     async with AsyncSessionLocal.begin() as db_session:
-                        # (*** 关键逻辑 ***)
-                        # 保持与 app.js 兼容的格式保存到数据库
+
+                        # 组装最终DB内容
+                        final_content_for_db = full_response # 纯 LLM 回答
+
+                        # 附加在循环中捕获的 sources_map
+                        if sources_map:
+                            try:
+                                map_str = json.dumps(sources_map, ensure_ascii=False)
+                                # 附加前端期望的魔术字符串
+                                final_content_for_db += f"\n\n[SourcesMap]: {map_str}"
+                            except Exception as json_e:
+                                logger.warning(f"[{conv_id}] Failed to serialize sources_map: {json_e}")
+
+                        # 附加 thinking 块
                         if thinking_response:
-                            full_content_with_thinking = f"\n{thinking_response}\n\n\n{full_response}"
+                            full_content_with_thinking = f"\n{thinking_response}\n\n\n{final_content_for_db}"
                         else:
-                            full_content_with_thinking = full_response
+                            full_content_with_thinking = final_content_for_db
 
                         await db_session.execute(
                             text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
@@ -638,7 +660,6 @@ async def api_ask(
                     logger.error(f"[{conv_id}] 在 finally 块中保存对话失败: {db_e}", exc_info=True)
             else:
                 logger.warning(f"[{conv_id}] 流未启动，未保存对话 (finally 块)。")
-    # --- 修复结束 ---
 
     return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
         "Cache-Control": "no-cache",
