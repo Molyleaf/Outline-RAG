@@ -2,17 +2,32 @@
 
 // (新) Req 5: 溯源处理函数
 /**
- * 查找 [来源 n] 文本并将其包裹在 <span class="citation"> 中
+ * 将 [来源 n] 文本包裹为可点击的 <a class="citation">，链接到后端提供的 URL
+ * 需要从同一消息块内的 “[SourcesMap]: {...}” 提示中读取编号到 URL 的映射
  * @param {HTMLElement} element - 包含已渲染 Markdown 的 DOM 元素
  */
 function processCitations(element) {
     if (!element) return;
+
+    // 1) 从当前消息 DOM 中提取 SourcesMap（在同一 .bubble-inner 内部的文本里）
+    // 向上寻找最近的 .bubble-inner 作为消息作用域
+    const scope = element.closest('.bubble-inner') || element;
+    let sourcesMap = {};
+    // 在作用域内搜集所有文本节点，寻找 “[SourcesMap]: {...}”
+    const allText = scope.innerText || '';
+    const m = allText.match(/\[SourcesMap]:\s*(\{[\s\S]*?})/);
+    if (m) {
+        try {
+            sourcesMap = JSON.parse(m[1]);
+        } catch (_) { /* ignore */ }
+    }
+
+    // 2) 将 [来源 n] 转为链接
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const nodesToReplace = [];
-    const citationTestRegex = /\[(来源|参考|参考资料)\s*\d+]/;
+    const citationTestRegex = /\[(来源|参考|参考资料)\s*(\d+)]/;
     const citationSplitRegex = /(\[(?:来源|参考|参考资料)\s*\d+])/g;
 
-    // 1. 查找所有匹配的文本节点
     while (walker.nextNode()) {
         const node = walker.currentNode;
         if (citationTestRegex.test(node.nodeValue)) {
@@ -20,25 +35,42 @@ function processCitations(element) {
         }
     }
 
-    // 2. 替换节点
-    // (必须在遍历后执行替换，否则会破坏 TreeWalker)
     nodesToReplace.forEach(node => {
-        if (!node.parentElement) return; // 节点可能已被
-
+        if (!node.parentElement) return;
         const fragment = document.createDocumentFragment();
         const parts = node.nodeValue.split(citationSplitRegex);
 
         parts.forEach(part => {
-            if (citationTestRegex.test(part)) {
-                const span = document.createElement('span');
-                span.className = 'citation';
-                span.textContent = part;
-                fragment.appendChild(span);
+            const mm = part.match(citationTestRegex);
+            if (mm) {
+                const idx = mm[2]; // 捕获到的编号
+                const href = sourcesMap && typeof sourcesMap[idx] === 'string' ? sourcesMap[idx] : '';
+                const a = document.createElement('a');
+                a.className = 'citation';
+                a.textContent = part;
+                if (href) {
+                    a.href = href;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    a.title = href;
+                }
+                fragment.appendChild(a);
             } else if (part) {
                 fragment.appendChild(document.createTextNode(part));
             }
         });
         node.parentElement.replaceChild(fragment, node);
+    });
+
+    // 3) 清理作用域中残留的 “[SourcesMap]: {...}” 文本（不影响已生成的链接）
+    // 仅清理显示，不去改原始消息
+    Array.from(scope.querySelectorAll('.md-body, .thinking-content, .bubble-inner')).forEach(block => {
+        block.childNodes.forEach(n => {
+            if (n.nodeType === Node.TEXT_NODE && /\[SourcesMap]:\s*\{/.test(n.nodeValue)) {
+                // 仅移除这一段标记行
+                n.nodeValue = n.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
+            }
+        });
     });
 }
 

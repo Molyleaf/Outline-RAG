@@ -48,24 +48,39 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
     formatted_docs = []
     base_url = config.OUTLINE_API_URL.replace("/api", "")
 
+    # 先收集每条文档的最终 URL，供后续 [来源 n] 超链接引用
+    resolved_urls: list[str] = []
+
     for i, doc in enumerate(docs):
-        # (*** 修复：现在 docs 是父文档，元数据在 metadata 属性中 ***)
         title = doc.metadata.get("title", "Untitled")
         url = doc.metadata.get("url")
 
-        doc_str = f"--- 来源 [{i+1}] ---\n"
-        doc_str += f"标题: {title}\n"
-
+        # 归一化 URL（后端负责补全 base）
         if url:
             if url.startswith('/'):
                 url = f"{base_url}{url}"
-            doc_str += f"来源: {url}\n"
+        else:
+            url = ""
 
+        resolved_urls.append(url)
+
+        doc_str = f"--- 来源 [{i+1}] ---\n"
+        doc_str += f"标题: {title}\n"
+        if url:
+            doc_str += f"来源: {url}\n"
         doc_str += f"内容: {doc.page_content}\n"
         formatted_docs.append(doc_str)
 
     if not formatted_docs:
         return "未找到相关参考资料。"
+
+    # 在末尾追加一个可解析的 JSON 块，供前端提取编号到 URL 的映射，实现 [来源 n] 可点击
+    try:
+        mapping = {str(i + 1): (resolved_urls[i] or "") for i in range(len(resolved_urls))}
+        formatted_docs.append(f"\n[SourcesMap]: {json.dumps(mapping, ensure_ascii=False)}")
+    except Exception:
+        # 安全兜底，即使序列化失败也不影响 QA
+        pass
 
     return "\n\n".join(formatted_docs)
 
