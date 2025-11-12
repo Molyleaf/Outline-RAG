@@ -53,7 +53,7 @@ def _format_docs_with_metadata(docs: List[Document]) -> str:
         title = doc.metadata.get("title", "Untitled")
         url = doc.metadata.get("url")
 
-        doc_str = f"--- 参考资料 [{i+1}] ---\n"
+        doc_str = f"--- 来源 [{i+1}] ---\n"
         doc_str += f"标题: {title}\n"
 
         if url:

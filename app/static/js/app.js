@@ -9,11 +9,13 @@ function processCitations(element) {
     if (!element) return;
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const nodesToReplace = [];
+    const citationTestRegex = /\[(来源|参考|参考资料)\s*\d+]/;
+    const citationSplitRegex = /(\[(?:来源|参考|参考资料)\s*\d+])/g;
 
     // 1. 查找所有匹配的文本节点
     while (walker.nextNode()) {
         const node = walker.currentNode;
-        if (/\[来源 \d+]/.test(node.nodeValue)) {
+        if (citationTestRegex.test(node.nodeValue)) {
             nodesToReplace.push(node);
         }
     }
@@ -24,10 +26,10 @@ function processCitations(element) {
         if (!node.parentElement) return; // 节点可能已被
 
         const fragment = document.createDocumentFragment();
-        const parts = node.nodeValue.split(/(\[来源 \d+\])/g);
+        const parts = node.nodeValue.split(citationSplitRegex);
 
         parts.forEach(part => {
-            if (/\[来源 \d+\]/.test(part)) {
+            if (citationTestRegex.test(part)) {
                 const span = document.createElement('span');
                 span.className = 'citation';
                 span.textContent = part;
