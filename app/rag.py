@@ -123,7 +123,7 @@ headers_to_split_on = [
 # 这个分割器将在索引时用于创建子块
 text_splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=headers_to_split_on,
-    strip_headers=True,
+    strip_headers=False,
     return_each_line=False
 )
 
