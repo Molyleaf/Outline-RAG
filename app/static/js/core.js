@@ -245,13 +245,6 @@ function appendFadeInChunk(chunk, container) {
     span.appendChild(document.createTextNode(chunk));
     container.appendChild(span);
 
-    // 在增量渲染时，如果 SourcesMap 已经出现，可以尝试对当前容器做一次 citation 处理
-    try {
-        if (typeof processCitations === 'function') {
-            processCitations(container.closest('.bubble-inner') || container);
-        }
-    } catch (_) {}
-
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 

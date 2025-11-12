@@ -989,7 +989,7 @@ async function sendQuestion() {
                                     currentStreamingDiv.innerHTML = parsedHtml;
 
                                     // (新 Req 5) 在解析块后处理溯源
-                                    processCitations(currentStreamingDiv);
+                                    // processCitations(currentStreamingDiv);
 
                                     if (window.hljs) currentStreamingDiv.querySelectorAll('pre code').forEach(block => {
                                         try { window.hljs.highlightElement(block); } catch(e){}
