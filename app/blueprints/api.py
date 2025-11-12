@@ -82,15 +82,16 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
 
     try:
         # (*** 修复 ***)
-        # ContextualCompressionRetriever (来自 langchain-classic)
-        # 实现了异步的 aget_relevant_documents 方法。
-        # 我们应该直接 await 这个方法，而不是使用 to_thread。
-        # 这个公共方法不需要 RunManager。
-        reranked_chunks = await rag.compression_retriever.aget_relevant_documents(
+        # 'ContextualCompressionRetriever' 继承自 'BaseRetriever',
+        # 'BaseRetriever' 实现了 'Runnable' 接口。
+        # 我们应该使用 'ainvoke' (LCEL) 方法来调用它，
+        # 'ainvoke' 会正确处理内部的 RunManager。
+        # aget_relevant_documents 在这个 Pydantic/Classic 组合中似乎有问题。
+        reranked_chunks = await rag.compression_retriever.ainvoke(
             query
         )
     except Exception as e:
-        logger.error(f"Failed during chunk retrieval/reranking (aget_relevant_documents): {e}", exc_info=True)
+        logger.error(f"Failed during chunk retrieval/reranking (ainvoke): {e}", exc_info=True)
         return []
 
     # 2. 从块中提取父文档 ID (保持顺序并去重)
