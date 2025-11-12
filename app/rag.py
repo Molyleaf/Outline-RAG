@@ -1,3 +1,4 @@
+# app/rag.py
 import asyncio
 import json
 import logging
@@ -189,41 +190,33 @@ async def process_doc_batch_task(doc_ids: list):
                 # 获取父文档标题
                 parent_title = parent_doc.metadata.get("title") or ""
 
-                # 1. [粗分]：首先按 Markdown 标题拆分
-                # 这会产生一些 Document，可能有的很长，有的很短
-                # 它们已经包含了 chunk.metadata (例如 {'Header 1': '共和国之辉'})
-                md_chunks = markdown_splitter.split_text(parent_doc.page_content)
+                # --- [RAG 修复 2025-11-12] ---
 
-                for md_chunk in md_chunks:
-                    # 2. [细分]：检查每个块是否过长，如果过长，则再次拆分
-                    # 我们将 md_chunk 的元数据（包含标题信息）传递给子块
+                # 我们*只*使用 child_splitter (RecursiveCharacterTextSplitter)
+                # 来对*整个*父文档 (parent_doc) 进行分割。
+                # child_splitter (separators=["\n\n", "\n", ...])
+                # 会创建大小合适 (1024) 且语义连贯的块。
+                # 这会保留 Markdown 标题 (如 "#简介") 在块内容中，
+                # 这对于语义搜索是友好的。
 
-                    if len(md_chunk.page_content) > child_splitter._chunk_size:
-                        # 这个块太长了，使用 RecursiveCharacterTextSplitter 进一步细分
-                        sub_chunks = child_splitter.create_documents(
-                            [md_chunk.page_content],
-                            metadatas=[md_chunk.metadata]
-                        )
-                    else:
-                        # 这个块长度合适，直接使用
-                        sub_chunks = [md_chunk]
+                # [分割]：使用 child_splitter (Recursive) 对 *整个文档* 进行分割
+                #    split_document 会自动将 parent_doc.metadata 复制到所有子块中。
+                sub_chunks = child_splitter.split_documents(parent_doc)
 
-                    # 3. [处理子块]：处理所有细分后的块
-                    for chunk in sub_chunks:
-                        # 合并父文档元数据 (source_id, title, url...)
-                        # 和块元数据 (Header 1, Header 2...)
-                        parent_metadata = parent_doc.metadata.copy()
-                        merged_metadata = {**chunk.metadata, **parent_metadata}
-                        chunk.metadata = merged_metadata
+                # [处理子块]：
+                for chunk in sub_chunks:
+                    # 'chunk' 已经从 parent_doc 继承了元数据 (source_id, title, url...)
 
-                        # 2. 将父标题强行注入 page_content (保持不变)
-                        if parent_title:
-                            chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
+                    # [注入父标题]：将父标题强行注入 page_content (保持不变)
+                    # 这为块提供了额外的上下文，告诉模型它来自哪个文档。
+                    if parent_title:
+                        chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
 
-                        if not chunk.page_content.strip():
-                            continue
+                    if not chunk.page_content.strip():
+                        continue
 
-                        chunks_to_add.append(chunk)
+                    chunks_to_add.append(chunk)
+                # --- [修复结束] ---
 
             if chunks_to_add:
                 logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
