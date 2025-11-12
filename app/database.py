@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 /* (新) Req 1: 为 ParentDocumentRetriever (AsyncPGStore) 添加持久化存储 */
-CREATE TABLE IF NOT EXISTS rag_parent_store (
+CREATE TABLE IF NOT EXISTS langchain_storage_collection_rag_parent_documents (
     key_ TEXT PRIMARY KEY,
     value_ BYTEA
 );

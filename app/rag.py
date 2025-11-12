@@ -3,12 +3,10 @@ import asyncio
 import json
 import logging
 import pickle
-import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
 
-# 修复：导入 *同步* redis 库
-import redis
+from langchain_community.storage.sql import SQLStore
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain_core.documents import Document
@@ -17,14 +15,12 @@ from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_classic.retrievers import ParentDocumentRetriever
-# 修复：导入 RedisStore 和 EncoderBackedStore
-from langchain_community.storage import RedisStore
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-# 修复：导入 *异步* redis_client (用于任务队列) 和 async_engine
+# 导入异步 redis_client (用于任务队列) 和 async_engine
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
 from llm_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
@@ -55,53 +51,33 @@ async def initialize_rag_components():
         if vector_store:
             return
 
-        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v2, RedisStore)...")
+        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v2, SQLStore)...")
 
         if not async_engine:
             raise ValueError("AsyncEngine from database.py is not available")
-        if not config.REDIS_URL:
-            raise ValueError("REDIS_URL is not set, but is required for ParentStore")
+        if not config.DATABASE_URL:
+            raise ValueError("DATABASE_URL is not set, but is required for SQLStore")
 
-        # 修复：为 RedisStore 创建一个 *同步* Redis 客户端
-        try:
-            parsed_url = urllib.parse.urlparse(config.REDIS_URL)
-            db_num = 0
-            if parsed_url.path and parsed_url.path.startswith('/'):
-                try:
-                    db_num = int(parsed_url.path[1:])
-                except (ValueError, IndexError):
-                    db_num = 0
-
-            # 必须使用同步 client，且 decode_responses=False 来存储 pickle 字节
-            sync_redis_client = redis.Redis(
-                host=parsed_url.hostname,
-                port=parsed_url.port,
-                password=parsed_url.password,
-                db=db_num,
-            )
-            sync_redis_client.ping() # 确认连接
-            logger.info("Sync Redis client for ParentStore connected.")
-        except Exception as e:
-            logger.critical(f"Failed to create *Sync* Redis client for ParentStore: {e}", exc_info=True)
-            raise
-
-        # 1. 创建基础的字节存储 (RedisStore)
-        base_redis_store = RedisStore(
-            client=sync_redis_client,
-            namespace="rag:parent_store:bytes"
+        # 1. 创建基础的字节存储 (SQLStore)
+        # 传入 'async_engine' 以支持异步方法 (amget, amset, amdelete)
+        base_sql_store = SQLStore(
+            engine=async_engine,
+            namespace="rag_parent_documents" # SQLStore 将自动创建和管理表
         )
+        # 确保表存在 (同步调用 OK)
+        logger.info(f"Async SQLStore for ParentStore configured (engine=async_engine, namespace='rag_parent_documents').")
 
         # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
         parent_store = EncoderBackedStore[str, Document](
-            store=base_redis_store,
+            store=base_sql_store,
             key_encoder=lambda k: k,
             value_serializer=pickle.dumps,
             value_deserializer=pickle.loads
         )
-        logger.info("ParentStore configured (EncoderBackedStore over RedisStore).")
+        logger.info("ParentStore configured (EncoderBackedStore over SQLStore).")
 
 
-        # 初始化 PGVectorStore (子块存储)
+        # 3. 初始化 PGVectorStore (子块存储)
         pg_engine_wrapper = PGEngine.from_engine(async_engine)
         try:
             vector_store = await AsyncPGVectorStore.create(
@@ -114,18 +90,17 @@ async def initialize_rag_components():
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
-        # 初始化基础检索器 (ParentDocumentRetriever)
-        # (*** 修复 ***) 使用 'search_kwargs' 替换 'child_search_kwargs'
+        # 4. 初始化基础检索器 (ParentDocumentRetriever)
         base_retriever = ParentDocumentRetriever(
             vectorstore=vector_store,
             docstore=parent_store,
             child_splitter=text_splitter,
             id_key="source_id",
-            search_kwargs={"k": config.TOP_K} # 将 k=4 覆盖为 k=12
+            search_kwargs={"k": config.TOP_K} # 使用 'search_kwargs' 定义检索的 K 值
         )
         logger.info(f"Base retriever configured (ParentDocumentRetriever, search_kwargs k={config.TOP_K}).")
 
-        # 初始化压缩/重排管线
+        # 5. 初始化压缩/重排管线
         pipeline_compressor = DocumentCompressorPipeline(
             transformers=[
                 reranker # 异步 Reranker
@@ -153,7 +128,7 @@ text_splitter = RecursiveCharacterTextSplitter(
 async def process_doc_batch_task(doc_ids: list):
     """
     异步处理一个批次的文档 ID，从 Outline 获取内容，
-    并将其存入 ParentStore (Redis) 和 VectorStore (Postgres)。
+    并将其存入 ParentStore (SQL) 和 VectorStore (Postgres)。
     """
     await initialize_rag_components()
 
@@ -185,7 +160,6 @@ async def process_doc_batch_task(doc_ids: list):
             continue
 
         # (*** 步骤 3: 组合数据 ***)
-        # export_data 本身就是字符串
         content = export_data or ""
         if not content.strip():
             logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
@@ -241,9 +215,9 @@ async def process_doc_batch_task(doc_ids: list):
 
             # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
             try:
-                # 4a. 将父文档存入 RedisStore (使用 asyncio.to_thread 运行同步 mset)
+                # 4a. 将父文档存入 SQLStore (使用原生异步 amset)
                 parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
-                await asyncio.to_thread(parent_store.mset, parent_docs_tuples)
+                await parent_store.amset(parent_docs_tuples)
 
                 # 4b. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
                 await vector_store.aadd_documents(chunks)
@@ -355,7 +329,7 @@ async def refresh_all_task():
 
 async def delete_doc(doc_id):
     """
-    从 PGVectorStore (子块) 和 RedisStore (父文档) 中异步删除一个文档。
+    从 PGVectorStore (子块) 和 SQLStore (父文档) 中异步删除一个文档。
     """
     await initialize_rag_components()
 
@@ -388,10 +362,10 @@ async def delete_doc(doc_id):
     else:
         logger.info(f"No chunks found in PGVectorStore to delete for: {doc_id}")
 
-    # 2. 从 ParentStore (Redis) 删除父文档
+    # 2. 从 ParentStore (SQLStore) 删除父文档
     try:
-        # 修复：必须使用 asyncio.to_thread 运行 *同步* mdelete
-        await asyncio.to_thread(parent_store.mdelete, [doc_id])
-        logger.info(f"Deleted from ParentStore (RedisStore): {doc_id}")
+        # (最终修复) 使用原生异步 amdelete
+        await parent_store.amdelete([doc_id])
+        logger.info(f"Deleted from ParentStore (SQLStore): {doc_id}")
     except Exception as e:
-        logger.error(f"parent_store.mdelete (async) failed for {doc_id}: {e}", exc_info=True)
+        logger.error(f"parent_store.amdelete (async) failed for {doc_id}: {e}", exc_info=True)
