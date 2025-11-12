@@ -439,8 +439,8 @@ async def api_ask(
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
         (lambda x: "greeting" in x["classification"].lower(), greeting_chain),
-        (lambda x: "rag" in x["classification"].lower(), rag_chain),
-        general_chain
+        # 如果不是问候语，则默认使用 RAG 链 (包含 'rag' 和 'other' 分类)
+        rag_chain
     )
     # --- RAG 链定义结束 ---
 

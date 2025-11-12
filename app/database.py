@@ -105,8 +105,6 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* 为 SQLStore (ParentDocumentRetriever) 添加持久化存储 */
-/* (修复：使用 (key, namespace) 复合主键以匹配 SQLStore 的默认期望) */
 CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
     key TEXT NOT NULL,
     value BYTEA,
@@ -134,8 +132,12 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
 """
 
 # 2. 将 CREATE INDEX 移到单独的变量
+# (*** 修复：添加 HNSW 索引 ***)
 PGVECTOR_INDEX_SQL = f"""
 CREATE INDEX IF NOT EXISTS idx_langchain_embedding_source_id ON langchain_pg_embedding(source_id);
+
+CREATE INDEX IF NOT EXISTS hnsw_embedding_idx ON langchain_pg_embedding
+    USING hnsw (embedding vector_cosine_ops);
 """
 
 # 异步数据库初始化
@@ -161,6 +163,19 @@ async def db_init():
                     await conn_tx.execute(text("ANALYZE"))
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")
+
+            # --- (*** 修复：在主事务外、咨询锁内创建索引 ***) ---
+            # (使用 conn_ac, 它是 AUTOCOMMIT 模式)
+            logger.info("正在 (异步) 检查并创建索引 (这可能需要一些时间)...")
+
+            # PGVECTOR_INDEX_SQL 现在包含 source_id 索引和 HNSW 向量索引
+            index_commands = [cmd.strip() for cmd in PGVECTOR_INDEX_SQL.split(';') if cmd.strip()]
+            for sql_command in index_commands:
+                logger.info(f"Executing index command: {sql_command[:60]}...")
+                await conn_ac.execute(text(sql_command))
+
+            logger.info("索引创建/检查完成。")
+            # --- 修复结束 ---
 
         except Exception as e:
             logger.error(f"数据库初始化 (db_init) 失败: {e}", exc_info=True)
