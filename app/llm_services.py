@@ -1,7 +1,7 @@
 # app/llm_services.py
 import hashlib
 import logging
-from typing import Sequence, Any
+from typing import Sequence, Any, List, Tuple
 
 import httpx
 from httpx import Response
@@ -12,11 +12,87 @@ from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import tiktoken
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
 from database import async_engine
 
 logger = logging.getLogger(__name__)
+
+# --- (新增) 修复：并发安全的 SQLStore ---
+class IdempotentSQLStore(SQLStore):
+    """
+    一个 SQLStore 子类，它重写 'amset' 方法
+    以使用 'INSERT ... ON CONFLICT DO NOTHING'。
+
+    这解决了在并发工作进程 (concurrent workers) 尝试
+    为缓存写入相同 embedding key 时
+    发生的 race condition (竞态条件) 和 UniqueViolation 错误。
+    """
+
+    # (*** 修复 ***)
+    # 显式添加 __init__ 以确保父类 SQLStore 的 __init__ 被调用，
+    # 它负责设置 self._serializer 和 self._deserializer。
+    #
+    # 尽管 Python 应该在子类没有 __init__ 的情况下自动调用
+    # 父类的 __init__，但我们在这里显式添加它以修复
+    # 'AttributeError: ... has no attribute '_serializer'' 错误。
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
+
+    async def amset(self, key_value_pairs: List[Tuple[str, Any]]) -> None:
+        """
+        异步设置键值对，安全地忽略主键冲突。
+        """
+        if not key_value_pairs:
+            return
+
+        try:
+            # 序列化值
+            serialized_pairs = [
+                {
+                    "key": k,
+                    "value": self._serializer(v), # self._serializer 在 SQLStore 中定义
+                    "namespace": self.namespace
+                }
+                for k, v in key_value_pairs
+            ]
+
+            # 创建 'INSERT ...' 语句 (self.table 在 SQLStore __init__ 中定义)
+            stmt = pg_insert(self.table).values(serialized_pairs)
+
+            # 添加 'ON CONFLICT (key, namespace) DO NOTHING'
+            # 这依赖于 database.py 中定义的复合主键
+            safe_stmt = stmt.on_conflict_do_nothing(
+                index_elements=['key', 'namespace']
+            )
+
+            async with self.engine.begin() as conn:
+                await conn.execute(safe_stmt)
+
+        except Exception as e:
+            # 这是一个缓存写入，记录错误但不要让整个 RAG 链失败
+            logger.warning(f"IdempotentSQLStore amset failed (non-fatal): {e}", exc_info=True)
+
+    def mset(self, key_value_pairs: List[Tuple[str, Any]]) -> None:
+        """
+        同步 set (不应在 async 应用中调用)。
+        """
+        logger.warning("IdempotentSQLStore.mset (sync) was called. This should be avoided in an async app.")
+        try:
+            with self.engine.begin() as conn:
+                for k, v in key_value_pairs:
+                    stmt = pg_insert(self.table).values(
+                        key=k, value=self._serializer(v), namespace=self.namespace
+                    )
+                    safe_stmt = stmt.on_conflict_do_nothing(
+                        index_elements=['key', 'namespace']
+                    )
+                    conn.execute(safe_stmt)
+        except Exception as e:
+            logger.warning(f"IdempotentSQLStore mset (sync) failed (non-fatal): {e}", exc_info=True)
+# --- 修复结束 ---
+
 
 # 预加载 tiktoken tokenizer
 # OpenAIEmbeddings 会在 *首次* 异步调用时 *同步* 下载
@@ -91,10 +167,10 @@ try:
     if not async_engine:
         raise ValueError("database.py 中的 async_engine 不可用")
 
-    # 1. 实例化 SQLStore，用于 Embedding 缓存
+    # 1. 实例化 (并发安全的) IdempotentSQLStore，用于 Embedding 缓存
     #    我们重用 database.py 中定义的 'langchain_key_value_stores' 表
     #    但使用一个唯一的 namespace。
-    store = SQLStore(
+    store = IdempotentSQLStore(
         engine=async_engine,
         namespace="embedding_cache", # <--- 为 embedding cache 使用一个唯一的 namespace
     )

@@ -106,14 +106,14 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 /* 为 SQLStore (ParentDocumentRetriever) 添加持久化存储 */
+/* (修复：使用 (key, namespace) 复合主键以匹配 SQLStore 的默认期望) */
 CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
-    key TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
     value BYTEA,
-    /* 增加 SQLStore 内部逻辑可能需要的 namespace 字段 */
-    namespace TEXT
+    namespace TEXT NOT NULL,
+    PRIMARY KEY (key, namespace)
 );
-/* 为 namespace 字段创建索引以提高查询效率 */
-CREATE INDEX IF NOT EXISTS idx_langchain_kv_namespace ON langchain_key_value_stores(namespace);
+/* 索引 'idx_langchain_kv_namespace' 已被主键覆盖，无需单独创建 */
 """
 
 # PGVector 表结构 (v2 显式列)
