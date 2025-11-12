@@ -15,7 +15,8 @@ from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_classic.storage import EncoderBackedStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# (*** 修改：导入 MarkdownHeaderTextSplitter ***)
+from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
 from sqlalchemy import text
 
 import config
@@ -126,12 +127,19 @@ async def initialize_rag_components():
         logger.info("RAG components initialization complete (Reranking Chunks).")
 
 
-# 这个分割器将由 ParentDocumentRetriever 在索引时用于创建子块
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    length_function=len,
-    separators=["\n\n", "\n", " ", ""],
+# (*** 修改：使用 MarkdownHeaderTextSplitter ***)
+# 定义要分割的 Markdown 标题级别
+headers_to_split_on = [
+    ("#", "Header 1"),
+    ("##", "Header 2"),
+    ("###", "Header 3"),
+]
+
+# 这个分割器将在索引时用于创建子块
+text_splitter = MarkdownHeaderTextSplitter(
+    headers_to_split_on=headers_to_split_on,
+    strip_headers=True, # 从块内容中移除标题行
+    return_each_line=False # 聚合相同标题下的行
 )
 
 # --- 数据库同步任务 ---
@@ -213,12 +221,29 @@ async def process_doc_batch_task(doc_ids: list):
             parents_to_add.append((source_id, parent_doc))
 
             # 分割子块
-            child_chunks = text_splitter.split_documents([parent_doc])
+            # (*** 修正：使用 .split_text() 并传入父文档的内容字符串 ***)
+            child_chunks = text_splitter.split_text(parent_doc.page_content)
 
-            # (*** 关键 ***) 确保子块继承了正确的元数据
+            # (*** 关键 ***) 确保子块继承 *父文档* 的元数据（source_id, title, url）
+            # 并 *合并* Markdown 分割器提取的标题元数据
             for chunk in child_chunks:
-                # 复制所有元数据
-                chunk.metadata = parent_doc.metadata.copy()
+                # 1. 复制父文档的元数据 (source_id, title, url, outline_updated_at_str)
+                parent_metadata = parent_doc.metadata.copy()
+
+                # 2. chunk.metadata 包含由 MarkdownHeaderTextSplitter 生成的标题
+                #    (e.g., {"Header 1": "Introduction"})
+                # 3. 合并它们。将父元数据放在后面，以确保 'source_id' 等关键字段
+                #    （如果 Markdown 标题元数据中意外出现同名字段）不会被覆盖。
+                merged_metadata = {**chunk.metadata, **parent_metadata}
+
+                chunk.metadata = merged_metadata
+
+                # (*** 额外检查 ***)
+                # 如果块内容为空 (例如只有标题但被 strip_headers=True 移除了)，则跳过
+                if not chunk.page_content.strip():
+                    logger.debug(f"Skipping empty chunk for doc {source_id} (likely just a header). Metadata: {chunk.metadata}")
+                    continue
+
                 chunks_to_add.append(chunk)
 
         if chunks_to_add:
@@ -274,6 +299,7 @@ async def process_doc_batch_task(doc_ids: list):
                 # 4c. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
                 #     由于缓存已清除，这将强制调用 OpenAIEmbeddings API
                 #     v2 引擎会自动将元数据映射到正确的列
+                #     (注意：'Header 1' 等元数据将被丢弃，因为它们不在 metadata_columns 中，这是符合预期的)
                 await vector_store.aadd_documents(chunks_to_add)
 
             except Exception as e:
