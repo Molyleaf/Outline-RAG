@@ -86,6 +86,7 @@ _base_embeddings = OpenAIEmbeddings(
 # 3c. 带缓存的 Embedding 模型
 # 3c. 带缓存的 Embedding 模型 (*** 修复 ***)
 # 使用 SQLStore 替换 RedisStore 来解决 sync/async 冲突
+store = None
 try:
     if not async_engine:
         raise ValueError("database.py 中的 async_engine 不可用")

@@ -22,7 +22,7 @@ from sqlalchemy import text
 import config
 # 导入异步 redis_client (用于任务队列) 和 async_engine
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
-from llm_services import embeddings_model, reranker
+from llm_services import embeddings_model, reranker, store as embedding_cache_store
 from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
 
 logger = logging.getLogger(__name__)
@@ -214,12 +214,25 @@ async def process_doc_batch_task(doc_ids: list):
                     logger.error(f"vector_store.adelete (async) failed for chunks {ids_to_delete}: {e}. Continuing...", exc_info=True)
 
             # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
+            # 4. 异步手动执行 ParentDocumentRetriever 的索引逻辑
             try:
-                # 4a. 将父文档存入 SQLStore (使用原生异步 amset)
+                # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
+                if embedding_cache_store:
+                    # 我们需要访问 CacheBackedEmbeddings 内部的 key_encoder
+                    # 来正确生成用于删除的哈希键。
+                    key_encoder = embeddings_model.key_encoder
+                    keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks]
+
+                    if keys_to_delete:
+                        logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
+                        await embedding_cache_store.amdelete(keys_to_delete)
+
+                # 4b. 将父文档存入 SQLStore (使用原生异步 amset)
                 parent_docs_tuples = [(doc.metadata["source_id"], doc) for doc in docs_to_process_lc]
                 await parent_store.amset(parent_docs_tuples)
 
-                # 4b. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
+                # 4c. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
+                #     由于缓存已清除，这将强制调用 OpenAIEmbeddings API
                 await vector_store.aadd_documents(chunks)
 
             except Exception as e:
