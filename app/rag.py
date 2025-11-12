@@ -14,15 +14,12 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
-# (*** 1. 移除不再需要的 Column 导入 ***)
-# from langchain_postgres import Column
 from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
 import config
-# 导入异步 redis_client (用于任务队列) 和 async_engine
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
 from llm_services import embeddings_model, reranker, store as embedding_cache_store
 from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
@@ -172,7 +169,8 @@ async def process_doc_batch_task(doc_ids: list):
             continue
 
         # (*** 步骤 3: 组合数据 ***)
-        content = export_data.get("text") or "" # (*** 修复: export_data 是一个 dict, 我们需要 'text' 字段 ***)
+        # (*** 修复：export_data 已经是字符串 (str)，而不是 dict ***)
+        content = export_data or ""
         if not content.strip():
             logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
             skipped_ids.add(doc_id)
