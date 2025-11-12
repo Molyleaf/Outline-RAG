@@ -81,15 +81,16 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
         return []
 
     try:
-        # (调用公共的 *sync* 方法，并用 to_thread 包装)
-        # 这避免了调用 internal _aget_relevant_documents (需要 run_manager)
-        # 也避开了 public aget_relevant_documents (在 classic 包中可能缺失)
-        reranked_chunks = await asyncio.to_thread(
-            rag.compression_retriever.get_relevant_documents,
+        # (*** 修复 ***)
+        # ContextualCompressionRetriever (来自 langchain-classic)
+        # 实现了异步的 aget_relevant_documents 方法。
+        # 我们应该直接 await 这个方法，而不是使用 to_thread。
+        # 这个公共方法不需要 RunManager。
+        reranked_chunks = await rag.compression_retriever.aget_relevant_documents(
             query
         )
     except Exception as e:
-        logger.error(f"Failed during chunk retrieval/reranking: {e}", exc_info=True)
+        logger.error(f"Failed during chunk retrieval/reranking (aget_relevant_documents): {e}", exc_info=True)
         return []
 
     # 2. 从块中提取父文档 ID (保持顺序并去重)
