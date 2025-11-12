@@ -133,7 +133,7 @@ async def process_doc_batch_task(doc_ids: list):
     """
     异步处理一个批次的文档 ID，从 Outline 获取内容，
     并将其存入 ParentStore (SQL) 和 VectorStore (Postgres)。
-    (*** 修复：重构以确保计数器在 finally 块中更新 ***)
+    (*** 修复：移除 amdelete 逻辑以避免竞态条件 ***)
     """
     await initialize_rag_components()
 
@@ -144,7 +144,6 @@ async def process_doc_batch_task(doc_ids: list):
     if not doc_ids:
         return
 
-    # (*** 修复：重命名变量以区分最终计数 ***)
     successful_ids_final = set()
     skipped_ids_final = set()
     docs_to_process_lc = []
@@ -152,28 +151,25 @@ async def process_doc_batch_task(doc_ids: list):
     try:
         # 1. 从 Outline API 批量获取文档内容
         for doc_id in doc_ids:
-            # (*** 步骤 1: 获取元数据 ***)
             info = await outline_get_doc(doc_id)
             if not info:
                 logger.warning(f"无法获取文档 {doc_id} 的 *信息* (metadata)，跳过。")
-                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
+                skipped_ids_final.add(doc_id)
                 continue
 
-            # (*** 步骤 2: 获取完整内容 ***)
             export_data = await outline_export_doc(doc_id)
             if not export_data:
                 logger.warning(f"无法获取文档 {doc_id} 的 *内容* (export)，跳过。")
-                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
+                skipped_ids_final.add(doc_id)
                 continue
 
-            # (*** 步骤 3: 组合数据 ***)
             content = export_data or ""
             if not content.strip():
                 logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
-                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
+                skipped_ids_final.add(doc_id)
                 continue
 
-            updated_at_str = info.get("updatedAt") # 从 info 获取元数据
+            updated_at_str = info.get("updatedAt")
             if not updated_at_str:
                 now_dt = datetime.now(timezone.utc)
                 updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
@@ -193,18 +189,15 @@ async def process_doc_batch_task(doc_ids: list):
             # 2. 将父文档分割为子块
             chunks_to_add = []
             parents_to_add = []
-            source_ids_to_process = [] # (*** 修复：收集需要处理的ID ***)
+            source_ids_to_process = []
 
             for parent_doc in docs_to_process_lc:
                 source_id = parent_doc.metadata.get("source_id")
                 if not source_id:
                     logger.warning(f"Skipping document with no source_id: {parent_doc.metadata.get('title')}")
-                    # (*** 修复：如果在这里跳过，也必须计数 ***)
-                    # 查找此 doc_id（如果可能），但它没有...
-                    # 这种情况理论上不应该发生，因为 source_id 是在上面添加的
                     continue
 
-                source_ids_to_process.append(source_id) # (*** 修复：添加到列表 ***)
+                source_ids_to_process.append(source_id)
                 parents_to_add.append((source_id, parent_doc))
 
                 child_chunks = text_splitter.split_text(parent_doc.page_content)
@@ -231,7 +224,7 @@ async def process_doc_batch_task(doc_ids: list):
                                  SELECT langchain_id FROM langchain_pg_embedding
                                  WHERE source_id = ANY(:source_ids)
                                  """),
-                            {"source_ids": source_ids_to_process} # (*** 修复：使用 source_ids_to_process ***)
+                            {"source_ids": source_ids_to_process}
                         )).fetchall()
                         ids_to_delete = [row[0] for row in ids_to_delete_rows]
                 except Exception as e:
@@ -244,41 +237,33 @@ async def process_doc_batch_task(doc_ids: list):
 
                 # 4. 异步手动执行索引逻辑
                 try:
-                    # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
-                    if embedding_cache_store:
-                        if hasattr(embeddings_model, "key_encoder"):
-                            key_encoder = embeddings_model.key_encoder
-                            keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks_to_add]
-
-                            if keys_to_delete:
-                                logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
-                                await embedding_cache_store.amdelete(keys_to_delete)
-                        else:
-                            logger.warning("embeddings_model missing 'key_encoder' attribute, skipping embedding cache deletion.")
+                    # (*** 修复：已删除 4a (amdelete) ***)
 
                     # 4b. 将父文档存入 SQLStore
                     await parent_store.amset(parents_to_add)
 
                     # 4c. 将新的子块存入 PGVectorStore
+                    #     CacheBackedEmbeddings 将自动处理缓存。
+                    #     如果 key (内容哈希) 已存在，它将跳过 API 调用和 INSERT。
                     await vector_store.aadd_documents(chunks_to_add)
 
                 except Exception as e:
                     logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
-                    # (*** 修复：如果索引失败，抛出异常以触发外部 except 块 ***)
+                    # 抛出异常以触发外部 except 块
                     raise e
 
-            # (*** 修复：如果索引成功（或无需索引），标记这些ID为成功 ***)
+            # 索引成功（或无需索引），标记这些ID为成功
             for doc in docs_to_process_lc:
                 successful_ids_final.add(doc.metadata["source_id"])
 
     except Exception as e:
         logger.error(f"Batch task for doc_ids {doc_ids} failed during processing: {e}", exc_info=True)
-        # (*** 修复：如果批次失败，将 *所有* ID 标记为跳过 ***)
+        # 如果批次失败，将 *所有* ID 标记为跳过
         successful_ids_final = set()
         skipped_ids_final = set(doc_ids)
 
     finally:
-        # (*** 修复：将计数器更新移至 finally 块 ***)
+        # 无论成功还是失败，都在 finally 块中更新计数器
         if async_redis_client:
             try:
                 p = async_redis_client.pipeline()
@@ -290,8 +275,6 @@ async def process_doc_batch_task(doc_ids: list):
                 logger.info(f"Redis counters updated: success={len(successful_ids_final)}, skipped={len(skipped_ids_final)}")
             except Exception as e:
                 logger.error("Failed to update Redis refresh counters (async) in finally block: %s", e)
-
-    # (*** 修复：删除旧的计数器更新块 ***)
 
     logger.info(f"Batch task complete (async): {len(successful_ids_final)} processed, {len(skipped_ids_final)} skipped.")
 
@@ -379,7 +362,6 @@ async def refresh_all_task():
             await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
     finally:
         if async_redis_client and not (await async_redis_client.exists("refresh:total_queued")):
-            # (*** 修复：如果任务在设置 total_queued 之前失败，也要删除锁 ***)
             await async_redis_client.delete("refresh:lock")
 
 
