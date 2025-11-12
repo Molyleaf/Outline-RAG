@@ -15,7 +15,6 @@ from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_classic.storage import EncoderBackedStore
-# (*** 修改：导入 MarkdownHeaderTextSplitter ***)
 from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
 from sqlalchemy import text
 
@@ -58,12 +57,10 @@ async def initialize_rag_components():
             raise ValueError("DATABASE_URL is not set, but is required for SQLStore")
 
         # 1. 创建基础的字节存储 (SQLStore)
-        # 传入 'async_engine' 以支持异步方法 (amget, amset, amdelete)
         base_sql_store = SQLStore(
             engine=async_engine,
-            namespace="rag_parent_documents" # SQLStore 将自动创建和管理表
+            namespace="rag_parent_documents"
         )
-        # 确保表存在 (同步调用 OK)
         logger.info(f"Async SQLStore for ParentStore configured (engine=async_engine, namespace='rag_parent_documents').")
 
         # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
@@ -76,7 +73,6 @@ async def initialize_rag_components():
         logger.info("ParentStore configured (EncoderBackedStore over SQLStore).")
 
 
-        # (*** 2. 修改 PGVectorStore 初始化 ***)
         # 3. 初始化 PGVectorStore (子块存储)
         pg_engine_wrapper = PGEngine.from_engine(async_engine)
         try:
@@ -84,9 +80,6 @@ async def initialize_rag_components():
                 engine=pg_engine_wrapper,
                 embedding_service=embeddings_model,
                 table_name="langchain_pg_embedding",
-
-                # (*** 关键修复：从 list[Column] 改为 list[str] ***)
-                # 告知 v2 存储引擎我们正在使用的显式元数据列的名称
                 metadata_columns=[
                     "source_id",
                     "title",
@@ -99,10 +92,7 @@ async def initialize_rag_components():
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
-        # (*** 关键修复：修改检索器架构 ***)
-
         # 4. 初始化基础 *块* 检索器 (k=12)
-        #    不再使用 ParentDocumentRetriever
         base_retriever = vector_store.as_retriever(
             search_kwargs={"k": config.TOP_K}
         )
@@ -116,18 +106,13 @@ async def initialize_rag_components():
         )
 
         # 6. 创建一个 reranker 包装的 *块* 检索器
-        #    这个检索器现在返回 Top K (6) 个最相关的 *块*
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=pipeline_compressor,
             base_retriever=base_retriever
         )
-
-        # (*** 修复结束 ***)
-
         logger.info("RAG components initialization complete (Reranking Chunks).")
 
 
-# (*** 修改：使用 MarkdownHeaderTextSplitter ***)
 # 定义要分割的 Markdown 标题级别
 headers_to_split_on = [
     ("#", "Header 1"),
@@ -138,8 +123,8 @@ headers_to_split_on = [
 # 这个分割器将在索引时用于创建子块
 text_splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=headers_to_split_on,
-    strip_headers=True, # 从块内容中移除标题行
-    return_each_line=False # 聚合相同标题下的行
+    strip_headers=True,
+    return_each_line=False
 )
 
 # --- 数据库同步任务 ---
@@ -148,6 +133,7 @@ async def process_doc_batch_task(doc_ids: list):
     """
     异步处理一个批次的文档 ID，从 Outline 获取内容，
     并将其存入 ParentStore (SQL) 和 VectorStore (Postgres)。
+    (*** 修复：重构以确保计数器在 finally 块中更新 ***)
     """
     await initialize_rag_components()
 
@@ -158,167 +144,156 @@ async def process_doc_batch_task(doc_ids: list):
     if not doc_ids:
         return
 
+    # (*** 修复：重命名变量以区分最终计数 ***)
+    successful_ids_final = set()
+    skipped_ids_final = set()
     docs_to_process_lc = []
-    successful_ids = set()
-    skipped_ids = set()
 
-    # 1. 从 Outline API 批量获取文档内容
-    for doc_id in doc_ids:
-        # (*** 步骤 1: 获取元数据 ***)
-        info = await outline_get_doc(doc_id)
-        if not info:
-            logger.warning(f"无法获取文档 {doc_id} 的 *信息* (metadata)，跳过。")
-            skipped_ids.add(doc_id)
-            continue
-
-        # (*** 步骤 2: 获取完整内容 ***)
-        export_data = await outline_export_doc(doc_id)
-        if not export_data:
-            logger.warning(f"无法获取文档 {doc_id} 的 *内容* (export)，跳过。")
-            skipped_ids.add(doc_id)
-            continue
-
-        # (*** 步骤 3: 组合数据 ***)
-        # (*** 修复：export_data 已经是字符串 (str)，而不是 dict ***)
-        content = export_data or ""
-        if not content.strip():
-            logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
-            skipped_ids.add(doc_id)
-            continue
-
-        updated_at_str = info.get("updatedAt") # 从 info 获取元数据
-        if not updated_at_str:
-            now_dt = datetime.now(timezone.utc)
-            updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
-
-        doc = Document(
-            page_content=content, # (*** 使用 'export' 的 'text' ***)
-            metadata={
-                "source_id": doc_id,
-                "title": info.get("title") or "", # (*** 使用 'info' 的 'title' ***)
-                "outline_updated_at_str": updated_at_str,
-                "url": info.get("url") # (*** 使用 'info' 的 'url' ***)
-            }
-        )
-        docs_to_process_lc.append(doc)
-        successful_ids.add(doc_id)
-
-    if docs_to_process_lc:
-        # 2. 将父文档分割为子块
-        # (*** 关键修复：使用 `split_documents_for_indexing` ***)
-        #    我们需要手动将 'source_id' 复制到子块中，
-        #    因为我们不再使用 ParentDocumentRetriever 的索引逻辑。
-
-        chunks_to_add = []
-        parents_to_add = []
-
-        for parent_doc in docs_to_process_lc:
-            source_id = parent_doc.metadata.get("source_id")
-            if not source_id:
-                logger.warning(f"Skipping document with no source_id: {parent_doc.metadata.get('title')}")
+    try:
+        # 1. 从 Outline API 批量获取文档内容
+        for doc_id in doc_ids:
+            # (*** 步骤 1: 获取元数据 ***)
+            info = await outline_get_doc(doc_id)
+            if not info:
+                logger.warning(f"无法获取文档 {doc_id} 的 *信息* (metadata)，跳过。")
+                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
                 continue
 
-            parents_to_add.append((source_id, parent_doc))
+            # (*** 步骤 2: 获取完整内容 ***)
+            export_data = await outline_export_doc(doc_id)
+            if not export_data:
+                logger.warning(f"无法获取文档 {doc_id} 的 *内容* (export)，跳过。")
+                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
+                continue
 
-            # 分割子块
-            # (*** 修正：使用 .split_text() 并传入父文档的内容字符串 ***)
-            child_chunks = text_splitter.split_text(parent_doc.page_content)
+            # (*** 步骤 3: 组合数据 ***)
+            content = export_data or ""
+            if not content.strip():
+                logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
+                skipped_ids_final.add(doc_id) # (*** 修复：使用 final 变量 ***)
+                continue
 
-            # (*** 关键 ***) 确保子块继承 *父文档* 的元数据（source_id, title, url）
-            # 并 *合并* Markdown 分割器提取的标题元数据
-            for chunk in child_chunks:
-                # 1. 复制父文档的元数据 (source_id, title, url, outline_updated_at_str)
-                parent_metadata = parent_doc.metadata.copy()
+            updated_at_str = info.get("updatedAt") # 从 info 获取元数据
+            if not updated_at_str:
+                now_dt = datetime.now(timezone.utc)
+                updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
 
-                # 2. chunk.metadata 包含由 MarkdownHeaderTextSplitter 生成的标题
-                #    (e.g., {"Header 1": "Introduction"})
-                # 3. 合并它们。将父元数据放在后面，以确保 'source_id' 等关键字段
-                #    （如果 Markdown 标题元数据中意外出现同名字段）不会被覆盖。
-                merged_metadata = {**chunk.metadata, **parent_metadata}
+            doc = Document(
+                page_content=content,
+                metadata={
+                    "source_id": doc_id,
+                    "title": info.get("title") or "",
+                    "outline_updated_at_str": updated_at_str,
+                    "url": info.get("url")
+                }
+            )
+            docs_to_process_lc.append(doc)
 
-                chunk.metadata = merged_metadata
+        if docs_to_process_lc:
+            # 2. 将父文档分割为子块
+            chunks_to_add = []
+            parents_to_add = []
+            source_ids_to_process = [] # (*** 修复：收集需要处理的ID ***)
 
-                # (*** 额外检查 ***)
-                # 如果块内容为空 (例如只有标题但被 strip_headers=True 移除了)，则跳过
-                if not chunk.page_content.strip():
-                    logger.debug(f"Skipping empty chunk for doc {source_id} (likely just a header). Metadata: {chunk.metadata}")
+            for parent_doc in docs_to_process_lc:
+                source_id = parent_doc.metadata.get("source_id")
+                if not source_id:
+                    logger.warning(f"Skipping document with no source_id: {parent_doc.metadata.get('title')}")
+                    # (*** 修复：如果在这里跳过，也必须计数 ***)
+                    # 查找此 doc_id（如果可能），但它没有...
+                    # 这种情况理论上不应该发生，因为 source_id 是在上面添加的
                     continue
 
-                chunks_to_add.append(chunk)
+                source_ids_to_process.append(source_id) # (*** 修复：添加到列表 ***)
+                parents_to_add.append((source_id, parent_doc))
 
-        if chunks_to_add:
-            logger.info(f"Processing {len(chunks_to_add)} chunks for {len(successful_ids)} documents...")
+                child_chunks = text_splitter.split_text(parent_doc.page_content)
 
-            # 3. 手动从 PGVector 删除旧的子块
-            ids_to_delete = []
-            try:
-                async with AsyncSessionLocal.begin() as session:
-                    ids_to_delete_rows = (await session.execute(
-                        text("""
-                             SELECT langchain_id FROM langchain_pg_embedding
-                             /* (*** 3. 修改SQL查询 (A) ***) */
-                             WHERE source_id = ANY(:source_ids)
-                             """),
-                        {"source_ids": list(successful_ids)}
-                    )).fetchall()
-                    ids_to_delete = [row[0] for row in ids_to_delete_rows]
-            except Exception as e:
-                logger.error(f"Failed to query old chunk UUIDs (async): {e}. Skipping delete.", exc_info=True)
+                for chunk in child_chunks:
+                    parent_metadata = parent_doc.metadata.copy()
+                    merged_metadata = {**chunk.metadata, **parent_metadata}
+                    chunk.metadata = merged_metadata
+
+                    if not chunk.page_content.strip():
+                        continue
+
+                    chunks_to_add.append(chunk)
+
+            if chunks_to_add:
+                logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
+
+                # 3. 手动从 PGVector 删除旧的子块
                 ids_to_delete = []
-
-            if ids_to_delete:
-                logger.info(f"Deleting {len(ids_to_delete)} old chunks from PGVectorStore for {len(successful_ids)} docs...")
                 try:
-                    await vector_store.adelete(ids=ids_to_delete)
+                    async with AsyncSessionLocal.begin() as session:
+                        ids_to_delete_rows = (await session.execute(
+                            text("""
+                                 SELECT langchain_id FROM langchain_pg_embedding
+                                 WHERE source_id = ANY(:source_ids)
+                                 """),
+                            {"source_ids": source_ids_to_process} # (*** 修复：使用 source_ids_to_process ***)
+                        )).fetchall()
+                        ids_to_delete = [row[0] for row in ids_to_delete_rows]
                 except Exception as e:
-                    logger.error(f"vector_store.adelete (async) failed for chunks {ids_to_delete}: {e}. Continuing...", exc_info=True)
+                    logger.error(f"Failed to query old chunk UUIDs (async): {e}. Skipping delete.", exc_info=True)
+                    ids_to_delete = []
 
-            # 4. 异步手动执行索引逻辑
+                if ids_to_delete:
+                    logger.info(f"Deleting {len(ids_to_delete)} old chunks from PGVectorStore for {len(source_ids_to_process)} docs...")
+                    await vector_store.adelete(ids=ids_to_delete)
+
+                # 4. 异步手动执行索引逻辑
+                try:
+                    # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
+                    if embedding_cache_store:
+                        if hasattr(embeddings_model, "key_encoder"):
+                            key_encoder = embeddings_model.key_encoder
+                            keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks_to_add]
+
+                            if keys_to_delete:
+                                logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
+                                await embedding_cache_store.amdelete(keys_to_delete)
+                        else:
+                            logger.warning("embeddings_model missing 'key_encoder' attribute, skipping embedding cache deletion.")
+
+                    # 4b. 将父文档存入 SQLStore
+                    await parent_store.amset(parents_to_add)
+
+                    # 4c. 将新的子块存入 PGVectorStore
+                    await vector_store.aadd_documents(chunks_to_add)
+
+                except Exception as e:
+                    logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
+                    # (*** 修复：如果索引失败，抛出异常以触发外部 except 块 ***)
+                    raise e
+
+            # (*** 修复：如果索引成功（或无需索引），标记这些ID为成功 ***)
+            for doc in docs_to_process_lc:
+                successful_ids_final.add(doc.metadata["source_id"])
+
+    except Exception as e:
+        logger.error(f"Batch task for doc_ids {doc_ids} failed during processing: {e}", exc_info=True)
+        # (*** 修复：如果批次失败，将 *所有* ID 标记为跳过 ***)
+        successful_ids_final = set()
+        skipped_ids_final = set(doc_ids)
+
+    finally:
+        # (*** 修复：将计数器更新移至 finally 块 ***)
+        if async_redis_client:
             try:
-                # 4a. 从 Embedding 缓存 (SQLStore) 中删除旧的 chunk 键
-                if embedding_cache_store:
-                    # 我们需要访问 CacheBackedEmbeddings 内部的 key_encoder
-                    # 来正确生成用于删除的哈希键。
-
-                    # (*** 修复 AttributeError ***)
-                    # key_encoder 是在 llm_services.py 中附加到实例上的
-                    if hasattr(embeddings_model, "key_encoder"):
-                        key_encoder = embeddings_model.key_encoder
-                        keys_to_delete = [key_encoder(chunk.page_content) for chunk in chunks_to_add]
-
-                        if keys_to_delete:
-                            logger.info(f"Deleting {len(keys_to_delete)} old entries from Embedding Cache (SQLStore)...")
-                            await embedding_cache_store.amdelete(keys_to_delete)
-                    else:
-                        logger.warning("embeddings_model missing 'key_encoder' attribute, skipping embedding cache deletion.")
-
-
-                # 4b. 将父文档存入 SQLStore (使用原生异步 amset)
-                await parent_store.amset(parents_to_add)
-
-                # 4c. 将新的子块存入 PGVectorStore (aadd_documents 已经是异步)
-                #     由于缓存已清除，这将强制调用 OpenAIEmbeddings API
-                #     v2 引擎会自动将元数据映射到正确的列
-                #     (注意：'Header 1' 等元数据将被丢弃，因为它们不在 metadata_columns 中，这是符合预期的)
-                await vector_store.aadd_documents(chunks_to_add)
-
+                p = async_redis_client.pipeline()
+                if successful_ids_final:
+                    p.incrby("refresh:success_count", len(successful_ids_final))
+                if skipped_ids_final:
+                    p.incrby("refresh:skipped_count", len(skipped_ids_final))
+                await p.execute()
+                logger.info(f"Redis counters updated: success={len(successful_ids_final)}, skipped={len(skipped_ids_final)}")
             except Exception as e:
-                logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
+                logger.error("Failed to update Redis refresh counters (async) in finally block: %s", e)
 
+    # (*** 修复：删除旧的计数器更新块 ***)
 
-    # 5. 更新 Redis 中的任务计数器 (使用异步 client)
-    if async_redis_client:
-        try:
-            p = async_redis_client.pipeline()
-            if successful_ids:
-                p.incrby("refresh:success_count", len(successful_ids))
-            if skipped_ids:
-                p.incrby("refresh:skipped_count", len(skipped_ids))
-            await p.execute()
-        except Exception as e:
-            logger.error("Failed to update Redis refresh counters (async): %s", e)
-
-    logger.info(f"Batch task complete (async): {len(successful_ids)} processed, {len(skipped_ids)} skipped.")
+    logger.info(f"Batch task complete (async): {len(successful_ids_final)} processed, {len(skipped_ids_final)} skipped.")
 
 
 async def refresh_all_task():
@@ -340,7 +315,6 @@ async def refresh_all_task():
             async with AsyncSessionLocal.begin() as session:
                 local_docs_raw = (await session.execute(
                     text("""
-                         /* (*** 3. 修改SQL查询 (B) ***) */
                          SELECT DISTINCT ON (source_id)
                              source_id as id,
                              outline_updated_at_str
@@ -405,6 +379,7 @@ async def refresh_all_task():
             await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
     finally:
         if async_redis_client and not (await async_redis_client.exists("refresh:total_queued")):
+            # (*** 修复：如果任务在设置 total_queued 之前失败，也要删除锁 ***)
             await async_redis_client.delete("refresh:lock")
 
 
@@ -425,7 +400,6 @@ async def delete_doc(doc_id):
             ids_to_delete_rows = (await session.execute(
                 text("""
                      SELECT langchain_id FROM langchain_pg_embedding
-                     /* (*** 3. 修改SQL查询 (C) ***) */
                      WHERE source_id = :source_id
                      """),
                 {"source_id": doc_id}
@@ -446,7 +420,6 @@ async def delete_doc(doc_id):
 
     # 2. 从 ParentStore (SQLStore) 删除父文档
     try:
-        # (最终修复) 使用原生异步 amdelete
         await parent_store.amdelete([doc_id])
         logger.info(f"Deleted from ParentStore (SQLStore): {doc_id}")
     except Exception as e:
