@@ -1,4 +1,3 @@
-# app/rag.py
 import asyncio
 import json
 import logging
@@ -20,26 +19,20 @@ from sqlalchemy import text
 
 import config
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
-from llm_services import embeddings_model, reranker, store as embedding_cache_store
+from llm_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
 
 logger = logging.getLogger(__name__)
 
-# LangChain 组件将按需延迟初始化
 vector_store: Optional[AsyncPGVectorStore] = None
 parent_store: Optional[BaseStore[str, Document]] = None
-base_retriever: Optional[BaseRetriever] = None # (*** 修改：现在是块检索器 ***)
-compression_retriever: Optional[ContextualCompressionRetriever] = None # (*** 修改：现在是块重排器 ***)
+base_retriever: Optional[BaseRetriever] = None
+compression_retriever: Optional[ContextualCompressionRetriever] = None
 
-# 确保 RAG 组件在多进程环境中只初始化一次的锁
 _rag_lock = asyncio.Lock()
 
 
 async def initialize_rag_components():
-    """
-    异步初始化所有 RAG 相关的 LangChain 组件。
-    使用锁来确保在并发请求下只执行一次。
-    """
     global vector_store, base_retriever, compression_retriever, parent_store
 
     if vector_store:
@@ -56,14 +49,12 @@ async def initialize_rag_components():
         if not config.DATABASE_URL:
             raise ValueError("DATABASE_URL is not set, but is required for SQLStore")
 
-        # 1. 创建基础的字节存储 (SQLStore)
         base_sql_store = SQLStore(
             engine=async_engine,
             namespace="rag_parent_documents"
         )
         logger.info(f"Async SQLStore for ParentStore configured (engine=async_engine, namespace='rag_parent_documents').")
 
-        # 2. 包装基础存储，使其能处理 Document 对象的序列化/反序列化
         parent_store = EncoderBackedStore[str, Document](
             store=base_sql_store,
             key_encoder=lambda k: k,
@@ -72,8 +63,6 @@ async def initialize_rag_components():
         )
         logger.info("ParentStore configured (EncoderBackedStore over SQLStore).")
 
-
-        # 3. 初始化 PGVectorStore (子块存储)
         pg_engine_wrapper = PGEngine.from_engine(async_engine)
         try:
             vector_store = await AsyncPGVectorStore.create(
@@ -92,20 +81,17 @@ async def initialize_rag_components():
             logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
             raise
 
-        # 4. 初始化基础 *块* 检索器 (k=12)
         base_retriever = vector_store.as_retriever(
             search_kwargs={"k": config.TOP_K}
         )
         logger.info(f"Base chunk retriever configured (PGVectorStore.as_retriever, k={config.TOP_K}).")
 
-        # 5. 初始化压缩/重排管线
         pipeline_compressor = DocumentCompressorPipeline(
             transformers=[
-                reranker # 异步 Reranker (top_n=K=6)
+                reranker
             ]
         )
 
-        # 6. 创建一个 reranker 包装的 *块* 检索器
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=pipeline_compressor,
             base_retriever=base_retriever
@@ -113,28 +99,20 @@ async def initialize_rag_components():
         logger.info("RAG components initialization complete (Reranking Chunks).")
 
 
-# 定义要分割的 Markdown 标题级别
 headers_to_split_on = [
     ("#", "Header 1"),
     ("##", "Header 2"),
     ("###", "Header 3"),
 ]
 
-# 这个分割器将在索引时用于创建子块
 text_splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=headers_to_split_on,
     strip_headers=False,
     return_each_line=False
 )
 
-# --- 数据库同步任务 ---
 
 async def process_doc_batch_task(doc_ids: list):
-    """
-    异步处理一个批次的文档 ID，从 Outline 获取内容，
-    并将其存入 ParentStore (SQL) 和 VectorStore (Postgres)。
-    (*** 修复：移除 amdelete 逻辑以避免竞态条件 ***)
-    """
     await initialize_rag_components()
 
     if not vector_store or not parent_store:
@@ -149,7 +127,6 @@ async def process_doc_batch_task(doc_ids: list):
     docs_to_process_lc = []
 
     try:
-        # 1. 从 Outline API 批量获取文档内容
         for doc_id in doc_ids:
             info = await outline_get_doc(doc_id)
             if not info:
@@ -186,7 +163,6 @@ async def process_doc_batch_task(doc_ids: list):
             docs_to_process_lc.append(doc)
 
         if docs_to_process_lc:
-            # 2. 将父文档分割为子块
             chunks_to_add = []
             parents_to_add = []
             source_ids_to_process = []
@@ -200,12 +176,19 @@ async def process_doc_batch_task(doc_ids: list):
                 source_ids_to_process.append(source_id)
                 parents_to_add.append((source_id, parent_doc))
 
+                # 获取父文档标题
+                parent_title = parent_doc.metadata.get("title") or ""
+
                 child_chunks = text_splitter.split_text(parent_doc.page_content)
 
                 for chunk in child_chunks:
                     parent_metadata = parent_doc.metadata.copy()
                     merged_metadata = {**chunk.metadata, **parent_metadata}
                     chunk.metadata = merged_metadata
+
+                    # 2. 将父标题强行注入 page_content，以确保它被向量化
+                    if parent_title:
+                        chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
 
                     if not chunk.page_content.strip():
                         continue
@@ -215,7 +198,6 @@ async def process_doc_batch_task(doc_ids: list):
             if chunks_to_add:
                 logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
 
-                # 3. 手动从 PGVector 删除旧的子块
                 ids_to_delete = []
                 try:
                     async with AsyncSessionLocal.begin() as session:
@@ -235,35 +217,23 @@ async def process_doc_batch_task(doc_ids: list):
                     logger.info(f"Deleting {len(ids_to_delete)} old chunks from PGVectorStore for {len(source_ids_to_process)} docs...")
                     await vector_store.adelete(ids=ids_to_delete)
 
-                # 4. 异步手动执行索引逻辑
                 try:
-                    # (*** 修复：已删除 4a (amdelete) ***)
-
-                    # 4b. 将父文档存入 SQLStore
                     await parent_store.amset(parents_to_add)
-
-                    # 4c. 将新的子块存入 PGVectorStore
-                    #     CacheBackedEmbeddings 将自动处理缓存。
-                    #     如果 key (内容哈希) 已存在，它将跳过 API 调用和 INSERT。
                     await vector_store.aadd_documents(chunks_to_add)
 
                 except Exception as e:
                     logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
-                    # 抛出异常以触发外部 except 块
                     raise e
 
-            # 索引成功（或无需索引），标记这些ID为成功
             for doc in docs_to_process_lc:
                 successful_ids_final.add(doc.metadata["source_id"])
 
     except Exception as e:
         logger.error(f"Batch task for doc_ids {doc_ids} failed during processing: {e}", exc_info=True)
-        # 如果批次失败，将 *所有* ID 标记为跳过
         successful_ids_final = set()
         skipped_ids_final = set(doc_ids)
 
     finally:
-        # 无论成功还是失败，都在 finally 块中更新计数器
         if async_redis_client:
             try:
                 p = async_redis_client.pipeline()
@@ -280,10 +250,6 @@ async def process_doc_batch_task(doc_ids: list):
 
 
 async def refresh_all_task():
-    """
-    执行 RAG 优雅刷新。
-    比较 Outline API 和本地存储，以确定要添加、更新或删除的文档。
-    """
     await initialize_rag_components()
 
     try:
@@ -366,16 +332,12 @@ async def refresh_all_task():
 
 
 async def delete_doc(doc_id):
-    """
-    从 PGVectorStore (子块) 和 SQLStore (父文档) 中异步删除一个文档。
-    """
     await initialize_rag_components()
 
     if not vector_store or not parent_store:
         logger.critical("Vector store or Parent store not initialized in delete_doc!")
         raise RuntimeError("RAG components (vector_store/parent_store) not initialized")
 
-    # 1. 从 PGVector (Postgres) 删除子块
     ids_to_delete = []
     try:
         async with AsyncSessionLocal.begin() as session:
@@ -400,7 +362,6 @@ async def delete_doc(doc_id):
     else:
         logger.info(f"No chunks found in PGVectorStore to delete for: {doc_id}")
 
-    # 2. 从 ParentStore (SQLStore) 删除父文档
     try:
         await parent_store.amdelete([doc_id])
         logger.info(f"Deleted from ParentStore (SQLStore): {doc_id}")
