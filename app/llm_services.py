@@ -7,7 +7,7 @@ import httpx
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
-from langchain_community.storage import SQLStore
+from langchain_community.storage.sql import SQLStore, LangchainKeyValueStores
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -18,7 +18,6 @@ import config
 from database import async_engine
 
 logger = logging.getLogger(__name__)
-
 
 class IdempotentSQLStore(SQLStore):
     """
@@ -33,21 +32,22 @@ class IdempotentSQLStore(SQLStore):
     def __init__(self, **kwargs: Any):
         # 1. 确保序列化器为 None，因为我们用于 bytes 存储
         #    (CacheBackedEmbeddings.from_bytes_store)
+        #    SQLStore (v0.2.1+) 的 __init__ 不接受这些参数，
+        #    所以我们必须在调用 super() 之前将它们移除。
         kwargs.pop('serializer', None)
         kwargs.pop('deserializer', None)
 
         # 2. pop 出 'value_serializer' (如果存在)，
-        #    因为父类 SQLStore (0.2.1+) 不认识它。
         #    (这是从 EncoderBackedStore (rag.py) 错误复制来的)
         kwargs.pop('value_serializer', None)
         kwargs.pop('value_deserializer', None)
 
         # 3. 调用父类 __init__
         #    父类 (SQLStore 0.2.1+) 将收到 engine, namespace,
-        #    serializer=None, deserializer=None。
-        #    它将正确设置 self._table，
-        #    并且 self._serializer 将被设置为 None。
+        #    并且不会收到意外的参数。
         super().__init__(**kwargs)
+
+        # (注意：SQLStore 0.2.1+ 不会设置 self._table，这是正常的)
 
     async def amset(self, key_value_pairs: List[Tuple[str, Any]]) -> None:
         """
@@ -57,7 +57,6 @@ class IdempotentSQLStore(SQLStore):
             return
 
         try:
-            # self._serializer 是 None (来自父类 __init__(serializer=None))
             # 'v' 已经是 bytes (来自 CacheBackedEmbeddings)
             serialized_pairs = [
                 {
@@ -68,11 +67,17 @@ class IdempotentSQLStore(SQLStore):
                 for k, v in key_value_pairs
             ]
 
-            stmt = pg_insert(self._table).values(serialized_pairs)
+            # (*** 修复 ***)
+            # 不使用 self._table，而是使用从 langchain_community.storage.sql
+            # 导入的 LangchainKeyValueStores ORM 模型类。
+            stmt = pg_insert(LangchainKeyValueStores).values(serialized_pairs)
+
             safe_stmt = stmt.on_conflict_do_nothing(
+                # 主键是 (key, namespace)
                 index_elements=['key', 'namespace']
             )
 
+            # self.engine 是由父类 SQLStore.__init__ 设置的
             async with self.engine.begin() as conn:
                 await conn.execute(safe_stmt)
 
@@ -85,14 +90,17 @@ class IdempotentSQLStore(SQLStore):
         """
         logger.warning("IdempotentSQLStore.mset (sync) was called. This should be avoided in an async app.")
         try:
-            # self._serializer 是 None。'v' 已经是 bytes。
+            # 'v' 已经是 bytes。
             with self.engine.begin() as conn:
                 for k, v in key_value_pairs:
-                    stmt = pg_insert(self._table).values(
+
+                    # (*** 修复 ***)
+                    # 同样，使用 LangchainKeyValueStores 模型类
+                    stmt = pg_insert(LangchainKeyValueStores).values(
                         key=k, value=v, namespace=self.namespace # 直接使用 v (bytes)
                     )
                     safe_stmt = stmt.on_conflict_do_nothing(
-                        index_elements=['key', 'namespace']
+                        index_elements=['key', 'namespace'] # (*** 修复 ***)
                     )
                     conn.execute(safe_stmt)
         except Exception as e:
