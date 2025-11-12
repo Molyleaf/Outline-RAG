@@ -14,8 +14,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
-# (*** 1. 添加 Column 导入 ***)
-from langchain_postgres import Column
+# (*** 1. 移除不再需要的 Column 导入 ***)
+# from langchain_postgres import Column
 from langchain_classic.retrievers import ParentDocumentRetriever
 from langchain_classic.storage import EncoderBackedStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -88,12 +88,13 @@ async def initialize_rag_components():
                 embedding_service=embeddings_model,
                 table_name="langchain_pg_embedding",
 
-                # 告知 v2 存储引擎我们正在使用的显式元数据列
+                # (*** 关键修复：从 list[Column] 改为 list[str] ***)
+                # 告知 v2 存储引擎我们正在使用的显式元数据列的名称
                 metadata_columns=[
-                    Column("source_id", "TEXT"),
-                    Column("title", "TEXT"),
-                    Column("outline_updated_at_str", "TEXT"),
-                    Column("url", "TEXT"),
+                    "source_id",
+                    "title",
+                    "outline_updated_at_str",
+                    "url",
                 ],
             )
             logger.info("AsyncPGVectorStore (v2) initialized (using explicit metadata columns).")
