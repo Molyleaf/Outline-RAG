@@ -105,11 +105,15 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-/* (新) Req 1: 为 ParentDocumentRetriever (AsyncPGStore) 添加持久化存储 */
-CREATE TABLE IF NOT EXISTS langchain_storage_collection_rag_parent_documents (
-    key_ TEXT PRIMARY KEY,
-    value_ BYTEA
+/* 为 SQLStore (ParentDocumentRetriever) 添加持久化存储 */
+CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
+    key TEXT PRIMARY KEY,
+    value BYTEA,
+    /* 增加 SQLStore 内部逻辑可能需要的 namespace 字段 */
+    namespace TEXT
 );
+/* 为 namespace 字段创建索引以提高查询效率 */
+CREATE INDEX IF NOT EXISTS idx_langchain_kv_namespace ON langchain_key_value_stores(namespace);
 """
 
 # PGVector 表结构
