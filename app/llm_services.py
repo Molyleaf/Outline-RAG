@@ -193,7 +193,6 @@ _siliconflow_api_key = config.SILICONFLOW_API_KEY
 # 因为 `utils.validate_environment` 会自动为我们添加 /v1。
 _siliconflow_base_url_for_embeddings = config.SILICONFLOW_BASE_URL.rstrip('/')
 
-# [--- 更改开始 ---]
 # 删除手动创建的 `_embedding_client` 和 `_embedding_async_client`
 
 # 将 `base_url` 显式注入 SiliconFlowEmbeddings 构造函数
