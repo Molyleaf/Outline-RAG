@@ -2,17 +2,15 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from operator import itemgetter
 from typing import List, Dict, Any
-import re
 
 import config
 import rag
 from database import AsyncSessionLocal, redis_client
-from llm_services import llm
-from outline_client import verify_outline_signature
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
@@ -20,6 +18,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
+from llm_services import llm
+from outline_client import verify_outline_signature
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename

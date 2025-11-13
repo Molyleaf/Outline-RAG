@@ -4,6 +4,7 @@ import logging
 from typing import Sequence, Any, List, Tuple
 
 import httpx
+import tiktoken
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
@@ -11,7 +12,6 @@ from langchain_community.storage.sql import SQLStore, LangchainKeyValueStores
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-import tiktoken
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
