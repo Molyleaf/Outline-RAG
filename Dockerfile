@@ -46,14 +46,43 @@ COPY --chown=1001:1001 app/. /app/
 RUN flask assets build
 
 
-# --- 阶段 2: 最终镜像 ---
+# --- 阶段 2: 运行时依赖 (Runtime Python Deps) ---
+# (*** 新增阶段 ***)
+# 此阶段 *仅* 安装运行时依赖，以保持 /home/outline/.local 纯净
+FROM python:3.13-slim-trixie AS runtime_builder
+
+WORKDIR /app
+ARG DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER root
+RUN rm -f /etc/apt/sources.list \
+    && rm -rf /etc/apt/sources.list.d/
+COPY sources.list /etc/apt/sources.list
+# 仅安装构建 psycopg 所需的依赖
+RUN apt-get update && apt-get install -y \
+    build-essential gcc libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN groupadd -g 1001 outline && useradd -m -u 1001 -g 1001 outline
+
+# (*** 已修改 ***) 仅复制运行时需求
+COPY requirements-runtime.txt .
+RUN chown 1001:1001 requirements.txt
+
+USER 1001:1001
+ENV PATH="/home/outline/.local/bin:${PATH}"
+
+# (*** 已修改 ***) 只安装 *运行时* 依赖
+RUN pip config set global.index-url https://mirrors.pku.edu.cn/pypi/simple/ \
+    && pip install --no-cache-dir --user -r requirements.txt
+
+
+# --- 阶段 3: 最终镜像 ---
 # 基于 Python 3.13 轻量镜像
 FROM python:3.13-slim-trixie
 
 WORKDIR /app
 
 ARG DEBIAN_FRONTEND=noninteractive
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     FLASK_DEBUG=0 \
@@ -87,13 +116,13 @@ ENV PATH="/home/outline/.local/bin:${PATH}"
 # (新) 切换回 root 用户以复制应用代码并设置权限
 USER root
 
-# (*** 已修改 ***)
-# 从构建器阶段复制已包含预构建资源的应用代码
-COPY --from=builder --chown=1001:1001 /app /app/
+# (*** 已修改 ***) 从 'runtime_builder' 复制 *纯净的* 运行时依赖
+COPY --from=runtime_builder /home/outline/.local /home/outline/.local
+ENV PATH="/home/outline/.local/bin:${PATH}"
 
-# (*** 已修改 ***)
-# 关键步骤：移除原始的 JS 和 CSS 源文件
-RUN rm -rf /app/static/js /app/static/css /app/static/.webassets-cache
+USER root
+# (*** 已修改 ***) 从 'builder' 复制 *已构建好的* 应用代码
+COPY --from=builder --chown=1001:1001 /app /app/
 
 # (*** 已修改 ***)
 # 创建可持久化目录并授权
