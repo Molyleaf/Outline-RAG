@@ -28,10 +28,11 @@ from database import db_init, redis_client, async_engine
 
 # --- 2. 配置日志 (在 Gunicorn/Uvicorn 启动时) ---
 logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+    level=getattr(logging, config.LOG_LEVEL, logging.ERROR),
     format="%(asctime)s %(levelname)s %(name)s - %(message)s"
 )
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
+logging.getLogger("uvicorn.access").setLevel(logging.ERROR) # 移除访问日志
 logger = logging.getLogger("main")
 
 # --- 6. 后台任务 (异步) ---

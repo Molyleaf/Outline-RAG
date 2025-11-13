@@ -67,7 +67,6 @@ class IdempotentSQLStore(SQLStore):
                 for k, v in key_value_pairs
             ]
 
-            # (*** 修复 ***)
             # 不使用 self._table，而是使用从 langchain_community.storage.sql
             # 导入的 LangchainKeyValueStores ORM 模型类。
             stmt = pg_insert(LangchainKeyValueStores).values(serialized_pairs)
@@ -94,13 +93,12 @@ class IdempotentSQLStore(SQLStore):
             with self.engine.begin() as conn:
                 for k, v in key_value_pairs:
 
-                    # (*** 修复 ***)
                     # 同样，使用 LangchainKeyValueStores 模型类
                     stmt = pg_insert(LangchainKeyValueStores).values(
                         key=k, value=v, namespace=self.namespace # 直接使用 v (bytes)
                     )
                     safe_stmt = stmt.on_conflict_do_nothing(
-                        index_elements=['key', 'namespace'] # (*** 修复 ***)
+                        index_elements=['key', 'namespace']
                     )
                     conn.execute(safe_stmt)
         except Exception as e:

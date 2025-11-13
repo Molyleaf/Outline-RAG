@@ -59,7 +59,7 @@ def _format_docs_with_metadata(docs: List[Document]) -> dict:
 
         # 归一化 URL
         if url:
-            # [MODIFIED] 替换 internal URL 为 external display URL
+            # 替换 internal URL 为 external display URL
             # 检查 config.OUTLINE_DISPLAY_URL 是否已设置
             if config.OUTLINE_DISPLAY_URL and api_base_url and url.startswith(api_base_url):
                 url = url.replace(api_base_url, display_base_url, 1)
@@ -351,7 +351,7 @@ async def api_ask(
 
     # --- LCEL 链定义 ---
 
-    # 修复：根据模型名称动态添加 reasoning=True
+    # 根据模型名称动态添加 stream_options
     llm_params = {
         "model": model,
         "temperature": temperature,

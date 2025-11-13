@@ -132,7 +132,6 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
 """
 
 # 2. 将 CREATE INDEX 移到单独的变量
-# (*** 修复：添加 HNSW 索引 ***)
 PGVECTOR_INDEX_SQL = f"""
 CREATE INDEX IF NOT EXISTS idx_langchain_embedding_source_id ON langchain_pg_embedding(source_id);
 
@@ -164,7 +163,6 @@ async def db_init():
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")
 
-            # --- (*** 修复：在主事务外、咨询锁内创建索引 ***) ---
             # (使用 conn_ac, 它是 AUTOCOMMIT 模式)
             logger.info("正在 (异步) 检查并创建索引 (这可能需要一些时间)...")
 
@@ -175,7 +173,6 @@ async def db_init():
                 await conn_ac.execute(text(sql_command))
 
             logger.info("索引创建/检查完成。")
-            # --- 修复结束 ---
 
         except Exception as e:
             logger.error(f"数据库初始化 (db_init) 失败: {e}", exc_info=True)

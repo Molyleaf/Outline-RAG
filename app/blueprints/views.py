@@ -55,7 +55,6 @@ async def chat_page_with_guid(
         resp.set_cookie("chat_notice", "对话不存在", max_age=10, httponly=False, samesite="lax")
         return resp
 
-    # (ASYNC REFACTOR)
     async with session.begin():
         user_id = user.get("id")
         own = (await session.execute(
@@ -68,7 +67,7 @@ async def chat_page_with_guid(
         resp.set_cookie("chat_notice", "无权访问该对话", max_age=10, httponly=False, samesite="lax")
         return resp
 
-    # (MODIFIED) 使用 TemplateResponse 替换 FileResponse
+    # 使用 TemplateResponse 替换 FileResponse
     resp = templates.TemplateResponse("index.html", {
         "request": request,
         "app_name": config.APP_NAME

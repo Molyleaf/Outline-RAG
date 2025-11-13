@@ -190,8 +190,6 @@ async def process_doc_batch_task(doc_ids: list):
                 # 获取父文档标题
                 parent_title = parent_doc.metadata.get("title") or ""
 
-                # --- [RAG 修复 2025-11-12] ---
-
                 # 我们*只*使用 child_splitter (RecursiveCharacterTextSplitter)
                 # 来对*整个*父文档 (parent_doc) 进行分割。
                 # child_splitter (separators=["\n\n", "\n", ...])
@@ -216,7 +214,6 @@ async def process_doc_batch_task(doc_ids: list):
                         continue
 
                     chunks_to_add.append(chunk)
-                # --- [修复结束] ---
 
             if chunks_to_add:
                 logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
