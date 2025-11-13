@@ -5,20 +5,23 @@ from typing import Sequence, Any, List, Tuple
 
 import httpx
 import tiktoken
+import openai
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
-from langchain_classic.embeddings.cache import CacheBackedEmbeddings
+from langchain.embeddings.cache import CacheBackedEmbeddings
 from langchain_community.cache import AsyncRedisCache
 from langchain_community.storage.sql import SQLStore, LangchainKeyValueStores
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_siliconflow.chat_models import ChatSiliconFlow
+from langchain_siliconflow.embeddings import SiliconFlowEmbeddings
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
 from database import async_engine, redis_client
 
 logger = logging.getLogger(__name__)
+
 
 class IdempotentSQLStore(SQLStore):
     """
@@ -62,7 +65,7 @@ class IdempotentSQLStore(SQLStore):
             serialized_pairs = [
                 {
                     "key": k,
-                    "value": v, # 直接使用 v (bytes)
+                    "value": v,  # 直接使用 v (bytes)
                     "namespace": self.namespace
                 }
                 for k, v in key_value_pairs
@@ -93,10 +96,9 @@ class IdempotentSQLStore(SQLStore):
             # 'v' 已经是 bytes。
             with self.engine.begin() as conn:
                 for k, v in key_value_pairs:
-
                     # 同样，使用 LangchainKeyValueStores 模型类
                     stmt = pg_insert(LangchainKeyValueStores).values(
-                        key=k, value=v, namespace=self.namespace # 直接使用 v (bytes)
+                        key=k, value=v, namespace=self.namespace  # 直接使用 v (bytes)
                     )
                     safe_stmt = stmt.on_conflict_do_nothing(
                         index_elements=['key', 'namespace']
@@ -116,12 +118,14 @@ except Exception as e:
 
 _cache_prefix = f"emb:{config.EMBEDDING_MODEL}"
 
+
 def _sha256_encoder(s: str) -> str:
     """
     将输入文本编码为 SHA-256 哈希，并附加模型特定的前缀。
     """
     hash_id = hashlib.sha256(s.encode()).hexdigest()
     return f"{_cache_prefix}:{hash_id}"
+
 
 def _create_retry_client() -> httpx.AsyncClient:
     """创建带 httpx-retries 的 AsyncClient"""
@@ -139,14 +143,15 @@ def _create_retry_client() -> httpx.AsyncClient:
     client = httpx.AsyncClient(transport=transport)
     return client
 
+
 # --- 聊天模型 (LLM) ---
-llm = ChatOpenAI(
+llm = ChatSiliconFlow(
     model=config.CHAT_MODEL,
     api_key=config.CHAT_API_TOKEN,
     base_url=f"{config.CHAT_API_URL}/v1",
 )
 
-# --- [新增] 启用 LLM 异步缓存 ---
+# --- 启用 LLM 异步缓存 ---
 if redis_client:
     try:
         # 你可以根据需要调整 ttl (Time-To-Live)，单位为秒
@@ -164,11 +169,30 @@ else:
 
 # --- 嵌入模型 (Embedding) ---
 
-_base_embeddings = OpenAIEmbeddings(
+# 我们必须手动创建客户端，因为 SiliconFlowEmbeddings (v0.1.3)
+# 的 Pydantic 验证器有缺陷，它会拒绝 'base_url' 关键字参数，
+# 这反过来又阻止了 'client' 和 'async_client' 的自动创建。
+
+_embedding_api_key = config.EMBEDDING_API_TOKEN
+_embedding_base_url = f"{config.EMBEDDING_API_URL}/v1"
+
+# 手动创建 openai 客户端
+_embedding_client = openai.OpenAI(
+    api_key=_embedding_api_key,
+    base_url=_embedding_base_url,
+)
+_embedding_async_client = openai.AsyncOpenAI(
+    api_key=_embedding_api_key,
+    base_url=_embedding_base_url,
+)
+
+_base_embeddings = SiliconFlowEmbeddings(
     model=config.EMBEDDING_MODEL,
-    api_key=config.EMBEDDING_API_TOKEN,
-    base_url=f"{config.EMBEDDING_API_URL}/v1",
-    chunk_size=64
+    # 显式传递必需的 client 和 async_client
+    client=_embedding_client,
+    async_client=_embedding_async_client,
+    # 保留 api_key 以便 Pydantic 验证（尽管现在是多余的）
+    siliconflow_api_key=config.EMBEDDING_API_TOKEN,
 )
 
 store = None
@@ -254,7 +278,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         for res in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
             original_index = res.get("index")
             if original_index is not None and 0 <= original_index < len(documents):
-
                 doc_content_raw = res.get("document", doc_texts[original_index])
                 if isinstance(doc_content_raw, dict):
                     page_content = doc_content_raw.get("text", "")
@@ -278,5 +301,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
     ) -> Sequence[Document]:
         self.logger.warning("SiliconFlowReranker.compress_documents (同步) 被调用，这不应该发生。")
         return []
+
 
 reranker = SiliconFlowReranker()
