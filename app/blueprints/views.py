@@ -1,8 +1,8 @@
 # app/blueprints/views.py
 import re
 
-import config
-from database import AsyncSessionLocal
+import config # type: ignore
+from database import AsyncSessionLocal # type: ignore
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates

@@ -8,9 +8,9 @@ import uuid
 from operator import itemgetter
 from typing import List, Dict, Any
 
-import config
-import rag
-from database import AsyncSessionLocal, redis_client
+import config # type: ignore
+import rag # type: ignore
+from database import AsyncSessionLocal, redis_client # type: ignore
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
@@ -18,8 +18,8 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
-from llm_services import llm
-from outline_client import verify_outline_signature
+from llm_services import llm # type: ignore
+from outline_client import verify_outline_signature # type: ignore
 from pydantic import BaseModel
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
@@ -419,7 +419,7 @@ async def api_ask(
     )
 
     rag_chain = {
-        "llm_output": itemgetter("prompt") | llm_with_options, # LLM 只处理 prompt
+        "llm_output": itemgetter("prompt") | llm_with_options, # type: ignore LLM 只处理 prompt
         "sources_map": itemgetter("sources_map") # Map 被传递
     }
 
@@ -546,8 +546,8 @@ async def api_ask(
             llm_iter = llm_stream.__aiter__()
             ping_iter = ping_stream.__aiter__()
 
-            llm_task = asyncio.create_task(llm_iter.__anext__())
-            ping_task = asyncio.create_task(ping_iter.__anext__())
+            llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
+            ping_task = asyncio.create_task(ping_iter.__anext__()) # type: ignore
 
             pending = {llm_task, ping_task}
 
@@ -575,7 +575,7 @@ async def api_ask(
                             delta_chunk = delta_chunk_dict.get("llm_output")
                             if not delta_chunk:
                                 # 这个块只包含 map，没有 LLM 内容，跳过
-                                llm_task = asyncio.create_task(llm_iter.__anext__())
+                                llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
                                 pending.add(llm_task)
                                 continue
 
@@ -596,7 +596,7 @@ async def api_ask(
                                 # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
-                            llm_task = asyncio.create_task(llm_iter.__anext__())
+                            llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
                             pending.add(llm_task)
 
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
@@ -617,7 +617,7 @@ async def api_ask(
                             _ = task.result()
                             yield ": ping\n\n"
                             if not llm_is_done:
-                                ping_task = asyncio.create_task(ping_iter.__anext__())
+                                ping_task = asyncio.create_task(ping_iter.__anext__()) # type: ignore
                                 pending.add(ping_task)
                         except (StopAsyncIteration, asyncio.CancelledError, GeneratorExit):
                             pass

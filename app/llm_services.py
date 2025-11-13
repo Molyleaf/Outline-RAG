@@ -5,9 +5,6 @@ from typing import Sequence, Any, List, Tuple
 
 import httpx
 import tiktoken
-# [--- 更改：导入 openai ---]
-import openai
-# [--- 更改结束 ---]
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain.embeddings.cache import CacheBackedEmbeddings
@@ -176,33 +173,38 @@ else:
     logger.info("Redis 未配置，LLM 缓存未启用。")
 
 # --- 嵌入模型 (Embedding) ---
-# 我们必须手动创建客户端，因为 SiliconFlowEmbeddings (v0.1.3)
-# 的 Pydantic 验证器有缺陷，它无法自动创建
-# 'client' 和 'async_client'，导致报错。
+# [--- 显式传递 Embedding Model 参数 ---]
+# `SiliconFlowEmbeddings` 的 Pydantic 验证器 (v0.1.3) 会在模型初始化前
+# 运行 `utils.validate_environment`。
+# 此函数会读取 'base_url' 或 'SILICONFLOW_BASE_URL' 环境变量
+# 来 *重新创建* 'client' 和 'async_client'。
+#
+# 为了确保在 Gunicorn/Uvicorn 等环境中正确使用 .cn 地址，
+# 我们 *必须* 显式地将 `base_url` 传递给构造函数。
+# 这样验证器就会使用我们传入的 `base_url`，而不是
+# 尝试读取可能不可靠的环境变量。
+#
+# (这与 ChatSiliconFlow 不同，ChatSiliconFlow 的验证器
+# 不会自动添加 /v1，但 SiliconFlowEmbeddings 的验证器会。)
 
 # 从 config.py 中读取标准变量
 _siliconflow_api_key = config.SILICONFLOW_API_KEY
-_siliconflow_base_url = f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1" # 确保 /v1
+# 我们传递 *不带* /v1 的 base_url，
+# 因为 `utils.validate_environment` 会自动为我们添加 /v1。
+_siliconflow_base_url_for_embeddings = config.SILICONFLOW_BASE_URL.rstrip('/')
 
-# 手动创建 openai 客户端 (指向 SiliconFlow)
-_embedding_client = openai.OpenAI(
-    api_key=_siliconflow_api_key,
-    base_url=_siliconflow_base_url,
-)
-_embedding_async_client = openai.AsyncOpenAI(
-    api_key=_siliconflow_api_key,
-    base_url=_siliconflow_base_url,
-)
+# [--- 更改开始 ---]
+# 删除手动创建的 `_embedding_client` 和 `_embedding_async_client`
 
-# 将客户端注入 SiliconFlowEmbeddings 构造函数
+# 将 `base_url` 显式注入 SiliconFlowEmbeddings 构造函数
 _base_embeddings = SiliconFlowEmbeddings(
     model=config.EMBEDDING_MODEL,
-    # 显式传递必需的 client 和 async_client
-    client=_embedding_client,
-    async_client=_embedding_async_client,
-    # 再次传入 API Key，以满足其内部验证器的 'get_from_dict_or_env'
-    siliconflow_api_key=config.SILICONFLOW_API_KEY
-)
+    # 显式传递 base_url 和 api_key
+    base_url=_siliconflow_base_url_for_embeddings, # type: ignore
+    siliconflow_api_key=_siliconflow_api_key
+    # 验证器将使用这些值自动创建
+    # 正确的 'client' 和 'async_client'
+) # type: ignore
 
 store = None
 try:

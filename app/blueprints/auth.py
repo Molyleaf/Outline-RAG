@@ -7,9 +7,9 @@ import secrets
 import time
 import urllib.parse
 
-import config
+import config # type: ignore
 import httpx
-from database import AsyncSessionLocal, redis_client
+from database import AsyncSessionLocal, redis_client # type: ignore
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import RedirectResponse, Response
 from httpx_retries import RetryTransport, Retry

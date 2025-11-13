@@ -151,7 +151,7 @@ app = FastAPI(
 # 3a. 修复代理后的 HTTPS (mixed content)
 # 使用 Starlette/FastAPI 兼容的 ProxyHeadersMiddleware
 # trusted_hosts="*" 表示信任来自任何上游代理的 X-Forwarded-* 头
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*") # type: ignore
 
 # 3b. Session 中间件
 app.add_middleware(
