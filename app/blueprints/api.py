@@ -358,8 +358,8 @@ async def api_ask(
         "top_p": top_p,
         "stream": True
     }
-    if "thinking" in model.lower():
-        llm_params["stream_options"] = {"include_reasoning": True}
+    if "Thinking" in model.lower():
+        llm_params["extra_body"] = {"thinking_budget": 4096}
 
     llm_with_options = llm.bind(**llm_params)
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
@@ -558,6 +558,8 @@ async def api_ask(
                         try:
                             # 结果现在是一个字典 {"llm_output": ..., "sources_map": ...}
                             delta_chunk_dict = task.result()
+
+                            logger.debug(f"RAW CHUNK FROM API: {delta_chunk_dict}")
 
                             # 捕获 sources_map (它通常在第一个块中完整到达)
                             if "sources_map" in delta_chunk_dict:
