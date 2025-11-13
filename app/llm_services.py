@@ -263,7 +263,9 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-        doc_texts = [doc.page_content for doc in documents]
+        # 将 List[str] 更改为 List[Dict[str, str]]
+        # 之前：doc_texts = [doc.page_content for doc in documents]
+        doc_texts = [{"text": doc.page_content} for doc in documents]
 
         payload = {
             "model": self.model,
