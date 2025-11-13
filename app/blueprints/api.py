@@ -360,9 +360,10 @@ async def api_ask(
     }
 
     if "thinking" in model.lower():
-        llm_params["stream_options"] = {"include_reasoning": True}
-        llm_params["thinking_budget"] = 4096
-
+        llm_params["stream_options"] = {
+            "include_reasoning": True,
+            "thinking_budget": 4096
+        }
 
     llm_with_options = llm.bind(**llm_params)
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
