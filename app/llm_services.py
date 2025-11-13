@@ -4,8 +4,10 @@ import logging
 from typing import Sequence, Any, List, Tuple
 
 import httpx
-import openai
 import tiktoken
+# [--- 更改：导入 openai ---]
+import openai
+# [--- 更改结束 ---]
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain.embeddings.cache import CacheBackedEmbeddings
@@ -145,11 +147,17 @@ def _create_retry_client() -> httpx.AsyncClient:
 
 
 # --- 聊天模型 (LLM) ---
-# ChatSiliconFlow 将自动从 SILICONFLOW_API_KEY 和
-# SILICONFLOW_BASE_URL 环境变量中读取 (由 config.py 提供)
+
+# [--- 更改：显式传递 Chat Model 参数 ---]
+# 依赖环境变量的 `default_factory` 在 Gunicorn/Uvicorn
+# 启动时不可靠。我们必须显式传递参数。
 llm = ChatSiliconFlow(
     model=config.CHAT_MODEL,
+    api_key=config.SILICONFLOW_API_KEY,
+    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
 )
+# [--- 更改结束 ---]
+
 
 # --- 启用 LLM 异步缓存 ---
 if redis_client:
@@ -167,16 +175,16 @@ if redis_client:
 else:
     logger.info("Redis 未配置，LLM 缓存未启用。")
 
-# [--- 更改：修复 SiliconFlowEmbeddings 实例化 ---]
+# --- 嵌入模型 (Embedding) ---
 # 我们必须手动创建客户端，因为 SiliconFlowEmbeddings (v0.1.3)
 # 的 Pydantic 验证器有缺陷，它无法自动创建
 # 'client' 和 'async_client'，导致报错。
 
-# 1. 从 config.py 中读取标准变量
+# 从 config.py 中读取标准变量
 _siliconflow_api_key = config.SILICONFLOW_API_KEY
 _siliconflow_base_url = f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1" # 确保 /v1
 
-# 2. 手动创建 openai 客户端 (指向 SiliconFlow)
+# 手动创建 openai 客户端 (指向 SiliconFlow)
 _embedding_client = openai.OpenAI(
     api_key=_siliconflow_api_key,
     base_url=_siliconflow_base_url,
@@ -186,7 +194,7 @@ _embedding_async_client = openai.AsyncOpenAI(
     base_url=_siliconflow_base_url,
 )
 
-# 3. 将客户端注入 SiliconFlowEmbeddings 构造函数
+# 将客户端注入 SiliconFlowEmbeddings 构造函数
 _base_embeddings = SiliconFlowEmbeddings(
     model=config.EMBEDDING_MODEL,
     # 显式传递必需的 client 和 async_client
@@ -195,7 +203,6 @@ _base_embeddings = SiliconFlowEmbeddings(
     # 再次传入 API Key，以满足其内部验证器的 'get_from_dict_or_env'
     siliconflow_api_key=config.SILICONFLOW_API_KEY
 )
-# [--- 更改结束 ---]
 
 store = None
 try:
