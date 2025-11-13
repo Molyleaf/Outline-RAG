@@ -66,14 +66,14 @@ RUN groupadd -g 1001 outline && useradd -m -u 1001 -g 1001 outline
 
 # (*** 已修改 ***) 仅复制运行时需求
 COPY requirements-runtime.txt .
-RUN chown 1001:1001 requirements.txt
+RUN chown 1001:1001 requirements-runtime.txt
 
 USER 1001:1001
 ENV PATH="/home/outline/.local/bin:${PATH}"
 
 # (*** 已修改 ***) 只安装 *运行时* 依赖
 RUN pip config set global.index-url https://mirrors.pku.edu.cn/pypi/simple/ \
-    && pip install --no-cache-dir --user -r requirements.txt
+    && pip install --no-cache-dir --user -r requirements-runtime.txt
 
 
 # --- 阶段 3: 最终镜像 ---
@@ -106,9 +106,6 @@ RUN groupadd -g 1001 outline && useradd -m -u 1001 -g 1001 outline
 
 # 切换到非 root 用户
 USER 1001:1001
-
-# (新) 从构建器阶段复制已安装的 Python 依赖
-COPY --from=builder /home/outline/.local /home/outline/.local
 
 # 设置 $PATH
 ENV PATH="/home/outline/.local/bin:${PATH}"
