@@ -263,16 +263,22 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-        # 错误：SiliconFlow v1/rerank API 的 'documents' 字段期望一个字符串列表 (List[str])，
-        # 而不是一个对象列表 (List[Dict[str, str]])。
-        # 正确：构造一个简单的字符串列表
+        # --- 修复 #1：请求体 (Payload) ---
+        # API 需要一个字符串列表 (List[str])，而不是对象列表。
+        # 原始错误代码： doc_texts = [{"text": doc.page_content} for doc in documents]
         doc_texts = [doc.page_content for doc in documents]
+        # --- 修复 #1 结束 ---
 
         payload = {
             "model": self.model,
             "query": query,
             "documents": doc_texts,
             "top_n": self.top_n,
+            # 确保我们请求 API 返回文档内容以便处理
+            # "return_documents": True, # 注意：根据文档，此字段默认为 false。
+            # 但响应处理逻辑似乎依赖它。
+            # 更好的做法是根本不依赖返回的文本，
+            # 而是使用下面的“修复 #2”。
         }
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
@@ -282,35 +288,29 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             data = resp.json()
         except httpx.HTTPError as e:
             self.logger.warning(f"SiliconFlowReranker API (async) 调用失败: {e}")
-            # 返回空列表，RAG 链将知道没有找到文档
             return []
 
         results = data.get("results")
         if not results:
             return []
 
+        # --- 修复 #2：响应处理逻辑 ---
+        # 原始代码错误地重建了文档。
+        # 正确的做法是返回 *原始* 文档列表，
+        # 仅根据 reranker 的分数进行排序和过滤。
+
         final_docs = []
-        for res in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
+        # 按 API 返回的 relevance_score 降序排序
+        sorted_results = sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True)
+
+        for res in sorted_results:
             original_index = res.get("index")
             if original_index is not None and 0 <= original_index < len(documents):
-
-                # --- 响应处理（这部分是正确的，无需修改） ---
-                # API 响应体中的 'document' 字段 *是* 一个对象： { "text": "..." }
-                doc_content_raw = res.get("document") #
-
-                if isinstance(doc_content_raw, dict): #
-                    page_content = doc_content_raw.get("text", "") #
-                else:
-                    # 回退逻辑，以防 API 行为与文档不符
-                    page_content = str(doc_content_raw) #
-                # --- 响应处理结束 ---
-
-                new_doc = Document(
-                    page_content=page_content,
-                    metadata=documents[original_index].metadata.copy()
-                )
-                new_doc.metadata["relevance_score"] = res.get("relevance_score")
-                final_docs.append(new_doc)
+                # 获取原始文档
+                doc = documents[original_index]
+                # 将分数附加到元数据中
+                doc.metadata["relevance_score"] = res.get("relevance_score")
+                final_docs.append(doc)
 
         return final_docs
 
