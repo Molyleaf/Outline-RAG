@@ -279,7 +279,7 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             # 但响应处理逻辑似乎依赖它。
             # 更好的做法是根本不依赖返回的文本，
             # 而是使用下面的“修复 #2”。
-            "return_documents": True
+            "return_documents": False
         }
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
 
