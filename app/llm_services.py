@@ -8,6 +8,7 @@ import tiktoken
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain_classic.embeddings.cache import CacheBackedEmbeddings
+from langchain_community.cache import AsyncRedisCache
 from langchain_community.storage.sql import SQLStore, LangchainKeyValueStores
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
@@ -15,7 +16,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
-from database import async_engine
+from database import async_engine, redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,22 @@ llm = ChatOpenAI(
     api_key=config.CHAT_API_TOKEN,
     base_url=f"{config.CHAT_API_URL}/v1",
 )
+
+# --- [新增] 启用 LLM 异步缓存 ---
+if redis_client:
+    try:
+        # 你可以根据需要调整 ttl (Time-To-Live)，单位为秒
+        # 例如：ttl=3600 表示缓存 1 小时
+        llm_cache = AsyncRedisCache(
+            redis_=redis_client,
+            ttl=3600
+        )
+        llm.cache = llm_cache
+        logger.info("LLM 异步缓存已启用 (AsyncRedisCache, TTL=3600s)。")
+    except Exception as e:
+        logger.warning(f"无法配置 AsyncRedisCache: {e}", exc_info=True)
+else:
+    logger.info("Redis 未配置，LLM 缓存未启用。")
 
 # --- 嵌入模型 (Embedding) ---
 
