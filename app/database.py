@@ -111,9 +111,8 @@ CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
     namespace TEXT NOT NULL,
     PRIMARY KEY (key, namespace)
 );
-/* 索引 'idx_langchain_kv_namespace' 已被主键覆盖，无需单独创建 */
 """
-
+# 索引 'idx_langchain_kv_namespace' 已被主键覆盖，无需单独创建
 # PGVector 表结构 (v2 显式列)
 # 1. 仅包含 CREATE TABLE 语句
 PGVECTOR_TABLE_SQL = f"""
