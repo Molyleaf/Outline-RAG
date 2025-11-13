@@ -265,7 +265,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
 
         # --- 修复 #1：请求体 (Payload) ---
         # API 需要一个字符串列表 (List[str])，而不是对象列表。
-        # 原始错误代码： doc_texts = [{"text": doc.page_content} for doc in documents]
         doc_texts = [doc.page_content for doc in documents]
         # --- 修复 #1 结束 ---
 
@@ -273,12 +272,11 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             "model": self.model,
             "query": query,
             "documents": doc_texts,
-            "top_n": self.top_n,
-            # 确保我们请求 API 返回文档内容以便处理
-            # "return_documents": True, # 注意：根据文档，此字段默认为 false。
-            # 但响应处理逻辑似乎依赖它。
-            # 更好的做法是根本不依赖返回的文本，
-            # 而是使用下面的“修复 #2”。
+            # 修复：强制转为 int，避免配置中是字符串导致 400 错误
+            "top_n": int(self.top_n),
+            # 修复：移除 "return_documents": True，
+            # 1. 避免部分模型不支持导致 400 错误
+            # 2. 减少网络传输负载，因为我们下面会使用原始 documents 列表重建
             "return_documents": False
         }
         headers = {"Authorization": f"Bearer {self.api_token}", "Content-Type": "application/json"}
@@ -287,8 +285,27 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             resp: Response = await self.client.post(self.api_url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
             data = resp.json()
+        except httpx.HTTPStatusError as e:
+            # [重要修复]：
+            # 分开捕获 HTTPStatusError (4xx/5xx)，它一定有 e.response 属性。
+            # 读取具体的响应体，以了解为什么报 400/500 (例如：token 长度超限、参数错误等)。
+            error_detail = "No details available"
+            try:
+                # 尝试读取响应内容
+                error_content = await e.response.aread()
+                error_detail = error_content.decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+
+            self.logger.warning(
+                f"SiliconFlowReranker API (async) 请求被拒绝 (Status: {e.response.status_code}): {e} | "
+                f"Server Response: {error_detail}"
+            )
+            return []
         except httpx.HTTPError as e:
-            self.logger.warning(f"SiliconFlowReranker API (async) 调用失败: {e}")
+            # 捕获其他 HTTP 错误（如 ConnectTimeout, ConnectError 等）
+            # 这些错误通常没有 response 属性，所以不要在这里访问 e.response
+            self.logger.warning(f"SiliconFlowReranker API (async) 连接/协议错误: {e}")
             return []
 
         results = data.get("results")
@@ -296,7 +313,6 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             return []
 
         # --- 修复 #2：响应处理逻辑 ---
-        # 原始代码错误地重建了文档。
         # 正确的做法是返回 *原始* 文档列表，
         # 仅根据 reranker 的分数进行排序和过滤。
 
