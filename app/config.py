@@ -20,19 +20,15 @@ OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
 OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "123").strip()
 OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "true").lower() == "true"
 
-# --- AI 服务 ---
-EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "").rstrip("/")
-EMBEDDING_API_TOKEN = os.getenv("EMBEDDING_API_TOKEN", "")
+SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+
+# 设置 SiliconFlow 的基础 URL，默认为您指定的 .cn 端点
+SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn").rstrip("/")
+
+# 保留模型名称配置
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
-
-RERANKER_API_URL = os.getenv("RERANKER_API_URL", "").rstrip("/")
-RERANKER_API_TOKEN = os.getenv("RERANKER_API_TOKEN", "")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "bge-reranker-m2")
-
-CHAT_API_URL = os.getenv("CHAT_API_URL", "").rstrip("/")
-CHAT_API_TOKEN = os.getenv("CHAT_API_TOKEN", "")
-# CHAT_MODEL 变量现在作为 RAG 链的默认后备，但主要模型列表来自 CHAT_MODELS_JSON
-CHAT_MODEL = os.getenv("CHAT_MODEL", "deepseek-ai/DeepSeek-V3.2-Exp")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
 
 # 模型列表配置
 DEFAULT_MODELS_JSON = """

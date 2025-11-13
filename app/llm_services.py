@@ -5,7 +5,6 @@ from typing import Sequence, Any, List, Tuple
 
 import httpx
 import tiktoken
-import openai
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
 from langchain.embeddings.cache import CacheBackedEmbeddings
@@ -145,10 +144,11 @@ def _create_retry_client() -> httpx.AsyncClient:
 
 
 # --- 聊天模型 (LLM) ---
+# 移除 api_key 和 base_url 参数
+# ChatSiliconFlow 将自动从 SILICONFLOW_API_KEY 和
+# SILICONFLOW_BASE_URL 环境变量中读取 (由 config.py 提供)
 llm = ChatSiliconFlow(
     model=config.CHAT_MODEL,
-    api_key=config.CHAT_API_TOKEN,
-    base_url=f"{config.CHAT_API_URL}/v1",
 )
 
 # --- 启用 LLM 异步缓存 ---
@@ -169,30 +169,12 @@ else:
 
 # --- 嵌入模型 (Embedding) ---
 
-# 我们必须手动创建客户端，因为 SiliconFlowEmbeddings (v0.1.3)
-# 的 Pydantic 验证器有缺陷，它会拒绝 'base_url' 关键字参数，
-# 这反过来又阻止了 'client' 和 'async_client' 的自动创建。
-
-_embedding_api_key = config.EMBEDDING_API_TOKEN
-_embedding_base_url = f"{config.EMBEDDING_API_URL}/v1"
-
-# 手动创建 openai 客户端
-_embedding_client = openai.OpenAI(
-    api_key=_embedding_api_key,
-    base_url=_embedding_base_url,
-)
-_embedding_async_client = openai.AsyncOpenAI(
-    api_key=_embedding_api_key,
-    base_url=_embedding_base_url,
-)
-
+# 2. 实例化 SiliconFlowEmbeddings (不再使用 OpenAIEmbeddings)
+#    同样，我们不传递任何参数，让它从环境变量中读取
+#    SILICONFLOW_API_KEY 和 SILICONFLOW_BASE_URL。
+#    这将使用包内建的、正确的 `validate_environment` 逻辑。
 _base_embeddings = SiliconFlowEmbeddings(
     model=config.EMBEDDING_MODEL,
-    # 显式传递必需的 client 和 async_client
-    client=_embedding_client,
-    async_client=_embedding_async_client,
-    # 保留 api_key 以便 Pydantic 验证（尽管现在是多余的）
-    siliconflow_api_key=config.EMBEDDING_API_TOKEN,
 )
 
 store = None
@@ -227,8 +209,9 @@ class SiliconFlowReranker(BaseDocumentCompressor):
     适配 SiliconFlow API 的异步 Reranker
     """
     model: str = config.RERANKER_MODEL
-    api_url: str = f"{config.RERANKER_API_URL}/v1/rerank"
-    api_token: str = config.RERANKER_API_TOKEN
+    # 使用新的标准环境变量
+    api_url: str = f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1/rerank"
+    api_token: str = config.SILICONFLOW_API_KEY
     top_n: int = config.K
 
     client: httpx.AsyncClient = None
