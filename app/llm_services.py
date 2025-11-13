@@ -263,9 +263,10 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         if not documents:
             return []
 
-        # 将 List[str] 更改为 List[Dict[str, str]]
-        # 之前：doc_texts = [doc.page_content for doc in documents]
-        doc_texts = [{"text": doc.page_content} for doc in documents]
+        # 错误：SiliconFlow v1/rerank API 的 'documents' 字段期望一个字符串列表 (List[str])，
+        # 而不是一个对象列表 (List[Dict[str, str]])。
+        # 正确：构造一个简单的字符串列表
+        doc_texts = [doc.page_content for doc in documents]
 
         payload = {
             "model": self.model,
@@ -281,6 +282,7 @@ class SiliconFlowReranker(BaseDocumentCompressor):
             data = resp.json()
         except httpx.HTTPError as e:
             self.logger.warning(f"SiliconFlowReranker API (async) 调用失败: {e}")
+            # 返回空列表，RAG 链将知道没有找到文档
             return []
 
         results = data.get("results")
@@ -291,11 +293,17 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         for res in sorted(results, key=lambda x: x.get("relevance_score", 0), reverse=True):
             original_index = res.get("index")
             if original_index is not None and 0 <= original_index < len(documents):
-                doc_content_raw = res.get("document", doc_texts[original_index])
-                if isinstance(doc_content_raw, dict):
-                    page_content = doc_content_raw.get("text", "")
+
+                # --- 响应处理（这部分是正确的，无需修改） ---
+                # API 响应体中的 'document' 字段 *是* 一个对象： { "text": "..." }
+                doc_content_raw = res.get("document") #
+
+                if isinstance(doc_content_raw, dict): #
+                    page_content = doc_content_raw.get("text", "") #
                 else:
-                    page_content = str(doc_content_raw)
+                    # 回退逻辑，以防 API 行为与文档不符
+                    page_content = str(doc_content_raw) #
+                # --- 响应处理结束 ---
 
                 new_doc = Document(
                     page_content=page_content,
