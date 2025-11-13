@@ -6,9 +6,9 @@ import pickle
 from datetime import datetime, timezone
 from typing import Optional
 
-from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
-from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
-from langchain_classic.storage import EncoderBackedStore
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
+from langchain.storage import EncoderBackedStore
 from langchain_community.storage.sql import SQLStore
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
