@@ -800,7 +800,11 @@ async function sendQuestion() {
     messageContainer.appendChild(currentStreamingDiv);
 
     let currentStreamingBuffer = ''; // 用于当前 div 的原始 Markdown 累积
+
+    let currentThinkingStreamingDiv = null; // 用于 thinking 的流式 div
     let currentThinkingBuffer = ''; // Req 1: 用于 thinking 的累积
+    let currentThinkingMdBody = null; // Req 1: thinking 的 .md-body 容器
+
     // Req 1: 跟踪思维链状态的标志
     let thinking_block_created = false;
     let thinking_has_been_collapsed = false;
@@ -834,11 +838,35 @@ async function sendQuestion() {
             currentStreamingDiv.remove();
         }
 
+        // 最终解析 thinking block
+        if (parseFn && currentThinkingStreamingDiv && currentThinkingBuffer.trim() !== '') {
+            try {
+                const finalParsedHtml = parseFn(currentThinkingBuffer, { breaks: true, gfm: true });
+                currentThinkingStreamingDiv.innerHTML = finalParsedHtml;
+                if (window.hljs) {
+                    currentThinkingStreamingDiv.querySelectorAll('pre code').forEach(block => {
+                        try { window.hljs.highlightElement(block); } catch(e){}
+                    });
+                }
+            } catch(e) {
+                console.error("Final thinking markdown parse error:", e);
+                currentThinkingStreamingDiv.textContent = currentThinkingBuffer; // 回退
+            }
+        } else if (currentThinkingStreamingDiv && currentThinkingBuffer.trim() === '') {
+            currentThinkingStreamingDiv.remove();
+        }
+
+
         // (新 Req 1) 移除 finalizeStream 中创建 <details> 的逻辑
         // 它现在在流式传输期间创建
 
         // (新 Req 5) 在最终内容上处理溯源
         processCitations(currentStreamingDiv);
+
+        // 同时处理 thinking 块的溯源
+        if (currentThinkingMdBody) {
+            processCitations(currentThinkingMdBody);
+        }
 
         // 最终化后，重新加载消息以获取正确的 ID 并附加按钮
         // 延迟一点点加载，确保数据库已写入
@@ -926,21 +954,29 @@ async function sendQuestion() {
                         }
 
                         // Req 1: 处理 Thinking (实时渲染)
-                        if (typeof thinking === 'string' && thinking.trim().length > 0) { // [!code ++] (修复 1: 增加 .trim() 检查)
-                            currentThinkingBuffer = thinking; // Thinking 是状态，直接覆盖
-                            let thinkingBlock = bubbleInner.querySelector('.thinking-block');
+                        if (typeof thinking === 'string' && thinking.length > 0) {
 
-                            if (!thinkingBlock) {
-                                // 创建 <details> 块
-                                thinkingBlock = document.createElement('details');
+                            if (!thinking_block_created) {
+                                // 1. 首次创建 <details> 块
+                                let thinkingBlock = document.createElement('details');
                                 thinkingBlock.className = 'thinking-block';
                                 thinkingBlock.setAttribute('open', ''); // 默认打开
 
                                 const summary = document.createElement('summary');
                                 summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>思维链</span>';
 
-                                const thinkingContent = document.createElement('div');
+                                // 2. 创建 .thinking-content 容器
+                                let thinkingContent = document.createElement('div');
                                 thinkingContent.className = 'thinking-content';
+
+                                // 3. 添加 .md-body 包装器
+                                currentThinkingMdBody = document.createElement('div');
+                                currentThinkingMdBody.className = 'md-body';
+                                thinkingContent.appendChild(currentThinkingMdBody);
+
+                                // 4. 创建第一个流式 div
+                                currentThinkingStreamingDiv = document.createElement('div');
+                                currentThinkingMdBody.appendChild(currentThinkingStreamingDiv);
 
                                 thinkingBlock.appendChild(summary);
                                 thinkingBlock.appendChild(thinkingContent);
@@ -950,13 +986,54 @@ async function sendQuestion() {
                                 thinking_block_created = true;
                             }
 
-                            // 实时使用 renderMarkdown 更新思维链内容
-                            const thinkingContent = thinkingBlock.querySelector('.thinking-content');
-                            if (thinkingContent) {
-                                const thinkingMd = renderMarkdown(currentThinkingBuffer);
-                                // (保持 DOM 结构与 appendMsg 一致)
-                                thinkingContent.innerHTML = ''; // [!code ++]
-                                thinkingContent.appendChild(thinkingMd); // [!code ++]
+                            // 5. 复制主内容的流式逻辑
+                            // 使用一个小的回看缓冲区来检查跨 delta 的触发器
+                            const lookbehind = currentThinkingBuffer.slice(-5); // 5 字符回看
+                            const testBuffer = lookbehind + thinking;
+                            const match = testBuffer.match(triggerRegex);
+
+                            if (match && parseFn) {
+                                // 触发器命中！
+                                const triggerStartInDelta = match.index - lookbehind.length;
+                                let textBeforeTrigger, triggerAndRest;
+
+                                if (triggerStartInDelta < 0) {
+                                    textBeforeTrigger = "";
+                                    triggerAndRest = thinking;
+                                } else {
+                                    textBeforeTrigger = thinking.substring(0, triggerStartInDelta);
+                                    triggerAndRest = thinking.substring(triggerStartInDelta);
+                                }
+
+                                // A: 处理触发器之前的文本
+                                if (textBeforeTrigger) {
+                                    currentThinkingBuffer += textBeforeTrigger;
+                                    appendFadeInChunk(textBeforeTrigger, currentThinkingStreamingDiv);
+                                }
+
+                                // B: 解析当前 div 的*完整*缓冲区并替换其内容
+                                if (currentThinkingBuffer.trim() !== '') {
+                                    const parsedHtml = parseFn(currentThinkingBuffer, { breaks: true, gfm: true });
+                                    currentThinkingStreamingDiv.innerHTML = parsedHtml;
+                                    if (window.hljs) currentThinkingStreamingDiv.querySelectorAll('pre code').forEach(block => {
+                                        try { window.hljs.highlightElement(block); } catch(e){}
+                                    });
+                                } else {
+                                    currentThinkingStreamingDiv.remove(); // 移除空的 div
+                                }
+
+                                // C: 创建一个新的 div 用于后续流式传输
+                                currentThinkingStreamingDiv = document.createElement('div');
+                                currentThinkingMdBody.appendChild(currentThinkingStreamingDiv);
+
+                                // D: 使用触发器和剩余文本开始新的缓冲区
+                                currentThinkingBuffer = triggerAndRest;
+                                appendFadeInChunk(triggerAndRest, currentThinkingStreamingDiv);
+
+                            } else {
+                                // 没有命中触发器，继续在当前 div 中流式传输
+                                currentThinkingBuffer += thinking;
+                                appendFadeInChunk(thinking, currentThinkingStreamingDiv);
                             }
                         }
 
