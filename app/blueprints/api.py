@@ -368,11 +368,13 @@ async def api_ask(
     llm_with_options = llm.bind(**llm_params)
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
 
-    # 1. 定义所有 System Prompts (从 config 加载)
-    SYSTEM_PROMPT_GAME = config.SYSTEM_PROMPT
-    SYSTEM_PROMPT_WRITE = config.SYSTEM_PROMPT_WRITE_ASSISTANT
-    SYSTEM_PROMPT_TRAILER = config.SYSTEM_PROMPT_TRAILER_ASSISTANT
-    SYSTEM_PROMPT_GENERAL = config.SYSTEM_PROMPT_GENERAL
+    # -----------------------------------------------------------
+    # [!! 修改 !!] 1. 定义所有 System Prompts (使用小写变量名)
+    # -----------------------------------------------------------
+    system_prompt_query = config.SYSTEM_PROMPT_QUERY
+    system_prompt_creative = config.SYSTEM_PROMPT_CREATIVE
+    system_prompt_roleplay = config.SYSTEM_PROMPT_ROLEPLAY
+    system_prompt_general = config.SYSTEM_PROMPT_GENERAL
 
     # 2. 查询重写链 (保持在 RAG 分支内部)
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
@@ -393,7 +395,6 @@ async def api_ask(
     get_docs_runnable = RunnableLambda(_get_reranked_parent_docs)
 
     # 3a. RAG 检索链 (通用部分，在 Prompt 之前)
-    #     (这部分对应你原有的 rag_chain_pre_llm 的前半部分)
     rag_retrieval_chain = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
@@ -412,7 +413,6 @@ async def api_ask(
     )
 
     # 3b. RAG Prompt 构造器 (辅助函数)
-    #     (这部分对应你原有的 rag_chain_pre_llm 的后半部分)
     def create_rag_prompt_builder(system_prompt: str):
         """辅助函数：根据传入的 system_prompt 创建 Prompt 构造链"""
         return (
@@ -435,33 +435,31 @@ async def api_ask(
         )
 
     # 3c. RAG LLM 链 (通用部分)
-    #     (这部分对应你原有的 rag_chain)
     rag_llm_chain = {
         "llm_output": itemgetter("prompt") | llm_with_options, # type: ignore LLM 只处理 prompt
         "sources_map": itemgetter("sources_map") # Map 被传递
     }
 
-    # 3d. 组合三个不同的 RAG 完整链
-    rag_chain_game = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_GAME) | rag_llm_chain
-    rag_chain_write = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_WRITE) | rag_llm_chain
-    rag_chain_trailer = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_TRAILER) | rag_llm_chain
+    # -----------------------------------------------------------
+    # [!! 修改 !!] 3d. 组合三个不同的 RAG 完整链 (使用小写变量)
+    # -----------------------------------------------------------
+    rag_chain_query = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_query) | rag_llm_chain
+    rag_chain_creative = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_creative) | rag_llm_chain
+    rag_chain_roleplay = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_roleplay) | rag_llm_chain
 
 
-    # -----------------------------------------------------------
-    # [!! 修改 !!] 智能路由 (使用新的 JSON Prompt)
-    # -----------------------------------------------------------
+    # 4. 智能路由 (使用新的 JSON Prompt)
     classifier_prompt = PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
     classifier_chain = (
             classifier_prompt
             | classifier_llm
-            | JsonOutputParser()  # <-- 修改: 使用 JsonOutputParser
+            | JsonOutputParser()  # <-- 使用 JsonOutputParser
     )
 
     # 5. 通用任务链 (非 RAG)
-    # (替换旧的 greeting_chain 和 general_chain)
     general_chain = (
             ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT_GENERAL), # <-- 使用通用 Prompt
+                ("system", system_prompt_general), # <-- 修改: 使用小写变量
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("user", "{input}")
             ])
@@ -473,29 +471,26 @@ async def api_ask(
         "sources_map": lambda x: {} # 通用任务没有 sources
     }
 
-    # -----------------------------------------------------------
-    # [!! 修改 !!] 最终主链 (新路由)
-    # -----------------------------------------------------------
+    # 6. 最终主链 (新路由)
     chain_with_classification = RunnablePassthrough.assign(
         # classification_data 将是一个字典: {"decision": "...", ...}
-        classification_data=classifier_chain # <-- 修改: 重命名为 classification_data
+        classification_data=classifier_chain
     )
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
-        # 分支 1: GAME_KNOWLEDGE
-        # (新逻辑: 读取 'classification_data' 字典中的 'decision' 键)
-        (lambda x: x.get("classification_data", {}).get("decision") == "GAME_KNOWLEDGE",
-         rag_chain_game
+        # 分支 1: Query (新路由)
+        (lambda x: x.get("classification_data", {}).get("decision") == "Query",
+         rag_chain_query
          ),
-        # 分支 2: WRITE_ASSISTANT
-        (lambda x: x.get("classification_data", {}).get("decision") == "WRITE_ASSISTANT",
-         rag_chain_write
+        # 分支 2: Creative (新路由)
+        (lambda x: x.get("classification_data", {}).get("decision") == "Creative",
+         rag_chain_creative
          ),
-        # 分支 3: TRAILER_ASSISTANT
-        (lambda x: x.get("classification_data", {}).get("decision") == "TRAILER_ASSISTANT",
-         rag_chain_trailer
+        # 分支 3: Roleplay (新路由)
+        (lambda x: x.get("classification_data", {}).get("decision") == "Roleplay",
+         rag_chain_roleplay
          ),
-        # 分支 4: GENERAL_TASK (回退)
+        # 分支 4: General (回退)
         general_chain_formatted
     )
     # --- RAG 链定义结束 ---
@@ -556,15 +551,7 @@ async def api_ask(
         full_response = ""
         sources_map = {} # 暂存 SourcesMap
         model_name = model
-
-        # --- (*** 这是修复逻辑 ***) ---
-        # 采纳用户的“简单追加”建议：
-        # 假设 reasoning_content 是 *增量 (delta)*，
-        # 我们将*累积*所有增量并存入数据库。
         thinking_response_for_db = ""
-        # 移除 last_thinking_raw_block，不再需要
-        # --- (*** 修复逻辑结束 ***) ---
-
         stream_started = False
         llm_is_done = False # LLM 完成标志
 
@@ -721,9 +708,9 @@ async def api_ask(
                         )
                     if redis_client:
                         await redis_client.delete(f"messages:{conv_id}")
-                    logger.info(f"[{conv_id}] 成功保存对话 (finally 块)。")
+                    logger.info(f"[{conv_id}] Gj (finally 块)。")
                 except Exception as db_e:
-                    logger.error(f"[{conv_id}] 在 finally 块中保存对话失败: {db_e}", exc_info=True)
+                    logger.error(f"[{conv_id}] Gj finally 块中保存对话失败: {db_e}", exc_info=True)
             else:
                 logger.warning(f"[{conv_id}] 流未启动，未保存对话 (finally 块)。")
 

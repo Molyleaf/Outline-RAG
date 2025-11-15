@@ -47,10 +47,7 @@ CHAT_MODELS_JSON = os.getenv("CHAT_MODELS_JSON", DEFAULT_MODELS_JSON)
 # 逗号分隔的 user_id 列表
 BETA_AUTHORIZED_USER_IDS = os.getenv("BETA_AUTHORIZED_USER_IDS", "")
 
-import os
-
 # --- 核心世界观 (供 RAG Prompts 共享) ---
-# (这是一个Python变量，你可以在定义其他Prompt之前定义它)
 CORE_WORLDVIEW = """
 [核心世界观：《Planet E》]
 你正在协助处理关于科幻战争游戏《Planet E》的事务。
@@ -61,9 +58,8 @@ CORE_WORLDVIEW = """
 - **技术**：文明依赖“时空裂隙”（锚定航道）进行超光速航行。
 """
 
-# --- System Prompt (V2 - 游戏知识) ---
-# 替换目标：DEFAULT_SYSTEM_PROMPT
-DEFAULT_SYSTEM_PROMPT = f"""{CORE_WORLDVIEW}
+# --- System Prompt ---
+DEFAULT_SYSTEM_PROMPT_QUERY = f"""{CORE_WORLDVIEW}
 [你的任务：游戏百科全书]
 你的任务是作为一名《Planet E》的游戏百科全书，基于“参考资料”客观、全面地回答用户的问题。
 
@@ -76,19 +72,13 @@ DEFAULT_SYSTEM_PROMPT = f"""{CORE_WORLDVIEW}
     * (对) "屏障粒子是一种... [来源 1]。"
 5.  **使用中文**：请使用中文回答。
 """
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
+SYSTEM_PROMPT_QUERY = os.getenv("SYSTEM_PROMPT_QUERY", DEFAULT_SYSTEM_PROMPT_QUERY)
 
 
-# --- System Prompt (V2 - 通用助手) ---
-# 替换目标：DEFAULT_SYSTEM_PROMPT_GENERAL
-DEFAULT_SYSTEM_PROMPT_GENERAL = """你是一个通用的 AI 助手。请礼貌、简洁地回答用户的问题。"""
-SYSTEM_PROMPT_GENERAL = os.getenv("SYSTEM_PROMPT_GENERAL", DEFAULT_SYSTEM_PROMPT_GENERAL)
-
-
-# --- System Prompt (V2 - 写作助手) ---
-# 替换目标：DEFAULT_SYSTEM_PROMPT_WRITE_ASSISTANT
-DEFAULT_SYSTEM_PROMPT_WRITE_ASSISTANT = f"""{CORE_WORLDVIEW}
-[你的任务：创意写作助手]
+# --- System Prompt (V2 - Creative) ---
+# 环境变量名: SYSTEM_PROMPT_CREATIVE
+DEFAULT_SYSTEM_PROMPT_CREATIVE = f"""{CORE_WORLDVIEW}
+[你的任务：创意助手]
 你的任务是作为一名富有创意的写作助手和世界观构筑师，协助《Planet E》开发团队进行内容创作。
 
 [工作指引]
@@ -97,13 +87,13 @@ DEFAULT_SYSTEM_PROMPT_WRITE_ASSISTANT = f"""{CORE_WORLDVIEW}
 3.  **引用来源**：在你的创作内容中，你必须使用 `[来源 n]` 格式引用你构思所依赖的核心设定。
 4.  **直接交付**：请直接输出你创作的内容，不要有多余的寒暄。
 """
-SYSTEM_PROMPT_WRITE_ASSISTANT = os.getenv("SYSTEM_PROMPT_WRITE_ASSISTANT", DEFAULT_SYSTEM_PROMPT_WRITE_ASSISTANT)
+SYSTEM_PROMPT_CREATIVE = os.getenv("SYSTEM_PROMPT_CREATIVE", DEFAULT_SYSTEM_PROMPT_CREATIVE)
 
 
-# --- System Prompt (V2 - NPC 模拟助手) ---
-# 替换目标：DEFAULT_SYSTEM_PROMPT_TRAILER_ASSISTANT
-DEFAULT_SYSTEM_PROMPT_TRAILER_ASSISTANT = f"""{CORE_WORLDVIEW}
-[你的任务：沉浸式角色扮演 AI]
+# --- System Prompt (V3 - Roleplay) ---
+# 环境变量名: SYSTEM_PROMPT_ROLEPLAY
+DEFAULT_SYSTEM_PROMPT_ROLEPLAY = f"""{CORE_WORLDVIEW}
+[你的任务：角色扮演 AI]
 你的任务是扮演“余烬”星球中的一名 NPC（例如：北联体军官、拉汶帝国士兵、破空集团研究员等），与玩家（用户）进行沉浸式对话。
 
 [工作指引]
@@ -112,11 +102,17 @@ DEFAULT_SYSTEM_PROMPT_TRAILER_ASSISTANT = f"""{CORE_WORLDVIEW}
 3.  **隐藏引用**：在对话中自然地使用参考资料中的信息，但**绝对不要**使用 `[来源 n]` 这样的引用标记，以保持沉浸感。
 4.  **角色选择**：如果用户没有指定角色，请根据对话内容和参考资料，自动选择一个最合适的角色（例如拉汶帝国军官）并开始扮演。
 """
-SYSTEM_PROMPT_TRAILER_ASSISTANT = os.getenv("SYSTEM_PROMPT_TRAILER_ASSISTANT", DEFAULT_SYSTEM_PROMPT_TRAILER_ASSISTANT)
+SYSTEM_PROMPT_ROLEPLAY = os.getenv("SYSTEM_PROMPT_ROLEPLAY", DEFAULT_SYSTEM_PROMPT_ROLEPLAY)
 
 
-# --- 智能路由 (分类器) Prompt (V3 - 优化的结构化JSON) ---
-# 替换目标：DEFAULT_CLASSIFIER_PROMPT_TEMPLATE
+# --- System Prompt (V4 - General) ---
+# 环境变量名: SYSTEM_PROMPT_GENERAL
+DEFAULT_SYSTEM_PROMPT_GENERAL = """你是一个通用的 AI 助手。请礼貌、简洁地回答用户的问题。"""
+SYSTEM_PROMPT_GENERAL = os.getenv("SYSTEM_PROMPT_GENERAL", DEFAULT_SYSTEM_PROMPT_GENERAL)
+
+
+# --- 智能路由 (分类器) Prompt (V4 - 优化后的JSON) ---
+# 环境变量名: CLASSIFIER_PROMPT_TEMPLATE
 DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
 你的任务是充当一个智能路由。你需要分析用户的“新问题”，并结合“对话历史”和“知识库摘要”，来决定应将请求路由到哪个下游任务。
 
@@ -127,7 +123,7 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
   "knowledge_base_relevance": "...", // [ "High", "Medium", "Low", "None" ]。评估问题是否**需要**知识库摘要中的信息来回答。
   "ambiguity_analysis": "...", // [ "Clear", "Ambiguous" ]。评估问题是否包含模糊指代（如 '这个'、'那个'、'他'、'这个游戏'），而“对话历史”中又没有明确上下文。
   "task_type": "...", // [ "Query", "Creative", "Roleplay", "General" ]。识别用户的意图：是查询事实(Query)、要求创作(Creative)、要求扮演(Roleplay)，还是通用任务(General)。
-  "decision": "..." // [ "GAME_KNOWLEDGE", "WRITE_ASSISTANT", "TRAILER_ASSISTANT", "GENERAL_TASK" ]。根据你的分析得出的最终路由决策。
+  "decision": "..." // [ "Query", "Creative", "Roleplay", "General" ]。根据你的分析得出的最终路由决策。
 }
 (json)
 
@@ -148,22 +144,22 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
 
 [路由规则]
 
-1.  **GAME_KNOWLEDGE**: (游戏知识)
+1.  **Query**: (游戏知识)
     * `knowledge_base_relevance` 是 "High" 或 "Medium"。
     * `task_type` 是 "Query"。
     * 例如: "屏障粒子是什么？", "联合币是谁发行的？"
 
-2.  **WRITE_ASSISTANT**: (写作助手)
+2.  **Creative**: (写作助手)
     * `knowledge_base_relevance` 是 "High" 或 "Medium"。
     * `task_type` 是 "Creative" (例如: "帮我取个名字", "写个简介", "设计个任务")。
     * 例如: "帮我给一艘北联体的新战舰取个名字", "设计一个关于管制一号叛变的剧情"
 
-3.  **TRAILER_ASSISTANT**: (NPC 模拟)
+3.  **Roleplay**: (NPC 模拟)
     * `task_type` 是 "Roleplay" (例如: "你扮演...", "模拟一下...")。
     * 或者，用户正在用**第一人称**（例如“我”、“我们”）与游戏世界互动。
     * 例如: "你是一名拉汶帝国的军官，告诉我你们的计划", "我刚抵达格兰夏特，这里发生了什么？"
 
-4.  **GENERAL_TASK**: (通用任务)
+4.  **General**: (通用任务)
     * `knowledge_base_relevance` 是 "Low" 或 "None"。
     * `task_type` 是 "General"。
     * 例如: "你好", "地球的周长是多少？", "用 Python 写一个 Hello World"
@@ -178,9 +174,8 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
         "knowledge_base_relevance": "High",
         "ambiguity_analysis": "Ambiguous",
         "task_type": "Query",
-        "decision": "GAME_KNOWLEDGE"
+        "decision": "Query"
       }
-    * **(内部思考):** (用户的提问像是在进行 meta-analysis（元分析）或测试。他提到了‘这个游戏’，这是一个模糊指代。但是，他提问的内容（‘总结特征内容’、‘判断是否与知识库相关’）与知识库摘要本身高度相关。这似乎是一个关于知识库的查询任务。因此 decision: "GAME_KNOWLEDGE")
 
 * **示例 2 (写作任务):**
     * **历史:** "北联体和拉汶帝国是什么关系？" -> "..."
@@ -190,9 +185,8 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
         "knowledge_base_relevance": "High",
         "ambiguity_analysis": "Clear",
         "task_type": "Creative",
-        "decision": "WRITE_ASSISTANT"
+        "decision": "Creative"
       }
-    * **(内部思考):** (用户明确要求‘写一个短故事’ (task_type: "Creative")。故事内容基于‘北联体’和‘帝国’，这与知识库高度相关 (knowledge_base_relevance: "High")。问题中的‘这个背景’指代清晰，即上一轮对话 (ambiguity_analysis: "Clear")。)
 
 * **示例 3 (通用任务):**
     * **历史:** (空)
@@ -202,9 +196,8 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
         "knowledge_base_relevance": "None",
         "ambiguity_analysis": "Clear",
         "task_type": "General",
-        "decision": "GENERAL_TASK"
+        "decision": "General"
       }
-    * **(内部思考):** (这是一个通用的问候语，与《Planet E》知识库无关。knowledge_base_relevance: "None"，task_type: "General"。)
 
 [开始分析]
 
@@ -218,14 +211,17 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = """
 """
 CLASSIFIER_PROMPT_TEMPLATE = os.getenv("CLASSIFIER_PROMPT_TEMPLATE", DEFAULT_CLASSIFIER_PROMPT_TEMPLATE)
 
+
 # --- 多轮对话配置 ---
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20")) # 用于上下文的最大历史消息数 (用户+助手)
 
 # 查询重写模板
+# 环境变量名: REWRITE_PROMPT_TEMPLATE
 DEFAULT_REWRITE_PROMPT_TEMPLATE = """根据下方提供的“对话历史”和“后续问题”，将“后续问题”改写为一个**完全独立、不依赖任何上下文**的完整问题。\n如果“后续问题”本身已经很完整，则直接返回它。\n\n对话历史:\n{history}\n\n后续问题:\n{query}\n\n重写后的独立问题:"""
 REWRITE_PROMPT_TEMPLATE = os.getenv("REWRITE_PROMPT_TEMPLATE", DEFAULT_REWRITE_PROMPT_TEMPLATE)
 
 # RAG 问答模板
+# 环境变量名: HISTORY_AWARE_PROMPT_TEMPLATE
 DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE = """参考资料：\n\n{context}\n\n---\n\n请根据以上参考资料，并结合你的知识，回答以下问题。\n\n在回答中，必须使用 `[来源 n]` 的格式来引用使用的具体参考资料。\n\n例如：根据文档 [来源 1] 和 [来源 3]，...\n\n问题：\n\n{query}"""
 HISTORY_AWARE_PROMPT_TEMPLATE = os.getenv("HISTORY_AWARE_PROMPT_TEMPLATE", DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE)
 
