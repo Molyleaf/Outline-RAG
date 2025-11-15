@@ -110,12 +110,12 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = f"""
 你必须严格按照以下 JSON 格式输出你的分析和决策（不要包含分析过程）：
 
 (json)
-{{
+{{{{
   "knowledge_base_relevance": "...", // [ "High", "Medium", "Low", "None" ]。评估问题是否**需要**知识库摘要中的信息来回答。
   "ambiguity_analysis": "...", // [ "Clear", "Ambiguous" ]。评估问题是否包含模糊指代（如 '这个'、'那个'、'他'、'这个游戏'、未知国家的名字、未知人名、未知实体、未知事件），而“对话历史”中又没有明确上下文。
   "task_type": "...", // [ "Query", "Creative", "Roleplay", "General" ]。识别用户的意图：是查询事实(Query)、要求创作(Creative)、要求扮演(Roleplay)，还是其它不需要额外知识库的任务(General)。
   "decision": "..." // [ "Query", "Creative", "Roleplay", "General" ]。根据你的分析得出的最终路由决策。
-}}
+}}}}
 (json)
 
 [知识库摘要]\n\n{CORE_WORLDVIEW}
@@ -149,34 +149,34 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = f"""
     * **历史:** (空)
     * **问题:** "总结这个游戏的内容。"
     * **输出 (json):**
-      {{
+      {{{{
         "knowledge_base_relevance": "High",
         "ambiguity_analysis": "Ambiguous",
         "task_type": "Query",
         "decision": "Query"
-      }}
+      }}}}
 
 * **示例 2 (写作任务):**
     * **历史:** "北联体和拉汶帝国是什么关系？" -> "..."
     * **问题:** "基于这个背景，写一个北联体军官和帝国贵族偶遇的短故事。"
     * **输出 (json):**
-      {{
+      {{{{
         "knowledge_base_relevance": "High",
         "ambiguity_analysis": "Clear",
         "task_type": "Creative",
         "decision": "Creative"
-      }}
+      }}}}
 
 * **示例 3 (通用任务):**
     * **历史:** (空)
     * **问题:** "你好，你是谁？"
     * **输出 (json):**
-      {{
+      {{{{
         "knowledge_base_relevance": "None",
         "ambiguity_analysis": "Clear",
         "task_type": "General",
         "decision": "General"
-      }}
+      }}}}
 
 [开始分析]
 对话历史:\n\n{{history}}

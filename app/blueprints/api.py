@@ -451,7 +451,13 @@ async def api_ask(
     # 4. 智能路由 (使用新的 JSON Prompt)
     classifier_prompt = PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
     classifier_chain = (
-            classifier_prompt
+        # 添加 RunnableParallel 来重命名和格式化变量
+        # 将 {"input": ..., "chat_history": ...} 映射为 {"input": ..., "history": ...}
+            RunnableParallel({
+                "input": itemgetter("input"),
+                "history": lambda x: _format_history_str(x["chat_history"]) # 使用已有的 _format_history_str 函数
+            })
+            | classifier_prompt
             | classifier_llm
             | JsonOutputParser()  # <-- 使用 JsonOutputParser
     )
