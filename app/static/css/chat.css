@@ -190,7 +190,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-m);
     background: color-mix(in srgb, var(--panel) 50%, var(--bg));
-    margin-bottom: 12px;
+    margin: 10px 0;
     overflow: hidden;
 }
 
