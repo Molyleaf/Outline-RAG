@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
 from llm_services import llm # type: ignore
@@ -447,12 +447,14 @@ async def api_ask(
     rag_chain_trailer = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_TRAILER) | rag_llm_chain
 
 
-    # 4. 智能路由 (使用新的 Prompt)
+    # -----------------------------------------------------------
+    # [!! 修改 !!] 智能路由 (使用新的 JSON Prompt)
+    # -----------------------------------------------------------
     classifier_prompt = PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
     classifier_chain = (
             classifier_prompt
             | classifier_llm
-            | StrOutputParser()
+            | JsonOutputParser()  # <-- 修改: 使用 JsonOutputParser
     )
 
     # 5. 通用任务链 (非 RAG)
@@ -471,22 +473,26 @@ async def api_ask(
         "sources_map": lambda x: {} # 通用任务没有 sources
     }
 
-    # 6. 最终主链 (新路由)
+    # -----------------------------------------------------------
+    # [!! 修改 !!] 最终主链 (新路由)
+    # -----------------------------------------------------------
     chain_with_classification = RunnablePassthrough.assign(
-        classification=classifier_chain
+        # classification_data 将是一个字典: {"decision": "...", ...}
+        classification_data=classifier_chain # <-- 修改: 重命名为 classification_data
     )
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
         # 分支 1: GAME_KNOWLEDGE
-        (lambda x: "GAME_KNOWLEDGE" in x["classification"].upper(),
+        # (新逻辑: 读取 'classification_data' 字典中的 'decision' 键)
+        (lambda x: x.get("classification_data", {}).get("decision") == "GAME_KNOWLEDGE",
          rag_chain_game
          ),
         # 分支 2: WRITE_ASSISTANT
-        (lambda x: "WRITE_ASSISTANT" in x["classification"].upper(),
+        (lambda x: x.get("classification_data", {}).get("decision") == "WRITE_ASSISTANT",
          rag_chain_write
          ),
         # 分支 3: TRAILER_ASSISTANT
-        (lambda x: "TRAILER_ASSISTANT" in x["classification"].upper(),
+        (lambda x: x.get("classification_data", {}).get("decision") == "TRAILER_ASSISTANT",
          rag_chain_trailer
          ),
         # 分支 4: GENERAL_TASK (回退)
