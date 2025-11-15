@@ -524,12 +524,11 @@ async def api_ask(
         model_name = model
 
         # --- (*** 这是修复逻辑 ***) ---
-        # `thinking_response_for_db` 保存所见过的*最长*的思考块，用于存入数据库
-        # 这样可以防止最后被简短的垃圾块覆盖
+        # 采纳用户的“简单追加”建议：
+        # 假设 reasoning_content 是 *增量 (delta)*，
+        # 我们将*累积*所有增量并存入数据库。
         thinking_response_for_db = ""
-        # `last_thinking_raw_block` 跟踪 API 发送的*上一个*原始块
-        # 用于计算发送给前端的*增量 (delta)*
-        last_thinking_raw_block = ""
+        # 移除 last_thinking_raw_block，不再需要
         # --- (*** 修复逻辑结束 ***) ---
 
         stream_started = False
@@ -591,33 +590,22 @@ async def api_ask(
                             # --- (*** 这是修复逻辑 ***) ---
                             delta_content = delta_chunk.content or ""
                             delta_thinking = "" # 这是要发送给前端的*增量*
-                            new_thinking_detected = False # (这个变量在原始代码中, 已移除其作用)
 
                             if delta_chunk.additional_kwargs:
-                                # 1. 从 API 获取*原始*思考块 (假设 API 发送的是完整累计块)
-                                new_thought_raw = delta_chunk.additional_kwargs.get("reasoning_content")
+                                # 1. (新) 假设 API 发送的是*增量 (delta)*
+                                new_thought_delta = delta_chunk.additional_kwargs.get("reasoning_content")
 
-                                # 2. 检查这是否是一个*新*的块 (API 可能会重复发送)
-                                if new_thought_raw is not None and new_thought_raw != last_thinking_raw_block:
+                                # 2. 检查这是否是一个*新*的块
+                                if new_thought_delta is not None:
 
-                                    # 3. 计算要发送给前端的*增量 (delta)*
-                                    #    (前端 app.js 期望的是增量)
-                                    if new_thought_raw.startswith(last_thinking_raw_block):
-                                        # 正常追加：计算增量
-                                        delta_thinking = new_thought_raw[len(last_thinking_raw_block):]
-                                    else:
-                                        # 历史不匹配（或第一块）：发送整个新块
-                                        delta_thinking = new_thought_raw
+                                    # 3. (新) 直接将增量 (delta) 发送给前端
+                                    #    (前端 app.js 期望的就是增量)
+                                    delta_thinking = new_thought_delta
 
-                                    # 4. 更新“上一块”跟踪器
-                                    last_thinking_raw_block = new_thought_raw
+                                    # 4. (新) 累积*所有*增量，用于存入 DB
+                                    thinking_response_for_db += new_thought_delta
 
-                                    # 5. (关键修复) 仅当新块*更长*时，才更新用于 DB 的版本
-                                    #    防止最后被垃圾短块覆盖
-                                    if len(new_thought_raw) > len(thinking_response_for_db):
-                                        thinking_response_for_db = new_thought_raw
-
-                                    # new_thinking_detected = True (不再需要此标志)
+                                    # 5. (旧的 len() 和 startswith() 检查已移除)
 
                             # 仅当有实际内容（LLM回答 或 思考增量）时才发送
                             if delta_content or delta_thinking:
@@ -686,7 +674,7 @@ async def api_ask(
                                 logger.warning(f"[{conv_id}] Failed to serialize sources_map: {json_e}")
 
                         # --- (*** 这是修复逻辑 ***) ---
-                        # 附加在循环中捕获的*最长*的思考块
+                        # 附加在循环中*累积*的完整思考块
                         if thinking_response_for_db:
                             full_content_with_thinking = f"\n{thinking_response_for_db}\n\n\n{final_content_for_db}"
                         else:

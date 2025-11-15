@@ -961,7 +961,7 @@ async function sendQuestion() {
 
                         // --- 流式处理核心逻辑 ---
                         const delta = j.choices?.[0]?.delta?.content;
-                        const thinking = j.choices?.[0]?.delta?.thinking; // Req 1
+                        const thinking = j.choices?.[0]?.delta?.thinking;
 
                         // 收到第一个数据块时，移除加载动画
                         const loader = messageContainer.querySelector('.loading-dots');
