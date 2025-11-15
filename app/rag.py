@@ -16,7 +16,6 @@ from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
 from langchain_postgres.v2.engine import PGEngine
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_text_splitters.markdown import MarkdownHeaderTextSplitter
 from sqlalchemy import text
 
 import config
@@ -106,12 +105,6 @@ headers_to_split_on = [
     ("##", "Header 2"),
     ("###", "Header 3"),
 ]
-
-markdown_splitter = MarkdownHeaderTextSplitter(
-    headers_to_split_on=headers_to_split_on,
-    strip_headers=False,
-    return_each_line=False
-)
 
 # --- 第二层拆分器 (细分) ---
 # 用于拆分过长的 Markdown 块

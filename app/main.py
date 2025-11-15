@@ -57,8 +57,8 @@ async def task_worker():
         except (redis.ConnectionError, asyncio.CancelledError) as e:
             logger.error("Redis 连接错误或任务取消，任务处理器暂停5秒: %s", e)
             await asyncio.sleep(5)
-        except TypeError:
-            continue
+        except json.JSONDecodeError as e:
+            logger.error(f"任务队列 JSON 解析失败'): {e}")
         except Exception as e:
             logger.exception("任务处理器发生未知错误: %s", e)
             await asyncio.sleep(1)
