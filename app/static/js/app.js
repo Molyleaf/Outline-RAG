@@ -1,5 +1,19 @@
 // app/static/js/app.js
 
+function appendFadeInChunk(text, container) {
+    if (text) {
+        const span = document.createElement('span');
+        span.className = 'fade-in-chunk';
+        span.textContent = text;
+        container.appendChild(span);
+        // 滚动到底部
+        const chatEl = document.querySelector('.chat');
+        if (chatEl) {
+            chatEl.scrollTop = chatEl.scrollHeight;
+        }
+    }
+}
+
 // Req 5: 溯源处理函数
 /**
  * 将 [来源 n] 文本包裹为可点击的 <a class="citation">，链接到后端提供的 URL
@@ -823,7 +837,8 @@ async function sendQuestion() {
         // 最终解析*最后*一个流式 div 的内容
         if (parseFn && currentStreamingBuffer.trim() !== '') {
             try {
-                const finalParsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
+                // [--- 修复 #1 ---]
+                const finalParsedHtml = parseFn(currentStreamingBuffer, { breaks: false, gfm: true });
                 currentStreamingDiv.innerHTML = finalParsedHtml;
                 if (window.hljs) {
                     currentStreamingDiv.querySelectorAll('pre code').forEach(block => {
@@ -842,7 +857,8 @@ async function sendQuestion() {
         // 最终解析 thinking block
         if (parseFn && currentThinkingStreamingDiv && currentThinkingBuffer.trim() !== '') {
             try {
-                const finalParsedHtml = parseFn(currentThinkingBuffer, { breaks: true, gfm: true });
+                // [--- 修复 #2 ---]
+                const finalParsedHtml = parseFn(currentThinkingBuffer, { breaks: false, gfm: true });
                 currentThinkingStreamingDiv.innerHTML = finalParsedHtml;
                 if (window.hljs) {
                     currentThinkingStreamingDiv.querySelectorAll('pre code').forEach(block => {
@@ -1014,7 +1030,8 @@ async function sendQuestion() {
 
                                 // B: 解析当前 div 的*完整*缓冲区并替换其内容
                                 if (currentThinkingBuffer.trim() !== '') {
-                                    const parsedHtml = parseFn(currentThinkingBuffer, { breaks: true, gfm: true });
+                                    // [--- 修复 #3 ---]
+                                    const parsedHtml = parseFn(currentThinkingBuffer, { breaks: false, gfm: true });
                                     currentThinkingStreamingDiv.innerHTML = parsedHtml;
                                     if (window.hljs) currentThinkingStreamingDiv.querySelectorAll('pre code').forEach(block => {
                                         try { window.hljs.highlightElement(block); } catch(e){}
@@ -1085,7 +1102,8 @@ async function sendQuestion() {
 
                                 // B: 解析当前 div 的*完整*缓冲区并替换其内容
                                 if (currentStreamingBuffer.trim() !== '') {
-                                    const parsedHtml = parseFn(currentStreamingBuffer, { breaks: true, gfm: true });
+                                    // [--- 修复 #4 ---]
+                                    const parsedHtml = parseFn(currentStreamingBuffer, { breaks: false, gfm: true });
                                     currentStreamingDiv.innerHTML = parsedHtml;
 
                                     // (新 Req 5) 在解析块后处理溯源
