@@ -179,8 +179,8 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = f"""
       }}
 
 [开始分析]
-对话历史:\n\n{history}
-新问题:\n\n{input}
+对话历史:\n\n{{history}}
+新问题:\n\n{{input}}
 """
 CLASSIFIER_PROMPT_TEMPLATE = os.getenv("CLASSIFIER_PROMPT_TEMPLATE", DEFAULT_CLASSIFIER_PROMPT_TEMPLATE)
 
