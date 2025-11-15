@@ -147,7 +147,7 @@
 }
 .msg.assistant .bubble-inner .bubble-actions {
     position: absolute;
-    top: -16px;
+    top: -32px;
     right: 0;
     bottom: auto;
 }
@@ -181,7 +181,7 @@
 .thinking-block {
     border: 1px solid var(--border);
     border-radius: var(--radius-m);
-    background: color-mix(in srgb, var(--panel) 50%, var(--bg));
+    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
     margin: 10px 0;
     overflow: hidden;
 }
@@ -197,7 +197,7 @@
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--muted);
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+    background: transparent;
     cursor: pointer;
     user-select: none;
 }
@@ -218,6 +218,7 @@
     color: var(--text);
     white-space: pre-wrap;
     border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--panel) 50%, var(--bg));
 }
 .thinking-content .md-body {
     line-height: 1.6;

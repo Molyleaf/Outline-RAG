@@ -10,6 +10,7 @@
     <orderEntry type="library" name="highlight" level="application" />
     <orderEntry type="library" name="light" level="application" />
     <orderEntry type="library" name="marked.esm" level="application" />
+    <orderEntry type="library" name="atom-one-dark" level="application" />
   </component>
   <component name="PackageRequirementsSettings">
     <option name="versionSpecifier" value="大于或等于 (&gt;=x.y.z)" />
