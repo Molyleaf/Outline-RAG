@@ -36,14 +36,14 @@
 .greet-suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
     border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--panel) 60%, var(--bg));
+    background: var(--bg);
     color: var(--text);
     padding: 8px 12px;
     border-radius: 999px;
     font-size: 14px;
     cursor: pointer;
 }
-.chip:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+.chip:hover { background: var(--bg); }
 
 .msg {
     margin: 12px 0;
