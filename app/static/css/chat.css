@@ -48,62 +48,61 @@
 }
 .chip:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
 
-
-/* 重构消息布局 */
+/* 对话项 */
 .msg {
     margin: 12px 0;
-    display: flex;
-    gap: 12px;
+    display: grid;
+    gap: 16px;
     align-items: flex-start;
     max-width: 100%;
 }
 .msg.assistant {
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+        "avatar meta"
+        "content content";
+    row-gap: 8px;
+    column-gap: 12px;
+    max-width: 1280px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.msg.assistant .bubble {
+    max-width: 100%;
+    min-width: 0;
+    display: contents;
 }
 .msg.user {
-    justify-content: flex-end;
-    flex-direction: row-reverse;
+    grid-template-columns: minmax(0,1fr);
 }
 .msg.user .avatar {
     display: none;
 }
-
+.msg.user .bubble {
+    justify-self: end;
+    max-width: 95%;
+    min-width: 0;
+    position: relative; /* (新) 为按钮定位 */
+}
 .msg .avatar {
-    width: 36px; height: 36px; border-radius: 50%;
+    width: 36px; height: 36px; border-radius: 50%; box-shadow: none;
     background-size: cover;
-    background-position: center;
-    box-sizing: border-box;
-    padding: 2px;
-    flex-shrink: 0;
 }
 .msg.assistant .avatar {
+    grid-area: avatar;
     width: 30px;
     height: 30px;
-    align-self: flex-start;
+    align-self: center;
+    padding: 2px;
+    box-sizing: border-box;
     background-size: 24px 24px;
     background-position: center;
     background-repeat: no-repeat;
-    background-color: white;
 }
-
-.msg .bubble {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    max-width: 90%;
-    min-width: 0;
-    position: relative;
-}
-.msg.user .bubble {
-    align-items: flex-end;
-}
-.msg.assistant .bubble {
-    align-items: flex-start;
-}
-
-
 .msg .bubble-inner {
-    padding: 10px 14px;
+    padding: 8px 12px;
     border-radius: var(--radius-l);
     background: var(--bubble-assistant);
     color: var(--text);
@@ -116,24 +115,24 @@
 }
 .msg.user .bubble-inner {
     background: var(--bubble-user);
-    border-bottom-right-radius: 4px;
+    border-top-right-radius: 0;
     border: none;
     line-height: 1.65;
-    color: var(--bubble-user-text, white);
 }
 .msg.assistant .bubble-inner {
+    grid-area: content;
     background: transparent;
-    border-radius: 0;
+    border-top-left-radius: 0;
     padding: 0;
     box-shadow: none;
     border: none;
 }
 .msg.assistant .bubble .msg-meta {
-    align-self: flex-start;
+    grid-area: meta;
+    align-self: center;
     font-size: 0.75rem;
     color: var(--muted);
     margin-top: 0;
-    padding-left: 8px;
 }
 
 /* 分组间距 */
@@ -141,26 +140,24 @@
 .msg.user + .msg.assistant { margin-top: 24px; }
 .msg.assistant + .msg.user { margin-top: 40px; }
 
-/* 消息操作按钮 (复制/编辑) */
+/* (新) 消息操作按钮 (复制/编辑) */
 .bubble-actions {
     position: absolute;
+    bottom: -10px; /* (新) 调整位置到气泡外部下方 */
+    right: 0;
     display: flex;
     gap: 4px;
     opacity: 0;
     transition: opacity 0.2s ease;
     z-index: 1;
 }
+/* (新) 助手消息的操作按钮在 .bubble-inner 内部 */
 .msg.assistant .bubble-inner .bubble-actions {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: -10px; /* 调整到 .md-body 的右上方 */
+    right: 0;
     bottom: auto;
 }
-.msg.user .bubble .bubble-actions {
-    bottom: -14px;
-    right: 0;
-}
-
 
 .msg:hover .bubble-actions {
     opacity: 1;
@@ -188,7 +185,7 @@
     height: 14px;
 }
 
-/* Req 1: Thinking 块样式 (使用 <details>) */
+/* (新) Req 1: Thinking 块样式 (使用 <details>) */
 .thinking-block {
     border: 1px solid var(--border);
     border-radius: var(--radius-m);
@@ -196,6 +193,11 @@
     margin-bottom: 12px;
     overflow: hidden;
 }
+
+.thinking-block[open] {
+   overflow: visible;
+}
+
 .thinking-block summary {
     display: flex;
     align-items: center;
@@ -216,6 +218,7 @@
     height: 14px;
     color: var(--accent);
 }
+/* 隐藏 <details> 默认的三角箭头 */
 .thinking-block summary::-webkit-details-marker { display: none; }
 .thinking-block summary::marker { display: none; }
 
@@ -223,8 +226,8 @@
     padding: 4px 12px 12px;
     font-size: 0.9rem;
     color: var(--text);
-    white-space: pre-wrap;
-    border-top: 1px solid var(--border);
+    white-space: pre-wrap; /* 允许换行 */
+    border-top: 1px solid var(--border); /* 打开时显示分割线 */
 }
 .thinking-content .md-body {
     line-height: 1.6;
@@ -232,7 +235,7 @@
 }
 .thinking-content .md-body p {
     margin: 4px 0;
-    text-indent: 0;
+    text-indent: 0; /* Thinking 块内不缩进 */
 }
 
 
@@ -269,10 +272,11 @@
     display: inline;
     opacity: 0;
     animation: geminiFadeIn 0.5s ease forwards;
+    /* 让浏览器处理换行 */
     white-space: pre-wrap;
 }
 
-/* Req 5: 溯源引用样式 */
+/* (新) Req 5: 溯源引用样式 */
 .citation {
     display: inline;
     font-size: 0.75rem;
@@ -283,7 +287,7 @@
     padding: 2px 5px;
     border-radius: 4px;
     margin: 0 2px;
-    vertical-align: super;
+    vertical-align: super; /* 角标 */
     text-decoration: none;
     user-select: none;
 }
@@ -291,11 +295,11 @@
 /* Markdown 表格样式 */
 .md-body table {
     border-collapse: collapse;
-    margin: 1.2em auto;
-    width: auto;
-    table-layout: auto;
+    margin: 1.2em auto; /* 居中并增加垂直间距 */
+    width: auto; /* 自动宽度 */
+    table-layout: auto; /* 自动列宽 */
     border: 1px solid var(--border);
-    overflow: hidden;
+    overflow: hidden; /* 配合圆角 */
     border-radius: var(--radius-s);
     box-shadow: var(--shadow-1);
 }
@@ -311,16 +315,16 @@
 
 /* 代码块深色模式 */
 :root[data-theme="dark"] .md-body code {
-    background: #2a2a2e;
+    background: #2a2a2e; /* 一个明确的深色 */
     color: #e0e0e0;
 }
 :root[data-theme="dark"] .md-body pre {
-    background: var(--panel);
+    background: var(--panel); /* 匹配 panel */
     border-color: var(--border);
 }
 :root[data-theme="dark"] .md-body pre code {
     background: transparent;
-    color: inherit;
+    color: inherit; /* 继承 pre 的颜色 */
 }
 
 /* 代码块系统主题（暗色） */
@@ -363,7 +367,7 @@
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
     padding: 10px 10px 10px 16px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease; /* (新) */
 }
 .input textarea {
     flex: 1;
@@ -379,7 +383,7 @@
     font-family: inherit;
 }
 
-/* 编辑状态 UI */
+/* (新) 编辑状态 UI */
 .input-inner.is-editing {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);

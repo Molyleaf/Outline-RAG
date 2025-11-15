@@ -500,6 +500,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
         // Kimi K2 (moonshotai) 使用黑色背景，其他使用白色
         if (metadata.model && metadata.model.includes('moonshotai')) {
             avatarEl.style.backgroundColor = 'black';
+            avatarEl.style.backgroundSize = 'cover';
         } else {
             // 默认为白色，以确保在暗色模式下也可见 (覆盖CSS)
             avatarEl.style.backgroundColor = 'white';
@@ -516,7 +517,7 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
     // 提取 Thinking 内容
     let thinkingText = '';
     let contentText = String(text ?? '');
-    // (新 Req 1) 适配后端的 `` 格式
+    // 适配后端的 `` 格式
     if (role === 'assistant' && contentText.includes('')) {
         const match = contentText.match(/\n([\s\S]*?)\n\n\n([\s\S]*)/);
         if (match) {
@@ -525,13 +526,13 @@ function appendMsg(role, text, metadata = {}, messageId = null) {
         }
     }
 
-    // (新 Req 1) 如果有 Thinking 内容，则渲染 (使用 <details>)
+    // 如果有 Thinking 内容，则渲染 (使用 <details>)
     if (thinkingText) {
         const thinkingBlock = document.createElement('details'); // 使用 <details>
         thinkingBlock.className = 'thinking-block';
 
         const summary = document.createElement('summary'); // 使用 <summary>
-        summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>显示思维链</span>';
+        summary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 18h.01"/><path d="M12 14a4 4 0 0 0-4-4h0a4 4 0 0 0-4 4v0a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4Z"/></svg><span>显示思考过程</span>';
 
         const thinkingContent = document.createElement('div');
         thinkingContent.className = 'thinking-content';
@@ -1047,7 +1048,7 @@ async function sendQuestion() {
                                     thinkingBlock.removeAttribute('open'); // 折叠
                                     // 更新 <summary> 文本
                                     const summarySpan = thinkingBlock.querySelector('summary span');
-                                    if (summarySpan) summarySpan.textContent = '显示思维链';
+                                    if (summarySpan) summarySpan.textContent = '显示思考过程';
                                 }
                                 thinking_has_been_collapsed = true;
                             }

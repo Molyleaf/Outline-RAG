@@ -522,7 +522,16 @@ async def api_ask(
         full_response = ""
         sources_map = {} # 暂存 SourcesMap
         model_name = model
-        thinking_response = ""
+
+        # --- (*** 已修改 ***) ---
+        # `thinking_response_for_db` 保存所见过的*最长*的思考块，用于存入数据库
+        # 这样可以防止最后被简短的垃圾块覆盖
+        thinking_response_for_db = ""
+        # `last_thinking_raw_block` 跟踪 API 发送的*上一个*原始块
+        # 用于计算发送给前端的*增量 (delta)*
+        last_thinking_raw_block = ""
+        # --- (*** 修改结束 ***) ---
+
         stream_started = False
         llm_is_done = False # LLM 完成标志
 
@@ -579,22 +588,42 @@ async def api_ask(
                                 pending.add(llm_task)
                                 continue
 
-                            # --- 从这里开始，逻辑和以前一样，使用 delta_chunk ---
+                            # --- (*** 已修改 ***) ---
                             delta_content = delta_chunk.content or ""
-                            delta_thinking = ""
+                            delta_thinking = "" # 这是要发送给前端的*增量*
                             new_thinking_detected = False
 
                             if delta_chunk.additional_kwargs:
-                                new_thought = delta_chunk.additional_kwargs.get("reasoning_content")
-                                if new_thought and new_thought != thinking_response:
-                                    thinking_response = new_thought
-                                    delta_thinking = new_thought
+                                # 1. 从 API 获取*原始*思考块
+                                new_thought_raw = delta_chunk.additional_kwargs.get("reasoning_content")
+
+                                # 2. 检查这是否是一个*新*的块 (API 可能会重复发送)
+                                if new_thought_raw is not None and new_thought_raw != last_thinking_raw_block:
+
+                                    # 3. 计算要发送给前端的*增量 (delta)*
+                                    if new_thought_raw.startswith(last_thinking_raw_block):
+                                        # 正常追加：计算增量
+                                        delta_thinking = new_thought_raw[len(last_thinking_raw_block):]
+                                    else:
+                                        # 历史不匹配（或第一块）：发送整个新块
+                                        delta_thinking = new_thought_raw
+
+                                    # 4. 更新“上一块”跟踪器
+                                    last_thinking_raw_block = new_thought_raw
+
+                                    # 5. (关键) 仅当新块*更长*时，才更新用于 DB 的版本
+                                    #    防止最后被垃圾短块覆盖
+                                    if len(new_thought_raw) > len(thinking_response_for_db):
+                                        thinking_response_for_db = new_thought_raw
+
                                     new_thinking_detected = True
 
-                            if delta_content or new_thinking_detected:
+                            # 仅当有实际内容（LLM回答 或 思考增量）时才发送
+                            if delta_content or delta_thinking:
                                 full_response += delta_content
                                 # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
+                            # --- (*** 修改结束 ***) ---
 
                             llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
                             pending.add(llm_task)
@@ -655,11 +684,13 @@ async def api_ask(
                             except Exception as json_e:
                                 logger.warning(f"[{conv_id}] Failed to serialize sources_map: {json_e}")
 
-                        # 附加 thinking 块
-                        if thinking_response:
-                            full_content_with_thinking = f"\n{thinking_response}\n\n\n{final_content_for_db}"
+                        # --- (*** 已修改 ***) ---
+                        # 附加在循环中捕获的*最长*的思考块
+                        if thinking_response_for_db:
+                            full_content_with_thinking = f"\n{thinking_response_for_db}\n\n\n{final_content_for_db}"
                         else:
                             full_content_with_thinking = final_content_for_db
+                        # --- (*** 修改结束 ***) ---
 
                         await db_session.execute(
                             text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
