@@ -195,7 +195,7 @@ REWRITE_PROMPT_TEMPLATE = os.getenv("REWRITE_PROMPT_TEMPLATE", DEFAULT_REWRITE_P
 
 # RAG 问答模板
 # 环境变量名: HISTORY_AWARE_PROMPT_TEMPLATE
-DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE = """参考资料：\n\n{context}\n\n---\n\n请根据以上参考资料，并结合你的知识，回答以下问题。\n\n在回答中，按照 SYSTEM_PROMPT 中的指令，使用 `[来源 n]` 的格式来引用使用的具体参考资料。\n\n例如："这是... [来源 1]。"\n\n问题：\n\n{query}"""
+DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE = """参考资料：\n\n{context}\n\n---\n\n请根据以上参考资料，并结合你的知识，回答以下问题。\n\n在回答中，按照 SYSTEM_PROMPT 中的指令，使用 `[来源 n]` 的格式来引用使用的具体参考资料。\n\n例如："这是... [来源 1]。"。\n\n对多个来源，不要使用"来源[1]至[9]"这样概括，而是逐一列出，例如"来源[1]""来源[2]""来源[3]"。\n\n问题：\n\n{query}"""
 HISTORY_AWARE_PROMPT_TEMPLATE = os.getenv("HISTORY_AWARE_PROMPT_TEMPLATE", DEFAULT_HISTORY_AWARE_PROMPT_TEMPLATE)
 
 # --- RAG/检索参数 ---
