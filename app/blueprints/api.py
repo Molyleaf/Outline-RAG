@@ -368,7 +368,13 @@ async def api_ask(
     llm_with_options = llm.bind(**llm_params)
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
 
-    # 1. 查询重写链
+    # 1. 定义所有 System Prompts (从 config 加载)
+    SYSTEM_PROMPT_GAME = config.SYSTEM_PROMPT
+    SYSTEM_PROMPT_WRITE = config.SYSTEM_PROMPT_WRITE_ASSISTANT
+    SYSTEM_PROMPT_TRAILER = config.SYSTEM_PROMPT_TRAILER_ASSISTANT
+    SYSTEM_PROMPT_GENERAL = config.SYSTEM_PROMPT_GENERAL
+
+    # 2. 查询重写链 (保持在 RAG 分支内部)
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
         return "\n".join([f"{m.type}: {m.content}" for m in messages])
 
@@ -386,7 +392,9 @@ async def api_ask(
     # 3. 核心 RAG 链 (新架构：分离元数据)
     get_docs_runnable = RunnableLambda(_get_reranked_parent_docs)
 
-    rag_chain_pre_llm = (
+    # 3a. RAG 检索链 (通用部分，在 Prompt 之前)
+    #     (这部分对应你原有的 rag_chain_pre_llm 的前半部分)
+    rag_retrieval_chain = (
             RunnableParallel({
                 "rewritten_query": rewrite_chain,
                 "input": lambda x: x["input"],
@@ -400,69 +408,89 @@ async def api_ask(
             | RunnablePassthrough.assign(
         formatted_data=lambda x: _format_docs_with_metadata(x["docs"])
     )
-            # 3. 准备 Prompt 输入，并暂存 sources_map
-            | RunnableParallel({
-        "chat_history": lambda x: x["chat_history"],
-        "context": lambda x: x["formatted_data"]["context"], # 仅 Context
-        "query": lambda x: x["input"],
-        "sources_map": lambda x: x["formatted_data"]["sources_map"] # 暂存 Map
-    })
-            # 4. 并行传递 Prompt 和 Map
-            | {
-                "prompt": ChatPromptTemplate.from_messages([
-                    ("system", config.SYSTEM_PROMPT),
-                    MessagesPlaceholder(variable_name="chat_history"),
-                    ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
-                ]),
-                "sources_map": itemgetter("sources_map") # 绕过 LLM 传递 Map
-            }
+        # 输出: rewritten_query, input, chat_history, docs, formatted_data
     )
 
-    rag_chain = {
+    # 3b. RAG Prompt 构造器 (辅助函数)
+    #     (这部分对应你原有的 rag_chain_pre_llm 的后半部分)
+    def create_rag_prompt_builder(system_prompt: str):
+        """辅助函数：根据传入的 system_prompt 创建 Prompt 构造链"""
+        return (
+            # 3. 准备 Prompt 输入，并暂存 sources_map
+                RunnableParallel({
+                    "chat_history": lambda x: x["chat_history"],
+                    "context": lambda x: x["formatted_data"]["context"], # 仅 Context
+                    "query": lambda x: x["input"], # (重要) 最终 Prompt 仍使用用户原始输入
+                    "sources_map": lambda x: x["formatted_data"]["sources_map"] # 暂存 Map
+                })
+                # 4. 并行传递 Prompt 和 Map
+                | {
+                    "prompt": ChatPromptTemplate.from_messages([
+                        ("system", system_prompt), # <-- 动态注入 System Prompt
+                        MessagesPlaceholder(variable_name="chat_history"),
+                        ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
+                    ]),
+                    "sources_map": itemgetter("sources_map") # 绕过 LLM 传递 Map
+                }
+        )
+
+    # 3c. RAG LLM 链 (通用部分)
+    #     (这部分对应你原有的 rag_chain)
+    rag_llm_chain = {
         "llm_output": itemgetter("prompt") | llm_with_options, # type: ignore LLM 只处理 prompt
         "sources_map": itemgetter("sources_map") # Map 被传递
     }
 
-    # 4. 智能路由
-    classifier_prompt = PromptTemplate.from_template(
-        """判断用户问题的类型。只回答 'rag' (需要知识库)、'greeting' (问候) 或 'other' (其他)。
-问题: {input}
-类型:"""
-    )
+    # 3d. 组合三个不同的 RAG 完整链
+    rag_chain_game = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_GAME) | rag_llm_chain
+    rag_chain_write = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_WRITE) | rag_llm_chain
+    rag_chain_trailer = rag_retrieval_chain | create_rag_prompt_builder(SYSTEM_PROMPT_TRAILER) | rag_llm_chain
+
+
+    # 4. 智能路由 (使用新的 Prompt)
+    classifier_prompt = PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
     classifier_chain = (
             classifier_prompt
             | classifier_llm
             | StrOutputParser()
     )
 
-    greeting_chain = (
-            PromptTemplate.from_template("你是一个友好的助手。请回复用户的问候。")
-            | llm_with_options
-    )
-
+    # 5. 通用任务链 (非 RAG)
+    # (替换旧的 greeting_chain 和 general_chain)
     general_chain = (
             ChatPromptTemplate.from_messages([
-                ("system", config.SYSTEM_PROMPT),
+                ("system", SYSTEM_PROMPT_GENERAL), # <-- 使用通用 Prompt
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("user", "{input}")
             ])
             | llm_with_options
     )
+    # 封装成与 RAG 链一致的输出格式
+    general_chain_formatted = {
+        "llm_output": general_chain,
+        "sources_map": lambda x: {} # 通用任务没有 sources
+    }
 
+    # 6. 最终主链 (新路由)
     chain_with_classification = RunnablePassthrough.assign(
         classification=classifier_chain
     )
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
-        # 问候分支：也必须返回 {llm_output, sources_map} 格式
-        (lambda x: "greeting" in x["classification"].lower(),
-         {
-             "llm_output": greeting_chain,
-             "sources_map": lambda x: {} # 问候语没有 sources
-         }
+        # 分支 1: GAME_KNOWLEDGE
+        (lambda x: "GAME_KNOWLEDGE" in x["classification"].upper(),
+         rag_chain_game
          ),
-        # RAG 分支 (rag_chain) 已符合此格式
-        rag_chain_pre_llm | rag_chain
+        # 分支 2: WRITE_ASSISTANT
+        (lambda x: "WRITE_ASSISTANT" in x["classification"].upper(),
+         rag_chain_write
+         ),
+        # 分支 3: TRAILER_ASSISTANT
+        (lambda x: "TRAILER_ASSISTANT" in x["classification"].upper(),
+         rag_chain_trailer
+         ),
+        # 分支 4: GENERAL_TASK (回退)
+        general_chain_formatted
     )
     # --- RAG 链定义结束 ---
 
