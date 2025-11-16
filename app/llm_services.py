@@ -150,14 +150,12 @@ def _create_retry_client() -> httpx.AsyncClient:
 #
 # 标准 LLM 实例
 llm = ChatSiliconFlow(
-    model=config.BASE_CHAT_MODEL,
     api_key=config.SILICONFLOW_API_KEY,
     base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
 )
 
 # 专用于“思考”的 LLM 实例，使用 default_query 传递 enable_thinking
 llm_thinking = ChatSiliconFlow(
-    model=config.BASE_CHAT_MODEL,
     api_key=config.SILICONFLOW_API_KEY,
     base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1",
     default_query={"enable_thinking": True}
