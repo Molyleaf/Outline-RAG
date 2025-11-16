@@ -332,7 +332,6 @@ async def api_ask(
     """聊天流式响应"""
 
     query, conv_id = (body.query or "").strip(), body.conv_id
-    # [---更改：重命名 model -> model_id ---]
     model_id, temperature, top_p = body.model, body.temperature, body.top_p
     edit_source_message_id = body.edit_source_message_id
 
@@ -350,7 +349,6 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 或 'parent_store' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 或 'parent_store' 未就绪"}, status_code=503)
 
-    # [--- 更改：加载模型配置 ---]
     try:
         all_models_list = json.loads(config.CHAT_MODELS_JSON)
         models_dict = {m["id"]: m for m in all_models_list}
@@ -374,7 +372,6 @@ async def api_ask(
 
     # --- LCEL 链定义 ---
 
-    # [--- 使用 model_id 和 is_reasoning_model ---]
     # 根据模型属性动态添加 stream_options
     llm_params: Dict[str, Any] = {
         "model": model_id, # 使用模型 ID
@@ -399,35 +396,44 @@ async def api_ask(
     llm_with_options = llm.bind(**llm_params)
 
     # 为辅助 LLM (分类器) 设置特定参数
-    # 强制使用 BASE_CHAT_MODEL, 非流式, 关闭思考, JSON 结构化输出
-    classifier_llm = llm.bind(
-        model=config.BASE_CHAT_MODEL,
-        temperature=0.0,
-        top_p=1.0,
-        stream=False,
-        enable_thinking=False,
-        response_format={"type": "json_object"}
-    )
+    # 强制使用 BASE_CHAT_MODEL, 非流式, JSON 结构化输出
+    classifier_params: Dict[str, Any] = {
+        "model": config.BASE_CHAT_MODEL,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "stream": False,
+        "response_format": {"type": "json_object"}
+    }
+    # [新增逻辑] 根据 config 动态设置 enable_thinking
+    if config.BASE_MODEL_ENABLE_THINKING is not None:
+        classifier_params["enable_thinking"] = config.BASE_MODEL_ENABLE_THINKING
+
+    classifier_llm = llm.bind(**classifier_params)
+
 
     # 为辅助 LLM (重写器) 设置特定参数
-    # 强制使用 BASE_CHAT_MODEL, 非流式, 关闭思考, 默认 (文本) 输出
-    rewriter_llm = llm.bind(
-        model=config.BASE_CHAT_MODEL,
-        temperature=0.0,
-        top_p=1.0,
-        stream=False,
-        enable_thinking=False
-    )
+    # 强制使用 BASE_CHAT_MODEL, 非流式, 默认 (文本) 输出
+    rewriter_params: Dict[str, Any] = {
+        "model": config.BASE_CHAT_MODEL,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "stream": False,
+    }
+    # [新增逻辑] 根据 config 动态设置 enable_thinking
+    if config.BASE_MODEL_ENABLE_THINKING is not None:
+        rewriter_params["enable_thinking"] = config.BASE_MODEL_ENABLE_THINKING
+
+    rewriter_llm = llm.bind(**rewriter_params)
 
     # -----------------------------------------------------------
-    #[!! 修改 !!] 1. 定义所有 System Prompts (使用小写变量名)
+    # 1. 定义所有 System Prompts
     # -----------------------------------------------------------
     system_prompt_query = config.SYSTEM_PROMPT_QUERY
     system_prompt_creative = config.SYSTEM_PROMPT_CREATIVE
     system_prompt_roleplay = config.SYSTEM_PROMPT_ROLEPLAY
     system_prompt_general = config.SYSTEM_PROMPT_GENERAL
 
-    # 2. 查询重写链 (保持在 RAG 分支内部)
+    # 2. 查询重写链
     def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
         return "\n".join([f"{m.type}: {m.content}" for m in messages])
 
@@ -492,7 +498,7 @@ async def api_ask(
     }
 
     # -----------------------------------------------------------
-    # [!! 修改 !!] 3d. 组合三个不同的 RAG 完整链 (使用小写变量)
+    # 3d. 组合三个不同的 RAG 完整链
     # -----------------------------------------------------------
     rag_chain_query = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_query) | rag_llm_chain
     rag_chain_creative = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_creative) | rag_llm_chain
@@ -509,24 +515,24 @@ async def api_ask(
                 "history": lambda x: _format_history_str(x["chat_history"]) # 使用已有的 _format_history_str 函数
             })
             | classifier_prompt
-            | classifier_llm # [!! 更改 !!] 使用 classifier_llm (已配置 JSON 输出)
+            | classifier_llm # 使用已配置 JSON 输出的 classifier_llm
             | JsonOutputParser()  # <-- 使用 JsonOutputParser
     )
 
     # 5. 通用任务链 (非 RAG)
     general_chain = (
             ChatPromptTemplate.from_messages([
-                ("system", system_prompt_general), # <-- 修改: 使用小写变量
+                ("system", system_prompt_general),
                 MessagesPlaceholder(variable_name="chat_history"),
                 ("user", "{input}")
             ])
             | llm_with_options
     )
     # 封装成与 RAG 链一致的输出格式
-    general_chain_formatted = {
+    general_chain_formatted = RunnableParallel({
         "llm_output": general_chain,
         "sources_map": lambda x: {} # 通用任务没有 sources
-    }
+    })
 
     # 6. 最终主链 (新路由)
     chain_with_classification = RunnablePassthrough.assign(
@@ -534,9 +540,6 @@ async def api_ask(
         classification_data=classifier_chain
     )
 
-    # [--- 修复：添加 (x or {}) 来处理 x=None 的情况 ---]
-    # 这是第二层防御。如果 classifier_chain 仍然产生了 None (理论上
-    # stream=False 已经修复了)，(x or {}) 会捕获它。
     final_chain_streaming = chain_with_classification | RunnableBranch(
         # 分支 1: Query (新路由)
         (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Query",
@@ -553,7 +556,6 @@ async def api_ask(
         # 分支 4: General (回退)
         general_chain_formatted
     )
-    # [--- 修复结束 ---]
     # --- RAG 链定义结束 ---
 
     chat_history_db = []
@@ -611,7 +613,7 @@ async def api_ask(
         yield ": ping\n\n"
         full_response = ""
         sources_map = {} # 暂存 SourcesMap
-        model_name = model_id # [--- 更改：使用 model_id ---]
+        model_name = model_id
         thinking_response_for_db = ""
         stream_started = False
         llm_is_done = False # LLM 完成标志
@@ -702,7 +704,6 @@ async def api_ask(
                                 pending.add(llm_task)
                                 continue
 
-                            # --- (*** 这是修复逻辑 ***) ---
                             delta_content = delta_chunk.content or ""
                             delta_thinking = "" # 这是要发送给前端的*增量*
 
@@ -720,14 +721,11 @@ async def api_ask(
                                     # 4. (新) 累积*所有*增量，用于存入 DB
                                     thinking_response_for_db += new_thought_delta
 
-                                    # 5. (旧的 len() 和 startswith() 检查已移除)
-
                             # 仅当有实际内容（LLM回答 或 思考增量）时才发送
                             if delta_content or delta_thinking:
                                 full_response += delta_content
                                 # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
-                            # --- (*** 修复逻辑结束 ***) ---
 
                             llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
                             pending.add(llm_task)
@@ -788,13 +786,11 @@ async def api_ask(
                             except Exception as json_e:
                                 logger.warning(f"[{conv_id}] Failed to serialize sources_map: {json_e}")
 
-                        # --- (*** 这是修复逻辑 ***) ---
                         # 附加在循环中*累积*的完整思考块
                         if thinking_response_for_db:
                             full_content_with_thinking = f"\n{thinking_response_for_db}\n\n\n{final_content_for_db}"
                         else:
                             full_content_with_thinking = final_content_for_db
-                        # --- (*** 修复逻辑结束 ***) ---
 
                         await db_session.execute(
                             text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
