@@ -391,7 +391,14 @@ async def api_ask(
     # [--- 更改结束 ---]
 
     llm_with_options = llm.bind(**llm_params)
-    classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
+
+    # [--- 修复：显式设置 stream=False ---]
+    # 强制分类器永远不要流式传输，以防止
+    # stream=True 状态从 llm_params 泄漏。
+    # 这可以防止分类器产生空的 'None' 块，从而
+    # 修复 'NoneType' object has no attribute 'get' 错误。
+    classifier_llm = llm.bind(temperature=0.0, top_p=1.0, stream=False)
+    # [--- 修复结束 ---]
 
     # -----------------------------------------------------------
     # [!! 修改 !!] 1. 定义所有 System Prompts (使用小写变量名)
@@ -508,22 +515,26 @@ async def api_ask(
         classification_data=classifier_chain
     )
 
+    # [--- 修复：添加 (x or {}) 来处理 x=None 的情况 ---]
+    # 这是第二层防御。如果 classifier_chain 仍然产生了 None (理论上
+    # stream=False 已经修复了)，(x or {}) 会捕获它。
     final_chain_streaming = chain_with_classification | RunnableBranch(
         # 分支 1: Query (新路由)
-        (lambda x: (x.get("classification_data") or {}).get("decision") == "Query",
+        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Query",
          rag_chain_query
          ),
         # 分支 2: Creative (新路由)
-        (lambda x: (x.get("classification_data") or {}).get("decision") == "Creative",
+        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Creative",
          rag_chain_creative
          ),
         # 分支 3: Roleplay (新路由)
-        (lambda x: (x.get("classification_data") or {}).get("decision") == "Roleplay",
+        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Roleplay",
          rag_chain_roleplay
          ),
         # 分支 4: General (回退)
         general_chain_formatted
     )
+    # [--- 修复结束 ---]
     # --- RAG 链定义结束 ---
 
     chat_history_db = []
