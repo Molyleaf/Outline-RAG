@@ -18,27 +18,28 @@ OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
 OUTLINE_DISPLAY_URL = os.getenv("OUTLINE_DISPLAY_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
 OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "123").strip()
-OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "true").lower() == "true"
+OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "True").lower() == "True"
 
 SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
-# 设置 SiliconFlow 的基础 URL，默认为您指定的 .cn 端点
 SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn").rstrip("/")
 
 # 保留模型名称配置
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
+# 用于分类器、重写器等内部任务的基础模型
+BASE_CHAT_MODEL = os.getenv("BASE_CHAT_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
+CHAT_MODEL = os.getenv("BASE_CHAT_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct")
 
 # 模型列表配置
 CHAT_MODELS_JSON = """[
-  {"id": "deepseek-ai/DeepSeek-V3.2-Exp", "name": "Deepseek", "icon": "/chat/static/img/DeepSeek.svg", "temp": 0.7, "top_p": 0.7, "beta": false, "reasoning": true},
-  {"id": "moonshotai/Kimi-K2-Instruct-0905", "name": "Kimi K2", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": false, "reasoning": false},
-  {"id": "inclusionAI/Ring-1T", "name": "Ring-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true},
-  {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": false},
-  {"id": "Qwen/Qwen3-Next-80B-A3B-Thinking", "name": "Qwen3-Next-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": true},
-  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-235B-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": true},
-  {"id": "moonshotai/Kimi-K2-Thinking", "name": "Kimi K2-Thinking", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true},
-  {"id": "zai-org/GLM-4.6", "name": "ChatGLM", "icon": "/chat/static/img/thudm.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": false}
+  {"id": "deepseek-ai/DeepSeek-V3.2-Exp", "name": "Deepseek", "icon": "/chat/static/img/DeepSeek.svg", "temp": 0.7, "top_p": 0.7, "beta": False, "reasoning": True, "enable_thinking": True},
+  {"id": "moonshotai/Kimi-K2-Instruct-0905", "name": "Kimi K2", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": False, "reasoning": False, "enable_thinking": Null},
+  {"id": "inclusionAI/Ring-1T", "name": "Ring-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": True, "reasoning": True, "enable_thinking": Null},
+  {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": False, "reasoning": False, "enable_thinking": Null},
+  {"id": "Qwen/Qwen3-Next-80B-A3B-Thinking", "name": "Qwen3-Next-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": False, "reasoning": True, "enable_thinking": Null},
+  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-235B-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": True, "reasoning": True, "enable_thinking": Null},
+  {"id": "moonshotai/Kimi-K2-Thinking", "name": "Kimi K2-Thinking", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": True, "reasoning": True, "enable_thinking": Null},
+  {"id": "zai-org/GLM-4.6", "name": "ChatGLM", "icon": "/chat/static/img/thudm.svg", "temp": 0.6, "top_p": 0.95, "beta": True, "reasoning": False, "enable_thinking": True}
 ]
 """
 
@@ -210,8 +211,8 @@ GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")
 
 # --- 功能开关与限制 ---
-USE_JOSE_VERIFY = os.getenv("USE_JOSE_VERIFY", "true").lower() == "true"
-SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "true").lower() == "true"
+USE_JOSE_VERIFY = os.getenv("USE_JOSE_VERIFY", "True").lower() == "True"
+SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "True").lower() == "True"
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
 MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "10485760"))  # 10MB
 ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FILE_EXTENSIONS", "txt,md,pdf").split(",") if e.strip()])

@@ -332,10 +332,9 @@ async def api_ask(
     """聊天流式响应"""
 
     query, conv_id = (body.query or "").strip(), body.conv_id
-    # [--- 更改：重命名 model -> model_id ---]
+    # [---更改：重命名 model -> model_id ---]
     model_id, temperature, top_p = body.model, body.temperature, body.top_p
     edit_source_message_id = body.edit_source_message_id
-    # [--- 更改结束 ---]
 
     if not query or not conv_id:
         raise HTTPException(status_code=400, detail="missing query or conv_id")
@@ -370,11 +369,12 @@ async def api_ask(
 
     # 从模型属性中获取 'reasoning' 标志
     is_reasoning_model = model_properties.get("reasoning", False)
-    # [--- 更改结束 ---]
+    # 从模型属性中获取 'enable_thinking' 标志
+    enable_thinking = model_properties.get("enable_thinking") # 值为 True, False, or None
 
     # --- LCEL 链定义 ---
 
-    # [--- 更改：使用 model_id 和 is_reasoning_model ---]
+    # [--- 使用 model_id 和 is_reasoning_model ---]
     # 根据模型属性动态添加 stream_options
     llm_params: Dict[str, Any] = {
         "model": model_id, # 使用模型 ID
@@ -383,25 +383,44 @@ async def api_ask(
         "stream": True
     }
 
-    if is_reasoning_model: # <-- 新的判断逻辑
+    if is_reasoning_model:
         llm_params["stream_options"] = {
             "include_reasoning": True,
-            "thinking_budget": 4096
+            "thinking_budget": 8192
         }
-    # [--- 更改结束 ---]
+
+    # 根据 enable_thinking (True/False/None) 动态添加参数
+    if enable_thinking:
+        llm_params["enable_thinking"] = True
+    elif enable_thinking is False:
+        llm_params["enable_thinking"] = False
+    # 如果 enable_thinking 是 None (null)，则不添加该参数
 
     llm_with_options = llm.bind(**llm_params)
 
-    # [--- 修复：显式设置 stream=False ---]
-    # 强制分类器永远不要流式传输，以防止
-    # stream=True 状态从 llm_params 泄漏。
-    # 这可以防止分类器产生空的 'None' 块，从而
-    # 修复 'NoneType' object has no attribute 'get' 错误。
-    classifier_llm = llm.bind(temperature=0.0, top_p=1.0, stream=False)
-    # [--- 修复结束 ---]
+    # 为辅助 LLM (分类器) 设置特定参数
+    # 强制使用 BASE_CHAT_MODEL, 非流式, 关闭思考, JSON 结构化输出
+    classifier_llm = llm.bind(
+        model=config.BASE_CHAT_MODEL,
+        temperature=0.0,
+        top_p=1.0,
+        stream=False,
+        enable_thinking=False,
+        response_format={"type": "json_object"}
+    )
+
+    # 为辅助 LLM (重写器) 设置特定参数
+    # 强制使用 BASE_CHAT_MODEL, 非流式, 关闭思考, 默认 (文本) 输出
+    rewriter_llm = llm.bind(
+        model=config.BASE_CHAT_MODEL,
+        temperature=0.0,
+        top_p=1.0,
+        stream=False,
+        enable_thinking=False
+    )
 
     # -----------------------------------------------------------
-    # [!! 修改 !!] 1. 定义所有 System Prompts (使用小写变量名)
+    #[!! 修改 !!] 1. 定义所有 System Prompts (使用小写变量名)
     # -----------------------------------------------------------
     system_prompt_query = config.SYSTEM_PROMPT_QUERY
     system_prompt_creative = config.SYSTEM_PROMPT_CREATIVE
@@ -418,7 +437,7 @@ async def api_ask(
                 "query": lambda x: x["input"]
             })
             | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-            | classifier_llm
+            | rewriter_llm
             | StrOutputParser()
     )
 
@@ -490,7 +509,7 @@ async def api_ask(
                 "history": lambda x: _format_history_str(x["chat_history"]) # 使用已有的 _format_history_str 函数
             })
             | classifier_prompt
-            | classifier_llm
+            | classifier_llm # [!! 更改 !!] 使用 classifier_llm (已配置 JSON 输出)
             | JsonOutputParser()  # <-- 使用 JsonOutputParser
     )
 
@@ -601,10 +620,43 @@ async def api_ask(
         ping_task = None
 
         try:
-            llm_stream = final_chain_streaming.astream({
-                "input": query,
-                "chat_history": chat_history
-            })
+            # LCEL 链是非流式的，直到 .astream() 被调用。
+            # 我们先 .ainvoke() 分类器部分，以获取非流式（结构化）的输出。
+            # 这样我们就适配了 Change 1 (非流式辅助任务)
+
+            # 1. (非流式) 执行分类
+            chain_input = {"input": query, "chat_history": chat_history}
+            try:
+                # .ainvoke() 将运行 classifier_chain (非流式, JSON)
+                # 并返回包含 "classification_data" 的字典
+                classification_result = await chain_with_classification.ainvoke(chain_input)
+                classification_data_debug = classification_result.get("classification_data", {})
+
+                # 2. (非流式) 根据分类结果选择 RAG 链或 General 链
+                #    (这模拟了 RunnableBranch 的逻辑)
+                decision = (classification_data_debug or {}).get("decision")
+
+                if decision == "Query":
+                    active_chain = rag_chain_query
+                elif decision == "Creative":
+                    active_chain = rag_chain_creative
+                elif decision == "Roleplay":
+                    active_chain = rag_chain_roleplay
+                else: # (General 或 Fallback)
+                    active_chain = general_chain_formatted
+
+            except Exception as e:
+                # 如果分类或路由失败，回退到通用链
+                logger.error(f"[{conv_id}] 路由/分类失败 (ainvoke): {e}. 回退到 General chain。", exc_info=True)
+                active_chain = general_chain_formatted
+                classification_data_debug = {"error": f"Classifier failed: {e}"}
+
+            # 3. (流式) 现在，我们只 .astream() 选定的 *最终* 链
+            #    active_chain (例如 rag_chain_query) 内部包含：
+            #    a) RAG 检索链 (包含 rewriter_llm, 非流式)
+            #    b) RAG LLM 链 (包含 llm_with_options, 流式)
+            llm_stream = active_chain.astream(chain_input)
+
             stream_started = True
 
             async def ping_generator():
