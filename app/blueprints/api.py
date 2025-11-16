@@ -510,15 +510,15 @@ async def api_ask(
 
     final_chain_streaming = chain_with_classification | RunnableBranch(
         # 分支 1: Query (新路由)
-        (lambda x: x.get("classification_data", {}).get("decision") == "Query",
+        (lambda x: (x.get("classification_data") or {}).get("decision") == "Query",
          rag_chain_query
          ),
         # 分支 2: Creative (新路由)
-        (lambda x: x.get("classification_data", {}).get("decision") == "Creative",
+        (lambda x: (x.get("classification_data") or {}).get("decision") == "Creative",
          rag_chain_creative
          ),
         # 分支 3: Roleplay (新路由)
-        (lambda x: x.get("classification_data", {}).get("decision") == "Roleplay",
+        (lambda x: (x.get("classification_data") or {}).get("decision") == "Roleplay",
          rag_chain_roleplay
          ),
         # 分支 4: General (回退)
