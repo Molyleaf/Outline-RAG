@@ -18,7 +18,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
-from llm_services import llm # type: ignore
+from llm_services import llm, llm_thinking # type: ignore
 from outline_client import verify_outline_signature # type: ignore
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -367,7 +367,6 @@ async def api_ask(
 
     # 从模型属性中获取 'reasoning' 标志
     is_reasoning_model = model_properties.get("reasoning", False)
-    # [--- 已移除 enable_thinking 的读取 ---]
 
     # --- LCEL 链定义 ---
 
@@ -379,18 +378,21 @@ async def api_ask(
         "stream": True
     }
 
+    # 根据是否为 reasoning model，选择不同的 LLM 实例
     if is_reasoning_model:
         llm_params["stream_options"] = {
             "include_reasoning": True,
             "thinking_budget": 8192
         }
-        # [--- 关键修复：在此处添加 enable_thinking ---]
-        # 'stream_options' 用于 LangChain *解析*响应。
-        # 'enable_thinking' 用于 SiliconFlow API *生成*响应。
-        # 对于 Deepseek-v3.2 等模型，两者都必须提供。
-        llm_params["enable_thinking"] = True
+        # 选择已启用 thinking 的 LLM 实例
+        base_llm_to_bind = llm_thinking
+    else:
+        # 使用标准 LLM 实例
+        base_llm_to_bind = llm
 
-    llm_with_options = llm.bind(**llm_params)
+    # 绑定参数
+    llm_with_options = base_llm_to_bind.bind(**llm_params)
+
 
     # 为辅助 LLM (分类器) 设置特定参数
     # 强制使用 BASE_CHAT_MODEL, 非流式, JSON 结构化输出
@@ -401,9 +403,7 @@ async def api_ask(
         "stream": False,
         "response_format": {"type": "json_object"}
     }
-
-    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
-
+    # 辅助任务总是使用标准的、非思考的 llm 实例
     classifier_llm = llm.bind(**classifier_params)
 
 
@@ -415,9 +415,7 @@ async def api_ask(
         "top_p": 1.0,
         "stream": False,
     }
-
-    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
-
+    # 辅助任务总是使用标准的、非思考的 llm 实例
     rewriter_llm = llm.bind(**rewriter_params)
 
     # -----------------------------------------------------------

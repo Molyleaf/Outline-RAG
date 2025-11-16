@@ -145,15 +145,23 @@ def _create_retry_client() -> httpx.AsyncClient:
 
 # --- 聊天模型 (LLM) ---
 
-# [--- 更改：显式传递 Chat Model 参数 ---]
 # 依赖环境变量的 `default_factory` 在 Gunicorn/Uvicorn
 # 启动时不可靠。我们必须显式传递参数。
+#
+# 标准 LLM 实例
 llm = ChatSiliconFlow(
     model=config.BASE_CHAT_MODEL,
     api_key=config.SILICONFLOW_API_KEY,
-    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1",
+    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
 )
-# [--- 更改结束 ---]
+
+# 专用于“思考”的 LLM 实例，使用 default_query 传递 enable_thinking
+llm_thinking = ChatSiliconFlow(
+    model=config.BASE_CHAT_MODEL,
+    api_key=config.SILICONFLOW_API_KEY,
+    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1",
+    default_query={"enable_thinking": True}
+)
 
 
 # --- 启用 LLM 异步缓存 ---
@@ -166,6 +174,9 @@ if redis_client:
             ttl=3600
         )
         llm.cache = llm_cache
+        # 注意：思考实例通常不应被缓存，
+        # 但如果需要，也可以为 llm_thinking 设置缓存
+        # llm_thinking.cache = llm_cache
         logger.info("LLM 异步缓存已启用 (AsyncRedisCache, TTL=3600s)。")
     except Exception as e:
         logger.warning(f"无法配置 AsyncRedisCache: {e}", exc_info=True)
