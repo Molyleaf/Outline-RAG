@@ -18,7 +18,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
-from llm_services import llm, llm_thinking # type: ignore
+from llm_services import llm # type: ignore [--- 修复：只导入 'llm' ---]
 from outline_client import verify_outline_signature # type: ignore
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -378,20 +378,23 @@ async def api_ask(
         "stream": True
     }
 
-    # 根据是否为 reasoning model，选择不同的 LLM 实例
     if is_reasoning_model:
         llm_params["stream_options"] = {
             "include_reasoning": True,
             "thinking_budget": 8192
         }
-        # 选择已启用 thinking 的 LLM 实例
-        base_llm_to_bind = llm_thinking
-    else:
-        # 使用标准 LLM 实例
-        base_llm_to_bind = llm
 
-    # 绑定参数
-    llm_with_options = base_llm_to_bind.bind(**llm_params)
+        # [--- 关键修复：使用 'extra_body' 传递 'enable_thinking' ---]
+        # 'extra_body' 是 openai-python v1+ 库的标准方式
+        # 用来传递 API 签名中未定义的*请求体*参数。
+        # 这将绕过 'TypeError'。
+        llm_params["extra_body"] = {
+            "enable_thinking": True
+        }
+
+    # [--- 修复：始终使用 'llm' 实例 ---]
+    # 辅助任务和主任务都将从这个 'llm' 实例开始
+    llm_with_options = llm.bind(**llm_params)
 
 
     # 为辅助 LLM (分类器) 设置特定参数
