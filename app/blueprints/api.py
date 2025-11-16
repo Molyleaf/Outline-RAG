@@ -367,8 +367,7 @@ async def api_ask(
 
     # 从模型属性中获取 'reasoning' 标志
     is_reasoning_model = model_properties.get("reasoning", False)
-    # 从模型属性中获取 'enable_thinking' 标志
-    enable_thinking = model_properties.get("enable_thinking") # 值为 True, False, or None
+    # [--- 已移除 enable_thinking 的读取 ---]
 
     # --- LCEL 链定义 ---
 
@@ -386,18 +385,7 @@ async def api_ask(
             "thinking_budget": 8192
         }
 
-    # --- [修改点 1] ---
-    # (新) 确保 model_kwargs 字典存在
-    if "model_kwargs" not in llm_params:
-        llm_params["model_kwargs"] = {}
-
-    # 根据 enable_thinking (True/False/None) 动态添加参数
-    if enable_thinking:
-        llm_params["model_kwargs"]["enable_thinking"] = True # <-- 放入 model_kwargs
-    elif enable_thinking is False:
-        llm_params["model_kwargs"]["enable_thinking"] = False # <-- 放入 model_kwargs
-    # 如果 enable_thinking 是 None (null)，则不添加该参数
-    # --- [修改结束 1] ---
+    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
 
     llm_with_options = llm.bind(**llm_params)
 
@@ -411,15 +399,7 @@ async def api_ask(
         "response_format": {"type": "json_object"}
     }
 
-    # --- [修改点 2] ---
-    # (新) 确保 model_kwargs 字典存在
-    if "model_kwargs" not in classifier_params:
-        classifier_params["model_kwargs"] = {}
-
-    # [新增逻辑] 根据 config 动态设置 enable_thinking
-    if config.BASE_MODEL_ENABLE_THINKING is not None:
-        classifier_params["model_kwargs"]["enable_thinking"] = config.BASE_MODEL_ENABLE_THINKING # <-- 放入 model_kwargs
-    # --- [修改结束 2] ---
+    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
 
     classifier_llm = llm.bind(**classifier_params)
 
@@ -433,15 +413,7 @@ async def api_ask(
         "stream": False,
     }
 
-    # --- [修改点 3] ---
-    # (新) 确保 model_kwargs 字典存在
-    if "model_kwargs" not in rewriter_params:
-        rewriter_params["model_kwargs"] = {}
-
-    # [新增逻辑] 根据 config 动态设置 enable_thinking
-    if config.BASE_MODEL_ENABLE_THINKING is not None:
-        rewriter_params["model_kwargs"]["enable_thinking"] = config.BASE_MODEL_ENABLE_THINKING # <-- 放入 model_kwargs
-    # --- [修改结束 3] ---
+    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
 
     rewriter_llm = llm.bind(**rewriter_params)
 
