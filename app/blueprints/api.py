@@ -18,7 +18,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
-from llm_services import llm # type: ignore [--- 修复：只导入 'llm' ---]
+from llm_services import llm # type: ignore
 from outline_client import verify_outline_signature # type: ignore
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -365,8 +365,13 @@ async def api_ask(
     if top_p is None:
         top_p = model_properties.get("top_p", 0.7)
 
-    # 从模型属性中获取 'reasoning' 标志
-    is_reasoning_model = model_properties.get("reasoning", False)
+    # --- [关键修复]：读取新的三态 'enable_thinking' 和 'use_reasoning_parser' 键 ---
+
+    # .get("enable_thinking", None) 将返回 True, False, 或 None
+    enable_thinking_value = model_properties.get("enable_thinking", None)
+
+    # .get("use_reasoning_parser", False) 将返回 True 或 False
+    use_reasoning_parser = model_properties.get("use_reasoning_parser", False)
 
     # --- LCEL 链定义 ---
 
@@ -378,22 +383,24 @@ async def api_ask(
         "stream": True
     }
 
-    if is_reasoning_model:
+    # 1. (控制解析) 如果 'use_reasoning_parser' 为 true，添加 stream_options
+    if use_reasoning_parser:
         llm_params["stream_options"] = {
             "include_reasoning": True,
             "thinking_budget": 8192
         }
 
-        # [--- 关键修复：使用 'extra_body' 传递 'enable_thinking' ---]
-        # 'extra_body' 是 openai-python v1+ 库的标准方式
-        # 用来传递 API 签名中未定义的*请求体*参数。
-        # 这将绕过 'TypeError'。
+    # 2. (控制 API) 如果 'enable_thinking' 不是 None (即它是 True 或 False)
+    if enable_thinking_value is not None:
         llm_params["extra_body"] = {
-            "enable_thinking": True
+            "enable_thinking": enable_thinking_value
         }
 
-    # [--- 修复：始终使用 'llm' 实例 ---]
-    # 辅助任务和主任务都将从这个 'llm' 实例开始
+    # 3. 绑定所有参数。
+    #    - Kimi-Instruct (null): 不添加 'stream_options' 或 'extra_body'
+    #    - Qwen-Instruct (false): 不添加 'stream_options'，添加 'extra_body: {false}'
+    #    - Deepseek (true/true): 添加 'stream_options' 和 'extra_body: {true}'
+    #    - Qwen-Thinking (null/true): 添加 'stream_options'，不添加 'extra_body'
     llm_with_options = llm.bind(**llm_params)
 
 
