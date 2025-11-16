@@ -61,7 +61,7 @@ CHAT_MODELS_JSON = """[
     "name": "Qwen3-Next",
     "icon": "/chat/static/img/Tongyi.svg",
     "temp": 0.6,
-    "top_p": 0.95,
+    "top_p": 0.95
   },
   {
     "id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
