@@ -332,8 +332,10 @@ async def api_ask(
     """聊天流式响应"""
 
     query, conv_id = (body.query or "").strip(), body.conv_id
-    model, temperature, top_p = body.model, body.temperature, body.top_p
+    # [--- 更改：重命名 model -> model_id ---]
+    model_id, temperature, top_p = body.model, body.temperature, body.top_p
     edit_source_message_id = body.edit_source_message_id
+    # [--- 更改结束 ---]
 
     if not query or not conv_id:
         raise HTTPException(status_code=400, detail="missing query or conv_id")
@@ -349,21 +351,44 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 或 'parent_store' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 或 'parent_store' 未就绪"}, status_code=503)
 
+    # [--- 更改：加载模型配置 ---]
+    try:
+        all_models_list = json.loads(config.CHAT_MODELS_JSON)
+        models_dict = {m["id"]: m for m in all_models_list}
+    except json.JSONDecodeError:
+        logger.error("CHAT_MODELS_JSON 环境变量格式错误，无法确定模型参数。")
+        models_dict = {}
+
+    # 获取所选模型的完整属性
+    model_properties = models_dict.get(model_id, {})
+
+    # 如果请求中未指定 (null)，则使用配置中的默认值
+    if temperature is None:
+        temperature = model_properties.get("temp", 0.7)
+    if top_p is None:
+        top_p = model_properties.get("top_p", 0.7)
+
+    # 从模型属性中获取 'reasoning' 标志
+    is_reasoning_model = model_properties.get("reasoning", False)
+    # [--- 更改结束 ---]
+
     # --- LCEL 链定义 ---
 
-    # 根据模型名称动态添加 stream_options
+    # [--- 更改：使用 model_id 和 is_reasoning_model ---]
+    # 根据模型属性动态添加 stream_options
     llm_params: Dict[str, Any] = {
-        "model": model,
+        "model": model_id, # 使用模型 ID
         "temperature": temperature,
         "top_p": top_p,
         "stream": True
     }
 
-    if "thinking" in model.lower():
+    if is_reasoning_model: # <-- 新的判断逻辑
         llm_params["stream_options"] = {
             "include_reasoning": True,
             "thinking_budget": 4096
         }
+    # [--- 更改结束 ---]
 
     llm_with_options = llm.bind(**llm_params)
     classifier_llm = llm.bind(temperature=0.0, top_p=1.0)
@@ -556,7 +581,7 @@ async def api_ask(
         yield ": ping\n\n"
         full_response = ""
         sources_map = {} # 暂存 SourcesMap
-        model_name = model
+        model_name = model_id # [--- 更改：使用 model_id ---]
         thinking_response_for_db = ""
         stream_started = False
         llm_is_done = False # LLM 完成标志
