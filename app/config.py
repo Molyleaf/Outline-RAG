@@ -33,12 +33,12 @@ BASE_MODEL_ENABLE_THINKING = os.getenv("BASE_MODEL_ENABLE_THINKING", "None").low
 # 模型列表配置
 CHAT_MODELS_JSON = """[
   {"id": "deepseek-ai/DeepSeek-V3.2-Exp", "name": "Deepseek", "icon": "/chat/static/img/DeepSeek.svg", "temp": 0.7, "top_p": 0.7, "beta": false, "reasoning": true, "enable_thinking": true},
-  {"id": "moonshotai/Kimi-K2-Instruct-0905", "name": "Kimi K2", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": false, "reasoning": false, "enable_thinking": none},
-  {"id": "inclusionAI/Ring-1T", "name": "Ring-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true, "enable_thinking": none},
-  {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": false, "enable_thinking": none},
-  {"id": "Qwen/Qwen3-Next-80B-A3B-Thinking", "name": "Qwen3-Next-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": true, "enable_thinking": none},
-  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-235B-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": true, "enable_thinking": none},
-  {"id": "moonshotai/Kimi-K2-Thinking", "name": "Kimi K2-Thinking", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true, "enable_thinking": none},
+  {"id": "moonshotai/Kimi-K2-Instruct-0905", "name": "Kimi K2", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": false, "reasoning": false, "enable_thinking": null},
+  {"id": "inclusionAI/Ring-1T", "name": "Ring-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true, "enable_thinking": null},
+  {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": false, "enable_thinking": null},
+  {"id": "Qwen/Qwen3-Next-80B-A3B-Thinking", "name": "Qwen3-Next-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": true, "enable_thinking": null},
+  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-235B-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": true, "enable_thinking": null},
+  {"id": "moonshotai/Kimi-K2-Thinking", "name": "Kimi K2-Thinking", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true, "enable_thinking": null},
   {"id": "zai-org/GLM-4.6", "name": "ChatGLM", "icon": "/chat/static/img/thudm.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": false, "enable_thinking": true}
 ]
 """

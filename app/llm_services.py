@@ -149,7 +149,7 @@ def _create_retry_client() -> httpx.AsyncClient:
 # 依赖环境变量的 `default_factory` 在 Gunicorn/Uvicorn
 # 启动时不可靠。我们必须显式传递参数。
 llm = ChatSiliconFlow(
-    model=config.CHAT_MODEL,
+    model=config.BASE_CHAT_MODEL,
     api_key=config.SILICONFLOW_API_KEY,
     base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
 )
