@@ -36,7 +36,6 @@ CHAT_MODELS_JSON = """[
   {"id": "inclusionAI/Ring-1T", "name": "Ring-1T", "icon": "/chat/static/img/ling.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true},
   {"id": "Qwen/Qwen3-Next-80B-A3B-Instruct", "name": "Qwen3-Next", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": false},
   {"id": "Qwen/Qwen3-Next-80B-A3B-Thinking", "name": "Qwen3-Next-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": false, "reasoning": true},
-  {"id": "Qwen/Qwen3-235B-A22B-Thinking-2507", "name": "Qwen3-235B-Thinking", "icon": "/chat/static/img/Tongyi.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": true},
   {"id": "moonshotai/Kimi-K2-Thinking", "name": "Kimi K2-Thinking", "icon": "/chat/static/img/moonshotai_new.png", "temp": 0.6, "top_p": 0.7, "beta": true, "reasoning": true},
   {"id": "zai-org/GLM-4.6", "name": "ChatGLM-4.6", "icon": "/chat/static/img/thudm.svg", "temp": 0.6, "top_p": 0.95, "beta": true, "reasoning": true}
 ]

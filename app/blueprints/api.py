@@ -384,8 +384,11 @@ async def api_ask(
             "include_reasoning": True,
             "thinking_budget": 8192
         }
-
-    # [--- 已移除 enable_thinking 的绑定逻辑 ---]
+        # [--- 关键修复：在此处添加 enable_thinking ---]
+        # 'stream_options' 用于 LangChain *解析*响应。
+        # 'enable_thinking' 用于 SiliconFlow API *生成*响应。
+        # 对于 Deepseek-v3.2 等模型，两者都必须提供。
+        llm_params["enable_thinking"] = True
 
     llm_with_options = llm.bind(**llm_params)
 

@@ -151,7 +151,7 @@ def _create_retry_client() -> httpx.AsyncClient:
 llm = ChatSiliconFlow(
     model=config.BASE_CHAT_MODEL,
     api_key=config.SILICONFLOW_API_KEY,
-    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
+    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1",
 )
 # [--- 更改结束 ---]
 
