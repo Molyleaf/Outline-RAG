@@ -28,6 +28,40 @@ mobileSheetContent.className = 'mobile-sheet-content';
 mobileSheetPanel.append(mobileSheetHeader, mobileSheetContent);
 document.body.append(mobileSheetOverlay, mobileSheetPanel);
 
+/**
+ * 预加载 Shoelace 组件
+ * 尝试通过动态创建（但不显示）元素来触发 Shoelace 自动加载器
+ * 或提示浏览器注册已定义的组件。
+ */
+function preloadShoelaceComponents() {
+    const components = ['sl-alert', 'sl-dialog', 'sl-input', 'sl-button', 'sl-icon'];
+    const preloadContainer = document.createElement('div');
+    preloadContainer.style.display = 'none'; // 隐藏容器
+    preloadContainer.id = 'shoelace-preloader';
+
+    components.forEach(tag => {
+        try {
+            // 检查是否已定义
+            if (!customElements.get(tag)) {
+                // 创建元素。如果 Shoelace 是自动加载的，
+                // 这可能会触发网络请求（如果尚未加载）。
+                const el = document.createElement(tag);
+                preloadContainer.appendChild(el);
+            }
+        } catch (e) {
+            console.warn(`Failed to preload <${tag}>:`, e);
+        }
+    });
+
+    if (preloadContainer.children.length > 0) {
+        document.body.appendChild(preloadContainer);
+        // 稍后移除
+        setTimeout(() => {
+            preloadContainer.remove();
+        }, 1000);
+    }
+}
+
 /** 显示自定义底部弹窗 */
 function showMobileSheet(contentHtml, label = '') {
     mobileSheetHeader.textContent = label;

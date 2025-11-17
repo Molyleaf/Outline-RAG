@@ -102,7 +102,7 @@
     font-weight: 600;
 }
 .model-item img { width: 24px; height: 24px; border-radius: 4px; }
-.param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
+.param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
 .param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
 .param-range { width: 100%; accent-color: var(--accent); }

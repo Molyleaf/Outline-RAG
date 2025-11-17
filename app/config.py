@@ -33,7 +33,7 @@ BASE_CHAT_MODEL = os.getenv("BASE_CHAT_MODEL", "Qwen/Qwen3-Next-80B-A3B-Instruct
 CHAT_MODELS_JSON = """[
   {
     "id": "deepseek-ai/DeepSeek-V3.2-Exp",
-    "name": "Deepseek",
+    "name": "Deepseek V3.2",
     "icon": "/chat/static/img/DeepSeek.svg",
     "temp": 0.7,
     "top_p": 0.7,
@@ -64,6 +64,16 @@ CHAT_MODELS_JSON = """[
     "top_p": 0.95
   },
   {
+    "id": "zai-org/GLM-4.6",
+    "name": "ChatGLM-4.6",
+    "icon": "/chat/static/img/thudm.svg",
+    "temp": 0.6,
+    "top_p": 0.95,
+    "beta": true,
+    "enable_thinking": true,
+    "use_reasoning_parser": true
+  },
+  {
     "id": "Qwen/Qwen3-Next-80B-A3B-Thinking",
     "name": "Qwen3-Next-Thinking",
     "icon": "/chat/static/img/Tongyi.svg",
@@ -78,16 +88,6 @@ CHAT_MODELS_JSON = """[
     "temp": 0.6,
     "top_p": 0.7,
     "beta": true,
-    "use_reasoning_parser": true
-  },
-  {
-    "id": "zai-org/GLM-4.6",
-    "name": "ChatGLM-4.6",
-    "icon": "/chat/static/img/thudm.svg",
-    "temp": 0.6,
-    "top_p": 0.95,
-    "beta": true,
-    "enable_thinking": true,
     "use_reasoning_parser": true
   }
 ]

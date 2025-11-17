@@ -71,7 +71,9 @@
 }
 .model-menu.mobile {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* 修改栅格布局以自动适应 */
+    /* grid-template-columns: 1fr 1fr; */
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 8px;
 }
 /* 修复 #3: 移动端模型菜单样式 */

@@ -192,6 +192,8 @@ qEl.addEventListener('keydown', (e) => {
 
 
 (async function init() {
+    /* 在 init 开始时调用预加载 */
+    preloadShoelaceComponents();
     function setupTopbarActions() {
         const actionsContainer = document.querySelector('.topbar .actions');
         if (!actionsContainer) return;

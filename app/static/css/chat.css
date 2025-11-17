@@ -1,7 +1,6 @@
 .chat {
     overflow-y: scroll;
-    padding: 24px 12%;
-    padding-bottom: 160px;
+    padding: 24px 12% 160px;
     background: var(--panel);
 }
 :root[data-theme="dark"] .chat {
@@ -23,7 +22,7 @@
 .greet-title {
     font-size: 28px;
     font-weight: 800;
-    letter-spacing: .2px;
+    letter-spacing: .1em;
     margin-bottom: 10px;
     background: linear-gradient(45deg, #4285f4, #9b72cb, #d96570, #f2a600);
     background-size: 300% 100%;
@@ -386,7 +385,7 @@
     height: 16px;
 }
 
-#send {
+#send, #stopBtn {
     width: 40px; height: 40px;
     border-radius: 50% !important;
     padding: 0 !important;
@@ -396,5 +395,6 @@
     color: white;
     box-shadow: none !important;
 }
-#send:hover { filter: brightness(1.1); }
+#send:hover, #stopBtn:hover { filter: brightness(1.1); }
+
 .upload { cursor: pointer; }
