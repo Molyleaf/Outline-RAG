@@ -70,10 +70,9 @@
     padding: 8px 8px 4px;
 }
 .model-menu.mobile {
-    display: grid;
-    /* 修改栅格布局以自动适应 */
-    /* grid-template-columns: 1fr 1fr; */
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    display: flex; /* 更改为 Flexbox */
+    flex-wrap: wrap; /* 允许换行 */
+    flex-direction: row;
     gap: 8px;
 }
 /* 修复 #3: 移动端模型菜单样式 */
@@ -82,6 +81,9 @@
     flex-direction: row; /* 改为 row */
     align-items: center; /* 垂直居中 */
     gap: 8px; /* 增加间距 */
+    /* [ADDED] (Req 2) Flexbox 布局，实现 1-2 列自动切换 */
+    flex-grow: 1;
+    flex-basis: 130px;
 }
 .model-menu.mobile .model-item img { width: 32px; height: 32px; }
 .model-menu.mobile .model-item span { font-size: 14px; }
@@ -151,9 +153,9 @@ sl-menu-item img,
     width: 24px; height: 24px; border-radius: 4px;
 }
 
-/* --- (Req 2 & 3) Shoelace Overrides --- */
+/* --- Shoelace Overrides --- */
 
-/* (Req 3) 修复 Shoelace 弹窗降级时的定位 */
+/* 修复 Shoelace 弹窗降级时的定位 */
 sl-alert.toast-fallback[open] {
     position: fixed;
     top: 24px;
@@ -163,10 +165,10 @@ sl-alert.toast-fallback[open] {
     width: auto;
 }
 
-/* (Req 2) 统一 Shoelace 圆角 */
+/* 统一 Shoelace 圆角 */
 sl-alert::part(base) {
     border-radius: var(--radius-m, 16px);
-    box-shadow: var(--shadow-2); /* (Req 3) 添加阴影以匹配其他弹窗 */
+    box-shadow: var(--shadow-2); /* 添加阴影以匹配其他弹窗 */
 }
 
 sl-dialog::part(panel) {
