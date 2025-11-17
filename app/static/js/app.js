@@ -1,5 +1,7 @@
 // app/static/js/app.js
 
+let currentStreamController = null; // [!! 修复 !!]：添加全局 AbortController
+
 function appendFadeInChunk(text, container) {
     if (text) {
         const span = document.createElement('span');
@@ -675,6 +677,36 @@ async function sendQuestion() {
     const text = qEl.value.trim();
     if (!text) return;
 
+    // [!! 修复 !!]：获取按钮
+    const sendBtn = document.getElementById('send');
+    let stopBtn = document.getElementById('stopBtn');
+    // [!! 修复 !!]：如果 "停止" 按钮不存在，则创建它
+    if (!stopBtn) {
+        stopBtn = document.createElement('button');
+        stopBtn.id = 'stopBtn';
+        if (sendBtn) { // 复制 sendBtn 的样式
+            stopBtn.className = sendBtn.className;
+            stopBtn.style.cssText = sendBtn.style.cssText;
+        } else { // 回退样式
+            stopBtn.className = 'btn';
+        }
+        stopBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>'; // 停止图标
+        stopBtn.style.display = 'none'; // 默认隐藏
+        stopBtn.title = '停止';
+
+        // 插入到 sendBtn 后面
+        sendBtn.parentElement.insertBefore(stopBtn, sendBtn.nextSibling);
+
+        // [!! 修复 !!]：为新按钮添加点击事件
+        stopBtn.addEventListener('click', () => {
+            if (currentStreamController) {
+                currentStreamController.abort(); // 调用 Abort
+                console.log('Stream aborted by user.');
+            }
+        });
+    }
+
+
     const greet = document.getElementById('greeting');
     if (greet) greet.style.display = 'none';
 
@@ -781,6 +813,15 @@ async function sendQuestion() {
         qEl.value = '';
     }
 
+    // [!! 修复 !!]：启动 AbortController 并切换按钮
+    if (currentStreamController) {
+        currentStreamController.abort(); // 中止上一个（如果存在）
+    }
+    currentStreamController = new AbortController();
+
+    if (sendBtn) sendBtn.style.display = 'none'; // 隐藏发送
+    if (stopBtn) stopBtn.style.display = 'inline-flex'; // 显示停止
+
 
     // --- 启动流式响应 ---
 
@@ -885,6 +926,11 @@ async function sendQuestion() {
             processCitations(currentThinkingMdBody);
         }
 
+        // [!! 修复 !!]：恢复按钮状态
+        if (sendBtn) sendBtn.style.display = 'inline-flex';
+        if (stopBtn) stopBtn.style.display = 'none';
+        currentStreamController = null; // 清理 Controller
+
         // 最终化后，重新加载消息以获取正确的 ID 并附加按钮
         // 延迟一点点加载，确保数据库已写入
         setTimeout(loadMessages, 100);
@@ -902,13 +948,16 @@ async function sendQuestion() {
             edit_source_message_id: editingId || null // 发送 ID
         }),
         headers: {'Content-Type':'application/json'},
-        credentials: 'include'
+        credentials: 'include',
+        signal: currentStreamController.signal // [!! 修复 !!]：传入 AbortSignal
     });
 
     if (!res.ok) {
         messageContainer.textContent = '请求失败'; // 替换 (这也会移除加载器)
         messageContainer.classList.remove('streaming');
         toast('请求失败', 'danger');
+        // [!! 修复 !!]：失败时也需要调用 finalizeStream 来恢复按钮
+        finalizeStream();
         return;
     }
 
@@ -1149,8 +1198,14 @@ async function sendQuestion() {
 
         finalizeStream(); // 处理流在 [DONE] 之前结束的情况
     } catch (e) {
-        console.error("Stream processing error:", e);
+        // [!! 修复 !!]：捕获 AbortError
+        if (e.name === 'AbortError') {
+            console.log('Fetch aborted.');
+            toast('已停止', 'warning');
+        } else {
+            console.error("Stream processing error:", e);
+            toast('连接中断', 'warning');
+        }
         finalizeStream(); // 异常时也尝试最终化
-        toast('连接中断', 'warning');
     }
 }

@@ -297,17 +297,27 @@ async def api_messages(
     if not conv_id:
         raise HTTPException(status_code=400, detail="conv_id 缺失")
 
+    # --- 修复：第一步：权限检查 ---
+    # 必须先检查用户是否有权访问此对话。
+    async with session.begin():
+        if not (await session.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
+                                      {"cid": conv_id, "u": user["id"]})).scalar():
+            # 如果无权访问，立即 403 拒绝，无论缓存中是否存在。
+            raise HTTPException(status_code=403, detail="无权限")
+    # --- 权限检查结束 ---
+
+
+    # --- 第二步：检查缓存 (现在是安全的) ---
     cache_key = f"messages:{conv_id}"
     if redis_client:
         cached_data = await redis_client.get(cache_key)
         if cached_data:
+            # 用户已通过权限检查，可以安全返回缓存数据
             return Response(content=cached_data, media_type='application/json')
 
+    # --- 第三步：缓存未命中，从数据库获取 ---
+    # (我们不再需要在这里重复 session.begin() 或权限检查)
     async with session.begin():
-        if not (await session.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
-                                      {"cid": conv_id, "u": user["id"]})).scalar():
-            raise HTTPException(status_code=403, detail="无权限")
-
         rs = (await session.execute(
             text("SELECT id, role, content, created_at, model, temperature, top_p FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
             {"cid": conv_id}
@@ -317,7 +327,9 @@ async def api_messages(
     response_data = {"items": items, "total": len(rs)}
     response_json = json.dumps(response_data)
 
+    # --- 第四步：存入缓存 ---
     if redis_client:
+        # (确保对话ID和用户ID都经过了验证)
         await redis_client.set(cache_key, response_json)
 
     return Response(content=response_json, media_type='application/json')
@@ -387,7 +399,6 @@ async def api_ask(
     if use_reasoning_parser:
         llm_params["stream_options"] = {
             "include_reasoning": True,
-            "thinking_budget": 8192
         }
 
     # 2. (控制 API) 如果 'enable_thinking' 不是 None (即它是 True 或 False)
