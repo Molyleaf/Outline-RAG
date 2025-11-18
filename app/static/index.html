@@ -3,25 +3,34 @@
 <head>
 	<meta charset="utf-8" />
 	<title>{{ app_name }}</title>
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 	<link rel="icon" href="/chat/static/img/favicon.svg" type="image/svg+xml" />
 	<link rel="icon" href="/chat/static/img/favicon.ico" type="image/x-icon"/>
+
 	<link rel="stylesheet" href="static/style.min.css" />
-	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+
 	<link rel="stylesheet" href="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" />
+	<script type="module" src="https://unpkg.shop.jd.com/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+
 	<script type="module" src="https://unpkg.shop.jd.com/marked@16.3.0/lib/marked.umd.js" defer></script>
 	<script src="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/highlight.min.js" defer></script>
-	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/googlecode.min.css" id="hljs-light-theme">
-	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/atom-one-dark.min.css" id="hljs-dark-theme" disabled>
+	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/github.min.css" id="hljs-light-theme">
+	<link rel="stylesheet" href="https://s4.zstatic.net/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" id="hljs-dark-theme" disabled>
+
 	<script>
+        /* 快速防闪烁主题脚本 */
         (function () {
             try {
                 const saved = localStorage.getItem('theme');
                 const root = document.documentElement;
                 if (saved === 'light' || saved === 'dark') {
                     root.setAttribute('data-theme', saved);
+                    if (saved === 'dark') document.documentElement.classList.add('sl-theme-dark');
                 } else {
                     root.setAttribute('data-theme', 'system');
+                    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                        document.documentElement.classList.add('sl-theme-dark');
+                    }
                 }
             } catch (e) {}
         })();
@@ -31,51 +40,62 @@
 <div class="app">
 	<div class="sidebar">
 		<div class="titlebar">
-			<strong>对话</strong>
-			<button class="btn tonal" id="newConv"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>新建</button>
+			<strong style="font-size: 18px;">对话</strong>
+			<button class="btn tonal" id="newConv" style="height:32px; font-size:13px;">
+				<sl-icon name="plus-lg" style="font-size: 16px; margin-right: 4px;"></sl-icon>
+				新建
+			</button>
 		</div>
 		<div id="convs"></div>
 	</div>
+
 	<div class="sidebar-veil"></div>
+
 	<div class="main">
 		<div class="topbar">
 			<div class="hamburger">
-				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+				<sl-icon name="list" style="font-size: 24px;"></sl-icon>
 			</div>
 			<div class="actions">
-				<label class="upload">
+				<label class="upload" title="上传文件">
 					<input type="file" id="fileInput" style="display:none" />
-					<span class="btn tonal">上传附件</span>
+					<span class="btn tonal" style="width:40px; height:40px; padding:0; border-radius:50%;">
+                        <sl-icon name="paperclip" style="font-size: 20px;"></sl-icon>
+                    </span>
 				</label>
 			</div>
 			<div class="menu" id="menu">
 				<div class="menu-section">
 					<div class="menu-label">主题</div>
-					<div class="menu-radio" data-theme="system">系统</div>
-					<div class="menu-radio" data-theme="light">浅色</div>
-					<div class="menu-radio" data-theme="dark">深色</div>
+					<div class="menu-radio" data-theme="system">系统默认</div>
+					<div class="menu-radio" data-theme="light">浅色模式</div>
+					<div class="menu-radio" data-theme="dark">深色模式</div>
 				</div>
 				<div class="menu-divider"></div>
 				<a href="/chat/logout">退出登录</a>
-				<a id="refreshAll" href="#">手动刷新数据库</a>
+				<a id="refreshAll" href="#">刷新知识库</a>
 			</div>
-			<div class="avatar" id="avatar" title="菜单"></div>
+			<div class="avatar" id="avatar" title="用户菜单"></div>
 		</div>
+
 		<div class="chat" id="chat">
 			<div class="greeting" id="greeting">
-				<div class="greet-title">你好！</div>
-				<div class="greet-sub">随时提问，或从以下示例开始</div>
+				<div class="greet-title">你好，有什么可以帮忙？</div>
+				<div class="greet-sub">探索知识库，或尝试以下问题</div>
 				<div class="greet-suggestions">
 					<button class="chip">总结新手教程</button>
-					<button class="chip">拉汶帝国完蛋了吗</button>
-					<button class="chip">开发组的烂摊子怎么样了</button>
+					<button class="chip">最近的项目进展</button>
+					<button class="chip">分析上传的文档</button>
 				</div>
 			</div>
 		</div>
+
 		<div class="input">
 			<div class="input-inner">
-				<textarea id="q" placeholder="向知识库提问... (Shift+Enter 换行)"></textarea>
-				<button class="btn" id="send"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>
+				<textarea id="q" placeholder="输入问题..." rows="1" autofocus></textarea>
+				<button id="send" title="发送">
+					<sl-icon name="arrow-up" style="font-size: 22px; stroke-width: 2px;"></sl-icon>
+				</button>
 			</div>
 			<label class="switch" style="display:none">
 				<input type="checkbox" id="streamToggle" checked />
@@ -86,27 +106,14 @@
 </div>
 
 <script src="static/script.min.js" defer></script>
-
 <script>
-    (function(){
-        const m = document.cookie.match(/(?:^|;\s*)chat_notice=([^;]+)/);
-        if (m) {
-            try {
-                const msg = decodeURIComponent(m[1]);
-                if (msg && typeof toast === 'function') toast(msg, 'warning', 3000);
-            } catch(_) {}
-            document.cookie = 'chat_notice=; Max-Age=0; path=/';
+    /* 辅助脚本：监听系统主题变化以切换 Shoelace 主题类 */
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (document.documentElement.getAttribute('data-theme') === 'system') {
+            if(e.matches) document.documentElement.classList.add('sl-theme-dark');
+            else document.documentElement.classList.remove('sl-theme-dark');
         }
-    })();
-    (function(){
-        document.querySelectorAll('.greet-suggestions .chip').forEach(btn=>{
-            btn.addEventListener('click', ()=>{
-                const q = document.getElementById('q');
-                q.value = btn.textContent.trim();
-                q.focus();
-            });
-        });
-    })();
+    });
 </script>
 </body>
 </html>

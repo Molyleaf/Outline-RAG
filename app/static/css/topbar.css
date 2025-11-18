@@ -1,110 +1,135 @@
-/* 顶栏（右侧） */
+/* 顶部导航栏 */
 .topbar {
     height: 56px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
-    padding: 0 12px;
+    padding: 0 16px;
     border-bottom: none;
-    /* [MODIFIED] (Req 4) 调整渐变以匹配 input 区域的逻辑（顶部 70% 实心，然后渐变） */
-    background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 100%, transparent) 70%, transparent 100%);
+    /* 顶部渐变遮罩 */
+    background: linear-gradient(to bottom, var(--bg) 70%, rgba(255,255,255,0));
     position: sticky;
     top: 0;
     z-index: 5;
 }
+
 .topbar .actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
+
+/* 汉堡菜单按钮 (移动端) */
 .topbar .hamburger {
     display: none;
     align-items: center;
     justify-content: center;
     width: 40px; height: 40px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: var(--bg);
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text);
     cursor: pointer;
 }
+.topbar .hamburger:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+
 @media (max-width: 960px) {
-    .topbar .hamburger { display: inline-flex; margin-right: auto; }
+    .topbar .hamburger { display: inline-flex; margin-right: auto; margin-left: -8px; }
+    .topbar { background: var(--bg); /* 移动端顶部不需要渐变 */ }
 }
 
-/* 头像与菜单 */
+/* 头像 */
 .avatar {
-    width: 40px; height: 40px;
+    width: 32px; height: 32px;
     border-radius: 50%;
     background-position: center;
     cursor: pointer;
     box-shadow: var(--shadow-1);
-}
-/* 恢复右上角头像的 cover 属性 */
-#avatar.avatar {
     background-size: cover;
+    border: 1px solid var(--border);
+    transition: transform 0.2s;
 }
+.avatar:hover { transform: scale(1.05); }
 
+/* 下拉菜单 */
 .menu {
-    position: absolute; right: 12px; top: 64px;
-    background: var(--bg);
+    position: absolute; right: 16px; top: 60px;
+    background: var(--panel);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
-    z-index: 10;
-    border-radius: 12px;
-    min-width: 220px;
+    z-index: 100;
+    border-radius: var(--radius-m);
+    min-width: 200px;
     overflow: hidden;
     visibility: hidden;
     opacity: 0;
     transform: scale(0.95) translateY(-10px);
     transform-origin: top right;
-    transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+    transition: visibility 0s .15s, opacity .15s ease, transform .15s ease;
 }
 .menu.visible {
     visibility: visible;
     opacity: 1;
     transform: scale(1) translateY(0);
-    transition: opacity .2s ease, transform .2s ease;
+    transition: opacity .15s ease, transform .15s ease;
 }
-.menu a, .menu .menu-radio { display: block; padding: 10px 12px; color: var(--text); }
-.menu a:hover, .menu .menu-radio:hover { background: color-mix(in srgb, var(--panel) 55%, var(--bg)); }
+
+.menu a, .menu .menu-radio {
+    display: block; padding: 10px 16px;
+    color: var(--text); font-size: 14px; cursor: pointer;
+}
+.menu a:hover, .menu .menu-radio:hover {
+    background: color-mix(in srgb, var(--panel) 90%, var(--text));
+}
 .menu .menu-section { padding: 8px 0 0; }
-.menu .menu-label { padding: 0 12px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.menu .menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
-.menu .menu-radio.active { font-weight: 700; }
-
-/* 模型图标背景 */
-.model-item img {
-    background-color: white;
-    padding: 2px;
-    box-sizing: border-box;
-    border-radius: 4px;
+.menu .menu-label {
+    padding: 0 16px 6px; font-size: 11px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
 }
+.menu .menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.menu .menu-radio.active { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
-/* 设置菜单动画 */
+/* 模型与参数弹窗 */
 .toolbar-popover {
-    position: fixed; background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius-m); box-shadow: var(--shadow-2); padding: 8px; z-index: 100;
-    visibility: hidden; opacity: 0; transform: scale(0.95) translateY(-10px);
+    position: fixed;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-2);
+    padding: 8px;
+    z-index: 100;
+    visibility: hidden; opacity: 0;
+    transform: scale(0.95) translateY(-10px);
     transform-origin: top right;
-    transition: visibility 0s .2s, opacity .2s ease, transform .2s ease;
+    transition: all 0.15s ease;
 }
 .toolbar-popover.visible {
     visibility: visible; opacity: 1; transform: scale(1) translateY(0);
-    transition: opacity .2s ease, transform .2s ease;
 }
-.model-menu { display: flex; flex-direction: column; gap: 4px; }
-.model-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-s); cursor: pointer; white-space: nowrap; }
-.model-item:hover { background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+
+.model-menu { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+.model-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: var(--radius-s);
+    cursor: pointer; white-space: nowrap; color: var(--text); font-size: 14px;
+}
+.model-item:hover { background: color-mix(in srgb, var(--bg) 80%, var(--text)); }
 .model-item.active {
-    background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
     color: var(--accent);
     font-weight: 600;
 }
 .model-item img { width: 24px; height: 24px; border-radius: 4px; }
-.param-slider { padding: 8px; display: flex; flex-direction: column; gap: 8px; width: 100%; }
-.param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); }
-.param-input { width: 60px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
-.param-range { width: 100%; accent-color: var(--accent); }
 
-.popover-divider { height: 1px; background: var(--border); margin: 8px 0; }
+/* 参数滑块 */
+.param-slider { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
+.param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
+.param-input {
+    width: 50px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text);
+    border-radius: 4px; padding: 2px 4px; font-size: 13px; text-align: center;
+}
+.param-range { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+.popover-divider { height: 1px; background: var(--border); margin: 4px 0; }

@@ -1,187 +1,128 @@
-/* --- 自定义移动端弹窗样式 --- */
+/* --- 自定义移动端底部动作面板 (Action Sheet) --- */
 .mobile-sheet-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.35);
-    opacity: 0;
-    visibility: hidden;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.4);
+    opacity: 0; visibility: hidden;
     transition: opacity .3s ease, visibility 0s .3s;
-    z-index: 100;
+    z-index: 200;
 }
 .mobile-sheet-overlay.visible {
-    opacity: 1;
-    visibility: visible;
+    opacity: 1; visibility: visible;
     transition: opacity .3s ease;
 }
+
 .mobile-sheet-panel {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: fixed; left: 0; right: 0; bottom: 0;
     background: var(--panel);
     border-top: 1px solid var(--border);
     border-radius: var(--radius-l) var(--radius-l) 0 0;
     box-shadow: var(--shadow-2);
-    z-index: 101;
+    z-index: 201;
     transform: translateY(100%);
-    transition: transform .3s ease;
-    max-height: 70vh;
-    display: flex;
-    flex-direction: column;
+    transition: transform .3s cubic-bezier(0.2, 0, 0, 1);
+    max-height: 75vh;
+    display: flex; flex-direction: column;
 }
-.mobile-sheet-panel.visible {
-    transform: translateY(0);
-}
+.mobile-sheet-panel.visible { transform: translateY(0); }
+
 .mobile-sheet-header {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--muted);
-    padding: 16px 20px 12px;
+    font-size: 14px; font-weight: 600; color: var(--muted);
+    padding: 16px 20px;
     border-bottom: 1px solid var(--border);
     text-align: center;
 }
 .mobile-sheet-content {
-    overflow-y: auto;
-    padding: 8px;
+    overflow-y: auto; padding: 8px;
 }
 .mobile-menu-item {
-    padding: 14px 20px;
-    font-size: 16px;
-    cursor: pointer;
-    border-radius: var(--radius-s);
+    padding: 16px 20px; font-size: 16px;
+    cursor: pointer; border-radius: var(--radius-s);
+    color: var(--text);
 }
-.mobile-menu-item:hover {
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
-}
-.mobile-menu-item.danger {
-    color: var(--sl-color-danger-600);
-}
-.mobile-sheet-group {
-    padding: 8px;
-    border-bottom: 1px solid var(--border);
-}
-.mobile-sheet-group:last-child {
-    border-bottom: none;
-}
+.mobile-menu-item:active { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.mobile-menu-item.danger { color: var(--danger); }
+
+.mobile-sheet-group { padding: 8px; border-bottom: 1px solid var(--border); }
+.mobile-sheet-group:last-child { border-bottom: none; }
 .mobile-sheet-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
+    font-size: 13px; font-weight: 600; color: var(--muted);
     padding: 8px 8px 4px;
 }
+
+/* 移动端模型网格 */
 .model-menu.mobile {
-    display: flex; /* 更改为 Flexbox */
-    flex-wrap: wrap; /* 允许换行 */
-    flex-direction: row;
-    gap: 8px;
+    display: flex; flex-wrap: wrap; flex-direction: row; gap: 8px;
 }
-/* 修复 #3: 移动端模型菜单样式 */
 .model-menu.mobile .model-item {
-    padding: 8px;
-    flex-direction: row; /* 改为 row */
-    align-items: center; /* 垂直居中 */
-    gap: 8px; /* 增加间距 */
-    /* [ADDED] (Req 2) Flexbox 布局，实现 1-2 列自动切换 */
-    flex-grow: 1;
-    flex-basis: 130px;
-}
-.model-menu.mobile .model-item img { width: 32px; height: 32px; }
-.model-menu.mobile .model-item span { font-size: 14px; }
-
-/* Shoelace 组件深色模式适配 */
-:root[data-theme="dark"] sl-dialog::part(panel),
-:root[data-theme="dark"] sl-alert::part(base) {
-    background-color: var(--panel);
+    padding: 10px;
+    flex-grow: 1; flex-basis: 140px; /* 双列布局 */
+    background: var(--bg);
     border: 1px solid var(--border);
+}
+.model-menu.mobile .model-item.active {
+    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+    border-color: var(--accent);
+}
+
+/* --- Shoelace 组件全局覆盖 --- */
+
+/* 统一圆角与背景 */
+sl-dialog::part(panel) {
+    border-radius: var(--radius-l);
+    background-color: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+}
+sl-dialog::part(header), sl-dialog::part(body), sl-dialog::part(footer) {
+    background-color: transparent;
     color: var(--text);
 }
-:root[data-theme="dark"] sl-dialog::part(title),
-:root[data-theme="dark"] sl-dialog::part(body) {
-    color: var(--text);
-}
-:root[data-theme="dark"] sl-dialog::part(header) { border-bottom-color: var(--border); }
-:root[data-theme="dark"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
-:root[data-theme="dark"] sl-input::part(input) { color: var(--text); }
-:root[data-theme="dark"] sl-menu-item::part(base):hover {
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
-}
-:root[data-theme="dark"] sl-menu-item.sl-selected {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 25%, var(--panel));
-}
+sl-dialog::part(header) { border-bottom-color: var(--border); }
+sl-dialog::part(title) { font-weight: 600; }
+sl-dialog::part(overlay) { background-color: rgba(0,0,0,0.4); }
 
-@media (prefers-color-scheme: dark) {
-    :root[data-theme="system"] sl-dialog::part(panel),
-    :root[data-theme="system"] sl-alert::part(base) {
-        background-color: var(--panel); border: 1px solid var(--border); color: var(--text);
-    }
-    :root[data-theme="system"] sl-dialog::part(title),
-    :root[data-theme="system"] sl-dialog::part(body) {
-        color: var(--text);
-    }
-    :root[data-theme="system"] sl-dialog::part(header) { border-bottom-color: var(--border); }
-    :root[data-theme="system"] sl-input::part(base) { background-color: var(--bg); border-color: var(--border); }
-    :root[data-theme="system"] sl-input::part(input) { color: var(--text); }
-    :root[data-theme="system"] sl-menu-item::part(base):hover {
-        background: color-mix(in srgb, var(--panel) 70%, var(--bg));
-    }
-    :root[data-theme="system"] sl-menu-item.sl-selected {
-        color: var(--accent);
-        background: color-mix(in srgb, var(--accent) 25%, var(--panel));
-    }
-}
-
-sl-dialog::part(overlay) {
-    justify-items: center;
-    align-items: center;
-}
-sl-dialog::part(panel) {
-    margin: 0;
-    max-width: min(600px, 90vw);
-}
-@media (max-width: 960px) {
-    sl-dialog::part(panel) {
-        margin: 0;
-        width: 90vw;
-        max-width: 90vw;
-    }
-}
-
-sl-menu-item img,
-.model-item img {
-    vertical-align: middle;
-    width: 24px; height: 24px; border-radius: 4px;
-}
-
-/* --- Shoelace Overrides --- */
-
-/* 修复 Shoelace 弹窗降级时的定位 */
-sl-alert.toast-fallback[open] {
-    position: fixed;
-    top: 24px;
-    right: 24px;
-    z-index: 200;
-    max-width: 400px;
-    width: auto;
-}
-
-/* 统一 Shoelace 圆角 */
-sl-alert::part(base) {
-    border-radius: var(--radius-m, 16px);
-    box-shadow: var(--shadow-2); /* 添加阴影以匹配其他弹窗 */
-}
-
-sl-dialog::part(panel) {
-    border-radius: var(--radius-l, 24px);
-}
-
+/* 输入框适配 */
 sl-input::part(base) {
-    border-radius: var(--radius-s, 8px);
+    border-radius: var(--radius-s);
+    background-color: var(--bg);
+    border-color: var(--border);
+    color: var(--text);
 }
-sl-input::part(input) {
-    border-radius: var(--radius-s, 8px);
+sl-input::part(input) { color: var(--text); }
+sl-input:focus-within::part(base) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-sl-button::part(base) {
-    border-radius: var(--radius-m, 16px);
+/* Toast 提示 */
+sl-alert::part(base) {
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-2);
+    background-color: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+/* 深色模式 Shoelace 覆盖 */
+:root[data-theme="dark"] sl-menu-item::part(base):hover,
+:root[data-theme="dark"] sl-menu-item::part(base):focus {
+    background-color: color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--text);
+}
+:root[data-theme="dark"] sl-menu-item[checked]::part(base) {
+    background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
+}
+
+/* 降级 Toast 样式 (当 Shoelace 未加载时) */
+sl-alert.toast-fallback[open] {
+    position: fixed; top: 24px; right: 24px;
+    z-index: 999;
+    max-width: 360px;
+    background: var(--panel);
+    padding: 16px; border-radius: var(--radius-m);
+    box-shadow: var(--shadow-2);
+    border: 1px solid var(--border);
+    display: flex; gap: 12px; align-items: center;
 }

@@ -1,50 +1,89 @@
 :root {
-    --bg: #f0f4f9;
+    /* 基础调色板 - 仿 Shoelace/Material 风格 */
+    --bg: #fdfdfd;
     --text: #1f1f1f;
-    --muted: #444746;
-    --border: #dfe1e5;
+    --muted: #5f6368;
+    --border: #e0e0e0;
     --panel: #ffffff;
-    --bubble-user: #d1e3ff;
+
+    /* 气泡颜色 */
+    --bubble-user: #e8f0fe;
     --bubble-assistant: #ffffff;
-    --accent: #1b6ef3;
-    --accent-glow: rgba(27, 110, 243, 0.4);
-    --shadow-1: 0 1px 2px rgba(0,0,0,.1);
-    --shadow-2: 0 4px 12px rgba(0,0,0,.12);
+
+    /* 强调色 (Google Blue) */
+    --accent: #0b57d0;
+    --accent-hover: #0842a0;
+
+    /* 状态色 */
+    --danger: #b3261e;
+    --danger-bg: #f9dedc;
+    --danger-border: #f2b8b5;
+
+    /* 发光与阴影系统 */
+    --input-glow: 0 0 0 1px rgba(11, 87, 208, 0.1), 0 4px 12px rgba(11, 87, 208, 0.08);
+    --input-glow-focus: 0 0 0 2px rgba(11, 87, 208, 0.2), 0 8px 24px rgba(11, 87, 208, 0.15);
+
+    --shadow-1: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+    --shadow-2: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+
+    /* 圆角系统 */
     --radius-s: 8px;
     --radius-m: 16px;
     --radius-l: 24px;
 }
 
+/* 深色模式适配 */
 @media (prefers-color-scheme: dark) {
     :root[data-theme="system"] {
         --bg: #131314;
         --text: #e3e3e3;
-        --muted: #8e9092;
+        --muted: #8e919a;
         --border: #444746;
         --panel: #1e1f20;
-        --bubble-user: #26344f;
+
+        --bubble-user: #2c333e;
         --bubble-assistant: #1e1f20;
-        --accent: #8ab4f8;
-        --accent-glow: rgba(138, 180, 248, 0.35);
+
+        --accent: #a8c7fa;
+        --accent-hover: #d3e3fd;
+
+        --danger: #f2b8b5;
+        --danger-bg: #601410;
+        --danger-border: #8c1d18;
+
+        --input-glow: 0 0 0 1px rgba(168, 199, 250, 0.1), 0 4px 12px rgba(0, 0, 0, 0.4);
+        --input-glow-focus: 0 0 0 2px rgba(168, 199, 250, 0.25), 0 8px 28px rgba(0, 0, 0, 0.6);
+
         --shadow-1: 0 1px 2px rgba(0,0,0,.5);
         --shadow-2: 0 8px 24px rgba(0,0,0,.6);
     }
 }
+
 :root[data-theme="dark"] {
     --bg: #131314;
     --text: #e3e3e3;
-    --muted: #8e9092;
+    --muted: #8e919a;
     --border: #444746;
     --panel: #1e1f20;
-    --bubble-user: #26344f;
+
+    --bubble-user: #2c333e;
     --bubble-assistant: #1e1f20;
-    --accent: #8ab4f8;
-    --accent-glow: rgba(138, 180, 248, 0.35);
+
+    --accent: #a8c7fa;
+    --accent-hover: #d3e3fd;
+
+    --danger: #f2b8b5;
+    --danger-bg: #601410;
+    --danger-border: #8c1d18;
+
+    --input-glow: 0 0 0 1px rgba(168, 199, 250, 0.1), 0 4px 12px rgba(0, 0, 0, 0.4);
+    --input-glow-focus: 0 0 0 2px rgba(168, 199, 250, 0.25), 0 8px 28px rgba(0, 0, 0, 0.6);
+
     --shadow-1: 0 1px 2px rgba(0,0,0,.5);
     --shadow-2: 0 8px 24px rgba(0,0,0,.6);
 }
 
-/* 为深色模式下的所有头像添加白色背景 */
+/* 强制深色模式下的头像背景为白色 */
 :root[data-theme="dark"] .avatar,
 :root[data-theme="system"] body .avatar {
     @media (prefers-color-scheme: dark) {
@@ -52,26 +91,27 @@
     }
 }
 
-/* 全局排版 */
+/* 全局基础样式 */
 * { box-sizing: border-box; }
-/* [MODIFIED] 按照用户要求，添加 overflow: hidden */
+
 html, body {
     height: 100%;
     margin: 0;
     padding: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: "Google Sans", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    line-height: 1.65; /* (Req 3) 增大全局行距 */
+    line-height: 1.65;
     font-size: 16px;
-    overflow: hidden; /* [ADDED] 按照用户要求，禁止根元素滚动 */
+    overflow: hidden; /* 禁止根元素滚动，由 .main 接管 */
 }
+
 a { color: inherit; text-decoration: none; }
 button { font: inherit; }
 
-/* 布局 */
+/* 主布局网格 */
 .app {
     height: 100%;
     display: grid;
@@ -79,34 +119,58 @@ button { font: inherit; }
     overflow: hidden;
 }
 
-/* 主区 */
-/* [MODIFIED] 按照用户要求，添加 overflow-y: auto */
+/* 内容主区域 */
 .main {
     height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
     background: var(--bg);
-    overflow-y: auto; /* [ADDED] 使 .main 成为滚动容器 */
+    overflow-y: auto; /* 滚动容器 */
+    position: relative;
 }
 
-/* 按钮 */
+/* 按钮通用样式 */
 .btn {
-    padding: 10px 14px;
-    border-radius: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    height: 40px;
+    border-radius: var(--radius-s);
     border: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--panel);
     color: var(--text);
     cursor: pointer;
+    font-weight: 500;
+    transition: all .2s ease;
+    user-select: none;
     box-shadow: var(--shadow-1);
-    transition: background .2s ease, transform .06s ease, box-shadow .2s ease;
 }
-.btn:hover { background: color-mix(in srgb, var(--bg) 85%, var(--panel)); transform: translateY(-1px); box-shadow: var(--shadow-2); }
-.btn:active { transform: translateY(0); }
+
+.btn:hover {
+    background: color-mix(in srgb, var(--bg) 85%, var(--panel));
+    border-color: color-mix(in srgb, var(--border) 80%, #000);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-2);
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
 .btn.tonal {
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+    background: color-mix(in srgb, var(--panel) 90%, var(--text));
+    border-color: transparent;
+    box-shadow: none;
 }
+
+.btn.tonal:hover {
+    background: color-mix(in srgb, var(--panel) 80%, var(--text));
+}
+
 .btn.tonal.moonshot-dark {
     background-color: #000000;
+    color: white;
 }
 .btn.tonal.moonshot-dark:hover {
     background-color: #222222;
@@ -116,19 +180,18 @@ button { font: inherit; }
     padding: 0 !important;
 }
 
-/* (Req 1) 加载动画 */
+/* 加载动画 */
 .loading-dots {
     display: flex;
     gap: 6px;
     align-items: center;
-    /* AI 气泡的 .md-body 没有 padding，在这里添加一些内边距 */
     padding: 10px 5px;
 }
 .loading-dots span {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    background-color: var(--muted);
+    background-color: var(--accent);
     animation: loading-pulse 1.4s infinite ease-in-out both;
 }
 .loading-dots span:nth-of-type(1) { animation-delay: -0.32s; }
@@ -139,45 +202,36 @@ button { font: inherit; }
     40% { transform: scale(1.0); opacity: 1; }
 }
 
-/* 渐隐动画 */
 @keyframes geminiFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
-/* 禁止选择非文本区域 */
+/* 禁止选中区域 */
 .avatar, .btn, .hamburger, .model-item, .chip, .menu-radio,
 .sidebar .conv .conv-menu, sl-menu-item, .mobile-menu-item,
 .menu a, .menu .menu-radio, .sidebar .conv .conv-menu-pop > div {
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
     user-select: none;
+    -webkit-user-select: none;
 }
 
-
-/* 统一滚动条样式 */
-.chat, #convs, .input textarea, .md-body pre, .mobile-sheet-content,
-.main { /* [ADDED] 将 .main 也加入滚动条样式 */
+/* 滚动条美化 */
+.chat, #convs, .input textarea, .md-body pre, .mobile-sheet-content, .main {
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
 }
-.chat::-webkit-scrollbar, #convs::-webkit-scrollbar, .input textarea::-webkit-scrollbar, .md-body pre::-webkit-scrollbar, .mobile-sheet-content::-webkit-scrollbar,
-.main::-webkit-scrollbar { /* [ADDED] 将 .main 也加入滚动条样式 */
+.chat::-webkit-scrollbar, #convs::-webkit-scrollbar, .input textarea::-webkit-scrollbar, .md-body pre::-webkit-scrollbar, .mobile-sheet-content::-webkit-scrollbar, .main::-webkit-scrollbar {
     width: 8px;
-    height: 8px; /* 增加高度以适应水平滚动条（如 pre） */
+    height: 8px;
 }
-.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track, .input textarea::-webkit-scrollbar-track, .md-body pre::-webkit-scrollbar-track, .mobile-sheet-content::-webkit-scrollbar-track,
-.main::-webkit-scrollbar-track { /* [ADDED] 将 .main 也加入滚动条样式 */
+.chat::-webkit-scrollbar-track, #convs::-webkit-scrollbar-track, .input textarea::-webkit-scrollbar-track, .md-body pre::-webkit-scrollbar-track, .mobile-sheet-content::-webkit-scrollbar-track, .main::-webkit-scrollbar-track {
     background: transparent;
 }
-.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb, .input textarea::-webkit-scrollbar-thumb, .md-body pre::-webkit-scrollbar-thumb, .mobile-sheet-content::-webkit-scrollbar-thumb,
-.main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
+.chat::-webkit-scrollbar-thumb, #convs::-webkit-scrollbar-thumb, .input textarea::-webkit-scrollbar-thumb, .md-body pre::-webkit-scrollbar-thumb, .mobile-sheet-content::-webkit-scrollbar-thumb, .main::-webkit-scrollbar-thumb {
     background-color: rgba(0, 0, 0, 0.2);
     border-radius: 4px;
 }
-.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover, .input textarea::-webkit-scrollbar-thumb:hover, .md-body pre::-webkit-scrollbar-thumb:hover, .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
-.main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
+.chat::-webkit-scrollbar-thumb:hover, #convs::-webkit-scrollbar-thumb:hover, .input textarea::-webkit-scrollbar-thumb:hover, .md-body pre::-webkit-scrollbar-thumb:hover, .mobile-sheet-content::-webkit-scrollbar-thumb:hover, .main::-webkit-scrollbar-thumb:hover {
     background-color: rgba(0, 0, 0, 0.4);
 }
 
@@ -187,7 +241,7 @@ button { font: inherit; }
 :root[data-theme="dark"] .input textarea,
 :root[data-theme="dark"] .md-body pre,
 :root[data-theme="dark"] .mobile-sheet-content,
-:root[data-theme="dark"] .main { /* [ADDED] 将 .main 也加入滚动条样式 */
+:root[data-theme="dark"] .main {
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb,
@@ -195,7 +249,7 @@ button { font: inherit; }
 :root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb,
 :root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb,
 :root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb,
-:root[data-theme="dark"] .main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
+:root[data-theme="dark"] .main::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, 0.2);
 }
 :root[data-theme="dark"] .chat::-webkit-scrollbar-thumb:hover,
@@ -203,7 +257,7 @@ button { font: inherit; }
 :root[data-theme="dark"] .input textarea::-webkit-scrollbar-thumb:hover,
 :root[data-theme="dark"] .md-body pre::-webkit-scrollbar-thumb:hover,
 :root[data-theme="dark"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
-:root[data-theme="dark"] .main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
+:root[data-theme="dark"] .main::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.4);
 }
 
@@ -213,7 +267,7 @@ button { font: inherit; }
     :root[data-theme="system"] .input textarea,
     :root[data-theme="system"] .md-body pre,
     :root[data-theme="system"] .mobile-sheet-content,
-    :root[data-theme="system"] .main { /* [ADDED] 将 .main 也加入滚动条样式 */
+    :root[data-theme="system"] .main {
         scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
     :root[data-theme="system"] .chat::-webkit-scrollbar-thumb,
@@ -221,15 +275,7 @@ button { font: inherit; }
     :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb,
     :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb,
     :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb,
-    :root[data-theme="system"] .main::-webkit-scrollbar-thumb { /* [ADDED] 将 .main 也加入滚动条样式 */
+    :root[data-theme="system"] .main::-webkit-scrollbar-thumb {
         background-color: rgba(255, 255, 255, 0.2);
-    }
-    :root[data-theme="system"] .chat::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] #convs::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] .input textarea::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] .md-body pre::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] .mobile-sheet-content::-webkit-scrollbar-thumb:hover,
-    :root[data-theme="system"] .main::-webkit-scrollbar-thumb:hover { /* [ADDED] 将 .main 也加入滚动条样式 */
-        background-color: rgba(255, 255, 255, 0.4);
     }
 }
