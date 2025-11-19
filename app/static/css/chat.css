@@ -356,21 +356,15 @@
 .input-inner::before {
     content: "";
     position: absolute;
-    top: 50%; left: 50%;
-    width: 150%; height: 600%; /* 足够大以覆盖长方形旋转 */
-    /* 连贯的四色渐变，首尾相接 */
-    background: conic-gradient(
-            from 0deg,
-            #4285f4,
-            #9b72cb,
-            #d96570,
-            #f9ab00,
-            #4285f4
-    );
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 1000%;
+    background: conic-gradient(from 0deg, #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4);
     transform: translate(-50%, -50%);
-    animation: flow-rotate 4s linear infinite; /* 匀速旋转 */
+    animation: flow-rotate 4s ease-in-out infinite;
     z-index: -2;
-    opacity: 0.4; /* 默认淡雅 */
+    opacity: 0.5; /* 默认淡雅 */
     filter: blur(10px); /* 柔化边缘，形成光晕感 */
     transition: opacity 0.3s ease;
 }
@@ -428,14 +422,13 @@
     .input::before {
         content: "";
         position: absolute;
-        top: 50%; left: 50%;
-        width: 200%; height: 200%; /* 移动端只要覆盖正方形区域即可 */
-        background: conic-gradient(
-                from 0deg,
-                #4285f4, #9b72cb, #d96570, #f9ab00, #4285f4
-        );
+        top: 50%;
+        left: 50%;
+        width: 100%;
+        height: 1000%; /* 移动端只要覆盖正方形区域即可 */
+        background: conic-gradient(from 0deg, #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4);
         transform: translate(-50%, -50%);
-        animation: flow-rotate 5s linear infinite;
+        animation: flow-rotate 5s ease-in-out infinite;
         z-index: -2;
         opacity: 0.5;
         filter: blur(15px); /* 移动端光晕更散一些 */
@@ -446,7 +439,7 @@
     .input::after {
         content: "";
         position: absolute;
-        inset: 1.5px; /* 边框细致一点 */
+        inset: 2px; /* 边框细致一点 */
         bottom: -50px; /* 底部不需要边框，把遮罩延伸出去 */
         background: var(--panel);
         border-radius: 23px 23px 0 0;
