@@ -58,6 +58,7 @@
     flex-grow: 1; flex-basis: 140px; /* 双列布局 */
     background: var(--bg);
     border: 1px solid var(--border);
+    border-radius: var(--radius-l);
 }
 .model-menu.mobile .model-item.active {
     background: color-mix(in srgb, var(--accent) 10%, var(--panel));

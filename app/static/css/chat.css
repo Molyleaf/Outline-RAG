@@ -87,11 +87,9 @@
     flex-shrink: 0;
 }
 .msg.user .avatar { display: none; }
+
 .msg.assistant .avatar {
-    grid-area: avatar;
-    padding: 2px;
-    box-sizing: border-box;
-    background-position: center;
+    background-size: 85%;
     background-repeat: no-repeat;
 }
 
@@ -113,11 +111,7 @@
 
 /* 气泡内容 */
 .msg .bubble-inner {
-    padding: 12px 18px;
-    border-radius: 18px;
-    background: var(--panel);
-    color: var(--text);
-    box-shadow: var(--shadow-1);
+    padding: 10px 12px 0px 12px;
     word-wrap: break-word;
     position: relative;
 }
@@ -125,7 +119,7 @@
 .msg.user .bubble-inner {
     background: var(--bubble-user);
     color: var(--text);
-    border-radius: 20px 20px 4px 20px;
+    border-radius: 20px 3px 20px 20px;
     box-shadow: none;
     line-height: 1.6;
 }
@@ -286,7 +280,7 @@
     right: 0;
     bottom: 0;
     padding: 24px 15% 30px; /* 桌面端大边距 */
-    background: linear-gradient(to top, var(--bg) 80%, transparent);
+    background: linear-gradient(to top, var(--bg) 50%, transparent);
     z-index: 20;
     display: flex;
     justify-content: center;
@@ -302,10 +296,8 @@
     border-radius: 32px; /* 大圆角 */
     background: var(--panel);
     border: 1px solid transparent;
-
     /* 发光与阴影 */
-    box-shadow: var(--input-glow);
-
+    box-shadow: 0 0 20px #747474;
     display: flex;
     align-items: flex-end;
     gap: 12px;
@@ -390,9 +382,9 @@
         padding: 12px 12px 16px 12px; /* 紧凑 */
         background: var(--panel); /* 底部实色面板 */
         border-top: 1px solid var(--border);
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
         align-items: flex-end;
         border-radius: var(--radius-l) var(--radius-l) 0 0;
+        box-shadow: 0 0 20px #747474;
     }
 
     .input-inner {
