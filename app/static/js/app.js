@@ -16,37 +16,33 @@ function appendFadeInChunk(text, container) {
     }
 }
 
-// Req 5: 溯源处理函数
 /**
- * 将 [来源 n] 文本包裹为可点击的 <a class="citation">，链接到后端提供的 URL
- * 需要从同一消息块内的 “[SourcesMap]: {...}” 提示中读取编号到 URL 的映射
- * @param {HTMLElement} element - 包含已渲染 Markdown 的 DOM 元素
+ * 增强版溯源处理函数
+ * 能处理: [来源 1]、[来源 1, 2]、[来源 1、2]、[来源 1，2]、[来源 1, 游戏背景]
+ * 以及 (参考来源 1) 等各种非标准格式
  */
 function processCitations(element) {
     if (!element) return;
 
-    // 从当前消息 DOM 中提取 SourcesMap（在同一 .bubble-inner 内部的文本里）
-    // 向上寻找最近的 .bubble-inner 作为消息作用域
     const scope = element.closest('.bubble-inner') || element;
     let sourcesMap = {};
-    // 在作用域内搜集所有文本节点，寻找 “[SourcesMap]: {...}”
     const allText = scope.innerText || '';
     const m = allText.match(/\[SourcesMap]:\s*(\{[\s\S]*?})/);
     if (m) {
-        try {
-            sourcesMap = JSON.parse(m[1]);
-        } catch (_) { /* ignore */ }
+        try { sourcesMap = JSON.parse(m[1]); } catch (_) { }
     }
 
-    // 将 [来源 n] 转为链接
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const nodesToReplace = [];
-    const citationTestRegex = /\[(来源|参考|参考资料)\s*(\d+)]/;
-    const citationSplitRegex = /(\[(?:来源|参考|参考资料)\s*\d+])/g;
+
+    // 1. 宽容的正则：匹配方括号或全角方括号内的任何内容，前提是里面至少包含 "来源"、"参考" 或数字
+    // 捕获组 1: 整个括号内容 (不含括号)
+    const looseCitationRegex = /[\[【(]\s*([^\]】)]*?(?:来源|参考|Source|\d+)[^\]】)]*?)[\]】)]/gi;
 
     while (walker.nextNode()) {
         const node = walker.currentNode;
-        if (citationTestRegex.test(node.nodeValue)) {
+        // 只有当文本节点包含类似括号的结构时才处理
+        if (looseCitationRegex.test(node.nodeValue)) {
             nodesToReplace.push(node);
         }
     }
@@ -54,60 +50,68 @@ function processCitations(element) {
     nodesToReplace.forEach(node => {
         if (!node.parentElement) return;
         const fragment = document.createDocumentFragment();
-        const parts = node.nodeValue.split(citationSplitRegex);
+        const text = node.nodeValue;
 
-        parts.forEach(part => {
-            const mm = part.match(citationTestRegex);
-            if (mm) {
-                const idx = mm[2]; // 捕获到的编号
-                const href = sourcesMap && typeof sourcesMap[idx] === 'string' ? sourcesMap[idx] : '';
-                const a = document.createElement('a');
-                a.className = 'citation';
-                a.textContent = part;
-                if (href) {
-                    a.href = href;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                    a.title = href;
+        let lastIndex = 0;
+        // 重置正则索引
+        looseCitationRegex.lastIndex = 0;
+
+        let match;
+        while ((match = looseCitationRegex.exec(text)) !== null) {
+            // 添加匹配前的普通文本
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+
+            const content = match[1]; // 括号内的内容，例如 "来源 1, 2, 游戏背景"
+
+            // 2. 从内容中提取所有数字
+            const nums = content.match(/\d+/g);
+
+            if (nums) {
+                // 过滤出有效的 source ID
+                const validNums = nums.filter(n => sourcesMap[n]);
+
+                if (validNums.length > 0) {
+                    // 为每个有效数字创建一个链接
+                    validNums.forEach(num => {
+                        const href = sourcesMap[num];
+                        const a = document.createElement('a');
+                        a.className = 'citation';
+                        a.textContent = `[来源 ${num}]`; // 强制标准化显示为 [来源 n]
+                        a.href = href;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        a.title = href;
+                        fragment.appendChild(a);
+                    });
+                } else {
+                    // 虽然匹配到了括号，但没有有效数字（可能是 [2025年]），保留原文本
+                    fragment.appendChild(document.createTextNode(match[0]));
                 }
-                fragment.appendChild(a);
-            } else if (part) {
-                fragment.appendChild(document.createTextNode(part));
+            } else {
+                // 括号里没有数字，保留原文本
+                fragment.appendChild(document.createTextNode(match[0]));
             }
-        });
+
+            lastIndex = looseCitationRegex.lastIndex;
+        }
+
+        // 添加剩余文本
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
         node.parentElement.replaceChild(fragment, node);
     });
 
-    // 清理作用域中残留的 “[SourcesMap]: {...}” 文本（不影响已生成的链接）
-    // 使用 TreeWalker 深度清理，确保 <p> 标签内的也能被移除
+    // 清理 SourcesMap JSON 文本
     const cleanupWalker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
     const nodesToClean = [];
     const mapRegex = /\[SourcesMap]:\s*\{/;
-
     while (cleanupWalker.nextNode()) {
-        const node = cleanupWalker.currentNode;
-        if (mapRegex.test(node.nodeValue)) {
-            nodesToClean.push(node);
+        if (mapRegex.test(cleanupWalker.currentNode.nodeValue)) {
+            nodesToClean.push(cleanupWalker.currentNode);
         }
     }
-
     nodesToClean.forEach(node => {
-        // 检查父元素 (通常是 <p>) 是否只包含 SourcesMap
-        if (node.parentElement) {
-            const parentText = node.parentElement.textContent || '';
-            // 如果父元素的纯文本内容以 [SourcesMap] 开头（允许前面有空格）
-            // 并且它是一个 <p> 标签，我们就直接隐藏这个 <p>
-            // (这是你请求的修复：隐藏父 <p> 标签)
-            if (node.parentElement.tagName === 'P' && parentText.trim().startsWith('[SourcesMap]:')) {
-                node.parentElement.style.display = 'none';
-            } else {
-                // 回退：如果它混合在其他内容中（不太可能），
-                // 只清理文本节点本身，并尝试旧的删除逻辑
-                node.nodeValue = node.nodeValue.replace(/\s*\[SourcesMap]:\s*\{[\s\S]*?}\s*/g, '').trimStart();
-                if (node.parentElement.tagName === 'P' && !node.parentElement.textContent.trim()) {
-                    node.parentElement.style.display = 'none';
-                }
-            }
+        if (node.parentElement && node.parentElement.tagName === 'P' && node.parentElement.textContent.trim().startsWith('[SourcesMap]:')) {
+            node.parentElement.style.display = 'none';
         }
     });
 }
