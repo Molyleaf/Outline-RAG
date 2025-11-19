@@ -111,7 +111,7 @@
 
 /* 气泡内容 */
 .msg .bubble-inner {
-    padding: 10px 12px 0px 12px;
+    padding: 10px 12px 0 12px;
     word-wrap: break-word;
     position: relative;
 }
@@ -176,14 +176,16 @@
 }
 .btn-icon svg { width: 16px; height: 16px; }
 
-/* 思考过程块 */
+/* --- 思考过程块 (Thinking Block) 优化 --- */
 .thinking-block {
     border: 1px solid var(--border);
     border-radius: 12px;
     background: color-mix(in srgb, var(--panel) 40%, var(--bg));
     margin: 12px 0;
     overflow: hidden;
+    transition: background-color 0.2s;
 }
+
 .thinking-block summary {
     padding: 10px 14px;
     font-size: 13px;
@@ -198,7 +200,17 @@
 .thinking-block summary:hover {
     background: color-mix(in srgb, var(--panel) 80%, var(--bg));
 }
-.thinking-block summary svg { width: 14px; height: 14px; color: var(--accent); }
+.thinking-block summary:active {
+    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+}
+.thinking-block summary svg {
+    width: 14px; height: 14px;
+    color: var(--accent);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* 箭头旋转动画 */
+}
+.thinking-block[open] summary svg {
+    transform: rotate(180deg);
+}
 .thinking-block summary::-webkit-details-marker, .thinking-block summary::marker { display: none; }
 
 .thinking-content {
@@ -206,6 +218,11 @@
     font-size: 14px;
     border-top: 1px solid var(--border);
     background: var(--bg);
+}
+
+/* 思考内容展开动画 */
+.thinking-block[open] .thinking-content {
+    animation: details-show 0.3s cubic-bezier(0.2, 0, 0, 1) forwards;
 }
 
 /* Markdown 内容排版 */
@@ -266,11 +283,11 @@
 }
 .md-body th { background: color-mix(in srgb, var(--panel) 95%, var(--text)); font-weight: 600; }
 
-/* 渐显动画 */
+/* 渐显动画 - 优化为 PopIn */
 .fade-in-chunk {
     display: inline;
     opacity: 0;
-    animation: geminiFadeIn 0.5s ease forwards;
+    animation: geminiPopIn 0.4s cubic-bezier(0.2, 0, 0, 1) forwards;
 }
 
 /* --- 输入区域 (Input Area) --- */
@@ -285,10 +302,11 @@
     display: flex;
     justify-content: center;
     pointer-events: none; /* 允许穿透点击 */
+    overflow: visible; /* 允许光环溢出 */
 }
 .input > * { pointer-events: auto; }
 
-/* 输入框内部容器 */
+/* 输入框内部容器 - 添加光环效果 */
 .input-inner {
     width: 100%;
     max-width: 900px; /* 限制最大宽度 */
@@ -296,27 +314,78 @@
     border-radius: 32px; /* 大圆角 */
     background: var(--panel);
     border: 1px solid transparent;
-    /* 发光与阴影 */
-    box-shadow: 0 0 20px #747474;
+    /* 调整阴影以适配光环 */
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
     display: flex;
     align-items: flex-end;
     gap: 12px;
     padding: 10px 12px 10px 24px;
     transition: box-shadow 0.3s ease, transform 0.2s ease, background-color 0.3s;
+
+    position: relative; /* 用于定位光环 */
+    z-index: 1;         /* 确保内容在光环之上 */
+    overflow: visible;
+}
+
+/* --- 彩色旋转光环 (Halo Animation) --- */
+.input-inner::before {
+    content: "";
+    position: absolute;
+    inset: -3px; /* 光环宽度 */
+    border-radius: 34px; /* 比父元素稍大 */
+    background: conic-gradient(
+            from 0deg,
+            var(--accent),
+            #9b72cb,
+            #d96570,
+            #f9ab00,
+            #1ea446,
+            var(--accent)
+    );
+    z-index: -1; /* 位于背景之下 */
+    filter: blur(10px); /* 柔化成光晕 */
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    animation: spin-gradient 4s linear infinite;
+    pointer-events: none;
+}
+
+/* 聚焦时显示光环 */
+.input-inner:focus-within::before {
+    opacity: 0.6;
 }
 
 /* 聚焦状态 */
 .input-inner:focus-within {
     background: var(--panel);
-    box-shadow: var(--input-glow-focus);
+    /* 移除旧的 focus 阴影，使用光环 */
+    box-shadow: 0 4px 24px rgba(0,0,0,0.1);
     transform: translateY(-2px);
 }
 
-/* 编辑模式高亮 */
+/* 编辑模式高亮 - 调整光环颜色 */
 .input-inner.is-editing {
-    box-shadow: 0 0 0 2px var(--accent), var(--shadow-2);
+    box-shadow: var(--shadow-2);
     background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
+.input-inner.is-editing::before {
+    background: conic-gradient(from 0deg, var(--accent) 0%, var(--panel) 50%, var(--accent) 100%);
+    opacity: 0.4;
+    animation: spin-gradient 2s linear infinite;
+}
+
+/* 深色模式下光环调整 */
+@media (prefers-color-scheme: dark) {
+    .input-inner::before { filter: blur(12px); opacity: 0; }
+    .input-inner:focus-within::before { opacity: 0.5; }
+}
+:root[data-theme="dark"] .input-inner::before {
+    filter: blur(12px); opacity: 0;
+}
+:root[data-theme="dark"] .input-inner:focus-within::before {
+    opacity: 0.5;
+}
+
 
 /* 文本框 */
 .input textarea {
@@ -369,6 +438,11 @@
     background: var(--accent) !important;
     color: white;
 }
+/* 点击反馈 */
+#send:active, #stopBtn:active {
+    transform: scale(0.9) !important;
+}
+
 #send:disabled {
     background: var(--muted) !important;
     cursor: not-allowed;
@@ -395,10 +469,17 @@
         box-shadow: none; /* 移动端扁平化 */
     }
 
+    /* 移动端光环微调 */
+    .input-inner::before {
+        inset: -2px;
+        filter: blur(6px);
+        border-radius: 26px;
+    }
+
     .input-inner:focus-within {
         background: var(--bg);
-        box-shadow: 0 0 0 2px var(--accent); /* 聚焦蓝框 */
         transform: none;
+        box-shadow: none;
     }
 
     .input textarea {

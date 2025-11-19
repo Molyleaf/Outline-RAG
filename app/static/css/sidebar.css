@@ -16,9 +16,17 @@
     gap: 8px;
 }
 
-/* 新建会话按钮 (图标+文字) */
+/* 新建会话按钮 */
 #newConv {
-    /* 具体样式在 index.html 内联或 main.css .btn 中定义，这里只做布局微调 */
+    /* 具体样式在 main.css .btn 中定义 */
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#newConv:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: var(--shadow-2);
+}
+#newConv:active {
+    transform: scale(0.97);
 }
 
 /* 会话列表 */
@@ -38,13 +46,19 @@
     color: var(--text);
     font-size: 14px;
     margin-bottom: 2px;
-    transition: background 0.1s;
+    transition: background 0.1s, transform 0.2s ease; /* 增加位移动画 */
 }
-.conv:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.conv:hover {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    transform: translateX(4px); /* 悬停右移 */
+}
 .conv.active {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     font-weight: 500;
+}
+.conv:active {
+    transform: translateX(2px);
 }
 
 .conv-title {
