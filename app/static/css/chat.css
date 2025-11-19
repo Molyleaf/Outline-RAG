@@ -226,6 +226,10 @@
     transition: opacity 0.3s ease;
 }
 
+.thinking-content > .md-body > .md-body {
+    font-size: 14px;
+}
+
 /* 展开状态 */
 .thinking-block[open] .thinking-content {
     grid-template-rows: 1fr;
@@ -374,7 +378,7 @@
     transform: translate(-50%, -50%);
     background: conic-gradient(from 0deg, transparent 0%, transparent 30%, var(--accent) 45%, #d96570 50%, #f9ab00 55%, var(--accent) 60%, transparent 70%, transparent 100%);
     z-index: -2;
-    opacity: 0.1; /* 闲置时极淡 */
+    opacity: 0.3; /* 闲置时极淡 */
     transition: opacity 0.4s ease;
     animation: spin-halo 4s linear infinite;
     pointer-events: none;
@@ -384,7 +388,7 @@
 .input-inner::after {
     content: "";
     position: absolute;
-    inset: 1.5px; /* 边框宽度 */
+    inset: 2px; /* 边框宽度 */
     border-radius: 31px;
     background: var(--panel);
     z-index: -1;
@@ -405,7 +409,7 @@
 }
 
 /* 深色模式微调 */
-:root[data-theme="dark"] .input-inner::before { filter: blur(8px); opacity: 0; }
+:root[data-theme="dark"] .input-inner::before { filter: blur(8px); opacity: 0.3; }
 :root[data-theme="dark"] .input-inner:focus-within::before { opacity: 0.6; }
 
 /* --- 移动端适配 --- */
