@@ -159,7 +159,6 @@ button { font: inherit; }
 }
 
 .btn.tonal {
-    background: color-mix(in srgb, var(--panel) 90%, var(--text));
     border-color: transparent;
     box-shadow: none;
 }

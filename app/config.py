@@ -48,15 +48,6 @@ CHAT_MODELS_JSON = """[
     "top_p": 0.7
   },
   {
-    "id": "inclusionAI/Ring-1T",
-    "name": "Ring-1T",
-    "icon": "/chat/static/img/ling.png",
-    "temp": 0.6,
-    "top_p": 0.7,
-    "beta": true,
-    "use_reasoning_parser": true
-  },
-  {
     "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
     "name": "Qwen3-Next",
     "icon": "/chat/static/img/Tongyi.svg",
