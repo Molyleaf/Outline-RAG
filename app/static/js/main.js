@@ -125,6 +125,7 @@ newConvBtn.addEventListener('click', async (e) => {
     e.preventDefault();
     currentConvId = null;
     chatEl.innerHTML = '';
+
     let greet = document.getElementById('greeting');
     if (!greet) {
         greet = document.createElement('div');
@@ -135,17 +136,26 @@ newConvBtn.addEventListener('click', async (e) => {
             '<div class="greet-sub">随时提问，或从以下示例开始</div>' +
             '<div class="greet-suggestions">' +
             '<button class="chip">总结新手教程</button>' +
-            '<button class="chip">拉汶帝国完蛋了吗</button>' +
-            '<button class="chip">开发组的烂摊子怎么样了</button>' +
+            '<button class="chip">为拉汶帝国写一段新剧情</button>' +
+            '<button class="chip">扮演艾琳与我对话</button>' +
             '</div>';
         chatEl.appendChild(greet);
-        greet.querySelectorAll('.greet-suggestions .chip').forEach(btn => {
-            btn.addEventListener('click', () => {
-                qEl.value = btn.textContent.trim();
-                qEl.focus();
-            });
+
+        // [修复] 使用事件委托绑定，确保点击生效
+        greet.addEventListener('click', (evt) => {
+            const chip = evt.target.closest('.chip');
+            if (chip) {
+                evt.preventDefault();
+                if (qEl) {
+                    qEl.value = chip.textContent.trim();
+                    qEl.focus();
+                    // 触发自动高度调整
+                    qEl.dispatchEvent(new Event('input'));
+                }
+            }
         });
     }
+
     const greetTitle = greet.querySelector('.greet-title');
     if (greetTitle) {
         const name = (userInfo?.name || userInfo?.username || '').trim();
