@@ -524,3 +524,8 @@
 }
 #send:active, #stopBtn:active { transform: scale(0.9); }
 #send:disabled { background: var(--muted) !important; cursor: not-allowed; opacity: 0.5; }
+
+/* 配合 app.js 使用，精确隐藏源数据块 */
+.source-map-hidden {
+    display: none !important;
+}
