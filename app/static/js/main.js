@@ -230,10 +230,10 @@ qEl.addEventListener('keydown', (e) => {
 
             if (modelId.includes('moonshotai')) {
                 btnElement.classList.add('moonshot-dark');
-                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:38px;height:38px;border-radius:50%;padding: 0;">';
+                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:32px;height:32px;border-radius:50%;padding: 0;">';
             } else {
                 btnElement.classList.remove('moonshot-dark');
-                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:38px;height:38px;border-radius:50%;background-color: white;padding: 3px;">';
+                iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:32px;height:32px;border-radius:50%;background-color: white;padding: 2px;">';
             }
             btnElement.innerHTML = iconHtml;
         }

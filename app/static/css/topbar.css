@@ -120,10 +120,16 @@
     color: var(--accent);
     font-weight: 600;
 }
-.model-item img { width: 24px; height: 24px; border-radius: 4px; }
+.model-item img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: white;
+    padding: 1px;
+}
 
 /* 参数滑块 */
-.param-slider { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; width: 220px; }
+.param-slider { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .param-slider label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); }
 .param-input {
     width: 50px; border: 1px solid var(--border);
