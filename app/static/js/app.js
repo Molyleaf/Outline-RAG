@@ -20,132 +20,133 @@ let currentStreamController = null; // 全局 AbortController
      * 增强版溯源处理函数
      * 能处理: [来源 1]、[来源 1, 2]、[来源 1、2]、[来源 1，2]、[来源 1, 游戏背景]
      * 以及 (参考来源 1) 等各种非标准格式
-     * 同时负责隐藏 [SourcesMap] 源数据 (使用 CSS 类名隐藏)
+     * 同时负责隐藏 [SourcesMap] 源数据
      */
     function processCitations(element) {
         if (!element) return;
 
-        const scope = element.closest('.bubble-inner') || element;
+        // 确保我们在正确的范围内查找，允许传入整个 bubble-inner
+        const scope = element.classList?.contains('bubble-inner') || element.classList?.contains('md-body')
+            ? element
+            : (element.closest('.bubble-inner') || element);
+
         let sourcesMap = {};
 
-        // --- 修复 4: 优化 SourcesMap 隐藏与解析 ---
-        // 使用 TreeWalker 查找文本节点
+        // --- 第一步：查找、解析并隐藏 SourceMap ---
+        // 使用 TreeWalker 遍历文本节点，查找 SourceMap 标记
         const mapWalker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-
-        // 使用贪婪匹配 ([\s\S]*) 尽可能捕获整个 JSON，包括嵌套结构
-        // 假设 SourcesMap 通常位于回答的末尾
-        const mapRegex = /\[SourcesMap]:\s*(\{[\s\S]*\})/;
 
         while (mapWalker.nextNode()) {
             const node = mapWalker.currentNode;
 
-            // 1. 检查是否包含 SourcesMap 标识
+            // 检查是否包含标记 (不区分是否是开头，只要包含即可)
             if (node.nodeValue.includes('[SourcesMap]:')) {
-                // 尝试解析 JSON 以供引用功能使用 (不删除文本，仅解析)
-                const match = node.nodeValue.match(mapRegex);
-                if (match) {
-                    try {
-                        const jsonStr = match[1];
-                        // 尝试解析，如果失败也无所谓，重点是隐藏
-                        const parsed = JSON.parse(jsonStr);
-                        Object.assign(sourcesMap, parsed);
-                    } catch (e) {
-                        console.warn('Failed to parse SourcesMap JSON', e);
-                    }
-                }
-
-                // 2. 核心修复：使用 CSS 隐藏容器元素
-                // 不要修改 nodeValue，这会破坏 DOM 结构或导致部分残留
                 const parent = node.parentElement;
 
-                // 只有当父元素的内容确实以 [SourcesMap]: 开头时才隐藏整个块
-                // 防止误伤包含 "[SourcesMap]:" 文本的普通句子
-                if (parent && parent.textContent.trim().startsWith('[SourcesMap]:')) {
+                if (parent) {
+                    // 1. CSS 隐藏：只要包含标记，就给父元素添加隐藏类
+                    // 这是最稳健的方法，即使 JSON 解析失败，丑陋的代码块也会被隐藏
                     parent.classList.add('source-map-hidden');
-                } else if (parent) {
-                    // 兜底：如果是内联的（不太常见），尝试给父元素加类，或者什么都不做
-                    // 对于标准 RAG 输出，通常是独立的段落 <p>[SourcesMap]: ...</p>
-                    // 如果不确定，就不隐藏，避免误伤
-                    if (parent.tagName === 'P' || parent.tagName === 'PRE' || parent.tagName === 'CODE' || parent.tagName === 'DIV') {
-                        // 再次确认内容占比较大
-                        if (parent.textContent.indexOf('[SourcesMap]:') === 0) {
-                            parent.classList.add('source-map-hidden');
+
+                    // 2. JSON 解析：尝试从父元素的完整文本中提取 JSON
+                    // 使用 parent.textContent 而不是 node.nodeValue，以防 JSON 被 split 到了相邻节点
+                    const fullText = parent.textContent;
+
+                    // 提取 [SourcesMap]: 之后的所有内容
+                    // 正则解释：匹配 [SourcesMap]: 及其后的 { ... }，允许中间有换行
+                    const jsonRegex = /\[SourcesMap]:\s*(\{[\s\S]*})/i;
+                    const match = fullText.match(jsonRegex);
+
+                    if (match && match[1]) {
+                        try {
+                            // 尝试解析 JSON
+                            const parsed = JSON.parse(match[1]);
+                            Object.assign(sourcesMap, parsed);
+                        } catch (e) {
+                            // 解析失败通常是因为流式输出还没结束，JSON 不完整
+                            // 这很正常，我们只需确保它被隐藏即可
+                            // console.warn('SourceMap JSON parse pending/failed');
                         }
                     }
                 }
             }
         }
 
-        // --- 处理引用链接 ---
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const nodesToReplace = [];
+        // --- 第二步：替换引用链接 ---
+        // 只有当成功提取到 sourcesMap 时才进行替换，避免无意义的 DOM 操作
+        if (Object.keys(sourcesMap).length > 0) {
+            const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+            const nodesToReplace = [];
 
-        // 1. 宽容的正则：匹配方括号或全角方括号内的任何内容，前提是里面至少包含 "来源"、"参考" 或数字
-        const looseCitationRegex = /[\[【(]\s*([^\]】)]*?(?:来源|参考|Source|\d+)[^\]】)]*?)[\]】)]/gi;
+            // 宽容的正则：匹配方括号或全角方括号内的任何内容
+            const looseCitationRegex = /[\[【(]\s*([^\]】)]*?(?:来源|参考|Source|\d+)[^\]】)]*?)[\]】)]/gi;
 
-        while (walker.nextNode()) {
-            const node = walker.currentNode;
-            // 忽略已经被隐藏的 SourceMap 节点中的文本
-            if (node.parentElement && node.parentElement.classList.contains('source-map-hidden')) {
-                continue;
-            }
+            while (walker.nextNode()) {
+                const node = walker.currentNode;
 
-            if (looseCitationRegex.test(node.nodeValue)) {
-                nodesToReplace.push(node);
-            }
-        }
-
-        nodesToReplace.forEach(node => {
-            if (!node.parentElement) return;
-            const fragment = document.createDocumentFragment();
-            const text = node.nodeValue;
-
-            let lastIndex = 0;
-            looseCitationRegex.lastIndex = 0;
-
-            let match;
-            while ((match = looseCitationRegex.exec(text)) !== null) {
-                // 添加匹配前的普通文本
-                fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
-
-                const content = match[1]; // 括号内的内容
-
-                // 2. 从内容中提取所有数字
-                const nums = content.match(/\d+/g);
-
-                if (nums) {
-                    // 过滤出有效的 source ID
-                    const validNums = nums.filter(n => sourcesMap[n]);
-
-                    if (validNums.length > 0) {
-                        // 为每个有效数字创建一个链接
-                        validNums.forEach(num => {
-                            const href = sourcesMap[num];
-                            const a = document.createElement('a');
-                            a.className = 'citation';
-                            a.textContent = `[来源 ${num}]`;
-                            a.href = href;
-                            a.target = '_blank';
-                            a.rel = 'noopener noreferrer';
-                            a.title = href;
-                            fragment.appendChild(a);
-                        });
-                    } else {
-                        // 虽然匹配到了括号，但没有有效数字，保留原文本
-                        fragment.appendChild(document.createTextNode(match[0]));
-                    }
-                } else {
-                    // 括号里没有数字，保留原文本
-                    fragment.appendChild(document.createTextNode(match[0]));
+                // 忽略已经被隐藏的 SourceMap 区域内的文本
+                if (node.parentElement && (
+                    node.parentElement.classList.contains('source-map-hidden') ||
+                    node.parentElement.closest('.source-map-hidden')
+                )) {
+                    continue;
                 }
 
-                lastIndex = looseCitationRegex.lastIndex;
+                if (looseCitationRegex.test(node.nodeValue)) {
+                    nodesToReplace.push(node);
+                }
             }
 
-            // 添加剩余文本
-            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
-            node.parentElement.replaceChild(fragment, node);
-        });
+            nodesToReplace.forEach(node => {
+                if (!node.parentElement) return;
+                const fragment = document.createDocumentFragment();
+                const text = node.nodeValue;
+
+                let lastIndex = 0;
+                looseCitationRegex.lastIndex = 0;
+
+                let match;
+                while ((match = looseCitationRegex.exec(text)) !== null) {
+                    // 添加匹配前的普通文本
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+
+                    const content = match[1]; // 括号内的内容
+                    const nums = content.match(/\d+/g); // 提取数字
+
+                    let hasValidLink = false;
+
+                    if (nums) {
+                        // 过滤出有效的 source ID
+                        const validNums = nums.filter(n => sourcesMap[n]);
+
+                        if (validNums.length > 0) {
+                            hasValidLink = true;
+                            validNums.forEach(num => {
+                                const href = sourcesMap[num];
+                                const a = document.createElement('a');
+                                a.className = 'citation';
+                                a.textContent = `[来源 ${num}]`;
+                                a.href = href;
+                                a.target = '_blank';
+                                a.title = href;
+                                fragment.appendChild(a);
+                            });
+                        }
+                    }
+
+                    // 如果没有匹配到任何有效链接，保留原文本
+                    if (!hasValidLink) {
+                        fragment.appendChild(document.createTextNode(match[0]));
+                    }
+
+                    lastIndex = looseCitationRegex.lastIndex;
+                }
+
+                // 添加剩余文本
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+                node.parentElement.replaceChild(fragment, node);
+            });
+        }
     }
 
 
@@ -881,7 +882,9 @@ let currentStreamController = null; // 全局 AbortController
                 currentThinkingStreamingDiv.remove();
             }
 
-            processCitations(currentStreamingDiv);
+            // --- 修复 2: 在流式输出结束后，对整个消息容器重刷引用 ---
+            // 这确保了因为流式输出而导致 SourceMap 后加载的情况下，前面的引用也能被正确替换
+            processCitations(messageContainer);
 
             if (currentThinkingMdBody) {
                 processCitations(currentThinkingMdBody);
@@ -1145,4 +1148,4 @@ let currentStreamController = null; // 全局 AbortController
                 }
             }
         });
-    }
+}

@@ -333,14 +333,14 @@
             transparent 0%,
             transparent 30%,
             var(--accent) 45%,
-            #d96570 50%,
-            #f9ab00 55%,
+            #d352e8 50%,
+            #60d1ff 55%,
             var(--accent) 60%,
             transparent 70%,
             transparent 100%
     );
     z-index: -2;
-    opacity: 0.3; /* 默认淡光 */
+    opacity: 0.5; /* 默认淡光 */
     transition: opacity 0.4s ease;
     animation: spin-halo 4s linear infinite;
     pointer-events: none;
