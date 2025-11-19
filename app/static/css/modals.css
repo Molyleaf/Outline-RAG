@@ -1,18 +1,25 @@
 /* --- 自定义移动端底部动作面板 (Action Sheet) --- */
-.mobile-sheet-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.4);
-    opacity: 0; visibility: hidden;
+.mobile-sheet-overlay
+{
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .4);
+    opacity: 0;
+    visibility: hidden;
     transition: opacity .3s ease, visibility 0s .3s;
     z-index: 200;
 }
 .mobile-sheet-overlay.visible {
-    opacity: 1; visibility: visible;
+    opacity: 1;
+    visibility: visible;
     transition: opacity .3s ease;
 }
 
 .mobile-sheet-panel {
-    position: fixed; left: 0; right: 0; bottom: 0;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: var(--panel);
     border-top: 1px solid var(--border);
     border-radius: var(--radius-l) var(--radius-l) 0 0;
@@ -21,53 +28,88 @@
     transform: translateY(100%);
     transition: transform .3s cubic-bezier(0.2, 0, 0, 1);
     max-height: 75vh;
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
 }
-.mobile-sheet-panel.visible { transform: translateY(0); }
+
+.mobile-sheet-panel.visible {
+    transform: translateY(0);
+}
 
 .mobile-sheet-header {
-    font-size: 14px; font-weight: 600; color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
     padding: 16px 20px;
     border-bottom: 1px solid var(--border);
     text-align: center;
 }
-.mobile-sheet-content {
-    overflow-y: auto; padding: 8px;
-}
-.mobile-menu-item {
-    padding: 16px 20px; font-size: 16px;
-    cursor: pointer; border-radius: var(--radius-s);
-    color: var(--text);
-}
-.mobile-menu-item:active { background: color-mix(in srgb, var(--text) 10%, transparent); }
-.mobile-menu-item.danger { color: var(--danger); }
 
-.mobile-sheet-group { padding: 8px; border-bottom: 1px solid var(--border); }
-.mobile-sheet-group:last-child { border-bottom: none; }
+.mobile-sheet-content {
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.mobile-menu-item {
+    padding: 16px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: var(--radius-s);
+    color: var(--text);
+    transition: background 0.2s;
+}
+
+.mobile-menu-item:active, .mobile-menu-item:hover {
+    background: var(--surface-hover);
+}
+
+.mobile-menu-item.danger {
+    color: var(--danger);
+}
+
+.mobile-sheet-group {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.mobile-sheet-group:last-child {
+    border-bottom: none;
+}
+
 .mobile-sheet-label {
-    font-size: 13px; font-weight: 600; color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
     padding: 8px 8px 4px;
 }
 
 /* 移动端模型网格 */
 .model-menu.mobile {
-    display: flex; flex-wrap: wrap; flex-direction: row; gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    flex-direction: row;
+    gap: 8px;
 }
+
 .model-menu.mobile .model-item {
     padding: 10px;
-    flex-grow: 1; flex-basis: 140px; /* 双列布局 */
+    flex-grow: 1;
+    flex-basis: 140px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-l);
+    border-radius: var(--radius-m);
+    transition: border-color 0.2s, background-color 0.2s;
 }
+
 .model-menu.mobile .model-item.active {
-    background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+    background: var(--accent-bg);
     border-color: var(--accent);
+    color: var(--accent);
 }
 
-/* --- Shoelace 组件全局覆盖 --- */
+/* --- Shoelace 组件深度定制 (全局覆盖) --- */
 
-/* 统一圆角与背景 */
+/* Dialog: 统一圆角与背景 */
 sl-dialog::part(panel) {
     border-radius: var(--radius-l);
     background-color: var(--panel);
@@ -75,55 +117,148 @@ sl-dialog::part(panel) {
     border: 1px solid var(--border);
     box-shadow: var(--shadow-2);
 }
+
 sl-dialog::part(header), sl-dialog::part(body), sl-dialog::part(footer) {
     background-color: transparent;
     color: var(--text);
+    padding: 16px 20px;
 }
-sl-dialog::part(header) { border-bottom-color: var(--border); }
-sl-dialog::part(title) { font-weight: 600; }
-sl-dialog::part(overlay) { background-color: rgba(0,0,0,0.4); }
 
-/* 输入框适配 */
+sl-dialog::part(header) {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+}
+
+sl-dialog::part(title) {
+    font-weight: 600;
+    font-size: 18px;
+}
+
+sl-dialog::part(close-button) {
+    color: var(--muted);
+}
+
+sl-dialog::part(close-button):hover {
+    color: var(--text);
+}
+
+sl-dialog::part(overlay) {
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+}
+
+/* Input: 输入框适配 */
 sl-input::part(base) {
     border-radius: var(--radius-s);
     background-color: var(--bg);
     border-color: var(--border);
     color: var(--text);
-}
-sl-input::part(input) { color: var(--text); }
-sl-input:focus-within::part(base) {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+    box-shadow: none;
+    height: 40px;
 }
 
-/* Toast 提示 */
+sl-input::part(input) {
+    color: var(--text);
+}
+
+sl-input:focus-within::part(base) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+/* Button: 按钮适配 */
+sl-button::part(base) {
+    border-radius: var(--radius-s);
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+/* Primary Button */
+sl-button[variant="primary"]::part(base) {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+}
+
+sl-button[variant="primary"]:hover::part(base) {
+    background-color: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+/* Neutral Button */
+sl-button[variant="neutral"]::part(base) {
+    background-color: var(--bg);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+sl-button[variant="neutral"]:hover::part(base) {
+    background-color: var(--surface-hover);
+    border-color: var(--muted);
+}
+
+/* Alert/Toast 提示 */
 sl-alert::part(base) {
     border-radius: var(--radius-m);
     box-shadow: var(--shadow-2);
     background-color: var(--panel);
     color: var(--text);
     border: 1px solid var(--border);
+    align-items: center;
 }
 
-/* 深色模式 Shoelace 覆盖 */
-:root[data-theme="dark"] sl-menu-item::part(base):hover,
-:root[data-theme="dark"] sl-menu-item::part(base):focus {
-    background-color: color-mix(in srgb, var(--text) 10%, transparent);
+sl-alert::part(icon) {
+    padding-top: 0;
+}
+
+sl-alert[variant="primary"] {
+    --sl-color-primary-600: var(--accent);
+}
+
+sl-alert[variant="success"] {
+    --sl-color-success-600: var(--success);
+}
+
+sl-alert[variant="warning"] {
+    --sl-color-warning-600: var(--warning);
+}
+
+sl-alert[variant="danger"] {
+    --sl-color-danger-600: var(--danger);
+}
+
+/* 菜单项 hover */
+sl-menu-item::part(base) {
+    color: var(--text);
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+sl-menu-item::part(base):hover,
+sl-menu-item::part(base):focus {
+    background-color: var(--surface-hover);
     color: var(--text);
 }
-:root[data-theme="dark"] sl-menu-item[checked]::part(base) {
-    background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+
+sl-menu-item[checked]::part(base) {
+    background-color: var(--accent-bg);
     color: var(--accent);
 }
 
 /* 降级 Toast 样式 (当 Shoelace 未加载时) */
 sl-alert.toast-fallback[open] {
-    position: fixed; top: 24px; right: 24px;
+    position: fixed;
+    top: 24px;
+    right: 24px;
     z-index: 999;
     max-width: 360px;
     background: var(--panel);
-    padding: 16px; border-radius: var(--radius-m);
+    padding: 12px 16px;
+    border-radius: var(--radius-m);
     box-shadow: var(--shadow-2);
     border: 1px solid var(--border);
-    display: flex; gap: 12px; align-items: center;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    animation: geminiPopIn 0.3s cubic-bezier(0.2, 0, 0, 1);
 }

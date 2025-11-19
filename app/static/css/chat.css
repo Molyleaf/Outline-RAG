@@ -30,7 +30,6 @@
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: hero-anim 2s linear infinite
 }
 .greet-sub { font-size: 16px; color: var(--muted); margin-bottom: 24px; }
 .greet-suggestions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
@@ -47,7 +46,7 @@
     transition: background 0.2s, transform 0.2s;
 }
 .chip:hover {
-    background: color-mix(in srgb, var(--panel) 95%, var(--text));
+    background: var(--surface-hover);
     transform: translateY(-1px);
 }
 
@@ -87,7 +86,6 @@
     flex-shrink: 0;
 }
 .msg.user .avatar { display: none; }
-
 .msg.assistant .avatar {
     background-size: 85%;
     background-repeat: no-repeat;
@@ -101,7 +99,7 @@
     min-width: 0;
 }
 .msg.assistant .bubble {
-    display: contents; /* 让内部元素直接参与 Grid 布局 */
+    display: contents; /* AI 消息直接使用 Grid */
 }
 .msg.user .bubble {
     max-width: 85%;
@@ -171,19 +169,18 @@
     cursor: pointer;
 }
 .btn-icon:hover {
-    background: color-mix(in srgb, var(--text) 10%, transparent);
+    background: var(--surface-hover);
     color: var(--text);
 }
 .btn-icon svg { width: 16px; height: 16px; }
 
-/* --- 思考过程块 (Thinking Block) 优化 --- */
+/* --- 思考过程块 (Thinking Block) --- */
 .thinking-block {
     border: 1px solid var(--border);
     border-radius: 12px;
-    background: color-mix(in srgb, var(--panel) 40%, var(--bg));
+    background: color-mix(in srgb, var(--panel) 60%, var(--bg));
     margin: 12px 0;
     overflow: hidden;
-    transition: background-color 0.2s;
 }
 
 .thinking-block summary {
@@ -196,42 +193,37 @@
     align-items: center;
     gap: 8px;
     user-select: none;
-    /* 移除默认 marker */
     list-style: none;
+    transition: background 0.2s;
 }
 .thinking-block summary:hover {
-    background: color-mix(in srgb, var(--panel) 80%, var(--bg));
-}
-.thinking-block summary:active {
-    background: color-mix(in srgb, var(--panel) 70%, var(--bg));
+    background: color-mix(in srgb, var(--panel) 90%, var(--text));
 }
 .thinking-block summary svg {
     width: 14px; height: 14px;
     color: var(--accent);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* 箭头旋转动画 */
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .thinking-block[open] summary svg {
     transform: rotate(180deg);
 }
 .thinking-block summary::-webkit-details-marker, .thinking-block summary::marker { display: none; }
 
-/* 修复 3: 思考内容展开动画 (使用 Grid 0fr -> 1fr) */
+/* 思考内容动画 - 使用 Grid 行高过渡实现平滑展开 */
 .thinking-content {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 0.3s ease-out;
-    font-size: 14px;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     background: var(--bg);
     border-top: 1px solid transparent;
 }
 
-/* 内部包裹层 */
 .thinking-content > .md-body {
     min-height: 0;
-    overflow: hidden;
+    overflow: hidden; /* 必须隐藏溢出才能生效 */
     padding: 0 16px;
     opacity: 0;
-    transition: opacity 0.2s ease-out;
+    transition: opacity 0.3s ease;
 }
 
 /* 展开状态 */
@@ -242,7 +234,12 @@
 .thinking-block[open] .thinking-content > .md-body {
     padding: 12px 16px;
     opacity: 1;
-    transition: opacity 0.3s ease-in 0.1s;
+}
+
+/* 隐藏 SourcesMap 源数据 */
+/* 如果后端生成的HTML包含特定包裹，或配合 app.js 隐藏 */
+.sources-map, [data-type="sources-map"] {
+    display: none !important;
 }
 
 /* Markdown 内容排版 */
@@ -256,7 +253,7 @@
 .md-body h1, .md-body h2, .md-body h3 { margin: 1.2em 0 0.6em; font-weight: 600; }
 .md-body ul, .md-body ol { padding-left: 1.2em; margin: 0.6em 0; }
 .md-body code {
-    background: color-mix(in srgb, var(--panel) 80%, var(--muted));
+    background: color-mix(in srgb, var(--panel) 85%, var(--muted));
     padding: 2px 6px;
     border-radius: 6px;
     font-family: ui-monospace, monospace;
@@ -277,7 +274,7 @@
     font-size: 0.75em;
     font-weight: 700;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    background: var(--accent-bg);
     padding: 2px 6px;
     border-radius: 6px;
     margin: 0 2px;
@@ -301,9 +298,9 @@
     padding: 10px 14px;
     text-align: left;
 }
-.md-body th { background: color-mix(in srgb, var(--panel) 95%, var(--text)); font-weight: 600; }
+.md-body th { background: var(--surface-hover); font-weight: 600; }
 
-/* 渐显动画 - 优化为 PopIn */
+/* 渐显动画 */
 .fade-in-chunk {
     display: inline;
     opacity: 0;
@@ -313,51 +310,24 @@
 /* --- 输入区域 (Input Area) --- */
 .input {
     position: fixed;
-    left: 280px; /* 避开侧边栏 */
+    left: 280px;
     right: 0;
     bottom: 0;
-    padding: 24px 15% 30px; /* 桌面端大边距 */
-    /* 背景渐变透明，不遮挡内容 */
+    padding: 24px 15% 30px;
     background: linear-gradient(to top, var(--bg) 50%, transparent);
     z-index: 20;
     display: flex;
     justify-content: center;
-    pointer-events: none; /* 允许穿透点击 */
+    pointer-events: none; /* 点击穿透 */
 }
 .input > * { pointer-events: auto; }
 
-/* --- 修复 1: 输入框流光边框 (结构重构) --- */
-.input-inner {
-    width: 100%;
-    max-width: 900px;
-    min-height: 64px;
-    border-radius: 32px;
-    /* 必须设置为 relative 以包含绝对定位的光环层 */
-    position: relative;
-    /* 必须 hidden 以裁剪光环 */
-    overflow: hidden;
-
-    background: var(--panel);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    padding: 10px 12px 10px 24px;
-    transition: transform 0.2s ease, box-shadow 0.3s;
-
-    /* 确保内容在光环层之上 */
-    z-index: 1;
-}
-
-/* 1. 旋转的锥形渐变层 (位于最底层) */
-.input-inner::before {
-    content: "";
+/* 通用光环动画定义 */
+.halo-layer {
     position: absolute;
     top: 50%; left: 50%;
-    width: 200%; height: 500%; /* 足够大覆盖旋转对角 */
+    width: 200%; height: 500%;
     transform: translate(-50%, -50%);
-
     background: conic-gradient(
             from 0deg,
             transparent 0%,
@@ -369,63 +339,137 @@
             transparent 70%,
             transparent 100%
     );
-
     z-index: -2;
-    opacity: 0;
+    opacity: 0.3; /* 默认淡光 */
     transition: opacity 0.4s ease;
     animation: spin-halo 4s linear infinite;
     pointer-events: none;
 }
 
-/* 2. 遮罩层 (位于渐变层之上，内容之下)，模拟边框内部 */
+/* --- 桌面端输入框样式 --- */
+.input-inner {
+    width: 100%;
+    max-width: 900px;
+    min-height: 64px;
+    border-radius: 32px;
+    position: relative;
+    background: var(--panel);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 10px 12px 10px 24px;
+    transition: transform 0.2s ease, box-shadow 0.3s;
+    z-index: 1;
+    /* 桌面端：光环包裹 .input-inner */
+    overflow: hidden;
+}
+
+/* 桌面端光环 */
+.input-inner::before {
+    content: "";
+    position: absolute;
+    /* 复用 halo-layer 样式 */
+    top: 50%; left: 50%; width: 200%; height: 500%;
+    transform: translate(-50%, -50%);
+    background: conic-gradient(from 0deg, transparent 0%, transparent 30%, var(--accent) 45%, #d96570 50%, #f9ab00 55%, var(--accent) 60%, transparent 70%, transparent 100%);
+    z-index: -2;
+    opacity: 0.1; /* 闲置时极淡 */
+    transition: opacity 0.4s ease;
+    animation: spin-halo 4s linear infinite;
+    pointer-events: none;
+}
+
+/* 桌面端内部遮罩 (模拟边框) */
 .input-inner::after {
     content: "";
     position: absolute;
-    inset: 2px; /* 这里的 2px 就是“光环”的宽度 */
-    border-radius: 30px; /* 比父元素略小 */
+    inset: 1.5px; /* 边框宽度 */
+    border-radius: 31px;
     background: var(--panel);
     z-index: -1;
 }
 
-@keyframes spin-halo {
-    0% { transform: translate(-50%, -50%) rotate(0deg); }
-    100% { transform: translate(-50%, -50%) rotate(360deg); }
-}
-
-/* 聚焦状态 */
-.input-inner:focus-within {
+/* 桌面端聚焦/编辑状态 */
+.input-inner:focus-within, .input-inner.is-editing {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-}
-/* 聚焦时显示光环 */
-.input-inner:focus-within::before {
-    opacity: 1;
-}
-
-/* 编辑模式高亮 */
-.input-inner.is-editing {
     box-shadow: var(--shadow-2);
 }
+.input-inner:focus-within::before, .input-inner.is-editing::before {
+    opacity: 1; /* 激活时变亮 */
+}
 .input-inner.is-editing::before {
-    /* 编辑模式下使用纯色呼吸光环 */
+    /* 编辑模式纯色呼吸 */
     background: conic-gradient(from 0deg, var(--accent), var(--panel), var(--accent));
-    opacity: 0.6;
-    animation: spin-halo 2s linear infinite;
+    animation-duration: 2s;
 }
 
-/* 深色模式下光环调整 */
-@media (prefers-color-scheme: dark) {
-    .input-inner::before { filter: blur(8px); opacity: 0; }
-    .input-inner:focus-within::before { opacity: 0.8; }
-    .input-inner::after { background: var(--panel); }
-}
-:root[data-theme="dark"] .input-inner::before {
-    filter: blur(8px); opacity: 0;
-}
-:root[data-theme="dark"] .input-inner:focus-within::before {
-    opacity: 0.8;
-}
+/* 深色模式微调 */
+:root[data-theme="dark"] .input-inner::before { filter: blur(8px); opacity: 0; }
+:root[data-theme="dark"] .input-inner:focus-within::before { opacity: 0.6; }
 
+/* --- 移动端适配 --- */
+@media (max-width: 960px) {
+    .input {
+        left: 0;
+        padding: 12px 12px 16px 12px;
+        background: var(--panel); /* 移动端底部实色背景 */
+        border-radius: var(--radius-l) var(--radius-l) 0 0;
+        align-items: flex-end;
+        pointer-events: auto;
+
+        /* 移动端核心：光环包裹外层 .input */
+        position: fixed;
+        overflow: hidden; /* 裁剪光环 */
+        z-index: 20;
+        transition: box-shadow 0.3s;
+    }
+
+    /* 移动端重置 input-inner */
+    .input-inner {
+        border-radius: 24px;
+        min-height: 50px;
+        padding: 6px 8px 6px 16px;
+        background: var(--bg); /* 输入框背景稍深 */
+        box-shadow: none;
+        transform: none !important;
+        overflow: visible; /* 取消 inner 的裁剪 */
+    }
+
+    /* 移除 inner 的光环与遮罩 */
+    .input-inner::before, .input-inner::after { display: none; }
+
+    /* 移动端添加外层光环 */
+    .input::before {
+        content: "";
+        position: absolute;
+        top: 50%; left: 50%; width: 200%; height: 500%;
+        transform: translate(-50%, -50%);
+        background: conic-gradient(from 0deg, transparent 0%, transparent 30%, var(--accent) 45%, #d96570 50%, #f9ab00 55%, var(--accent) 60%, transparent 70%, transparent 100%);
+        z-index: -2;
+        opacity: 0.1;
+        animation: spin-halo 4s linear infinite;
+        pointer-events: none;
+    }
+
+    /* 移动端激活状态 */
+    .input:focus-within::before { opacity: 1; }
+
+    /* 移动端遮罩 (遮挡光环中间部分) */
+    .input::after {
+        content: "";
+        position: absolute;
+        inset: 1px; /* 边框细一点 */
+        background: var(--panel);
+        border-radius: 23px 23px 0 0; /* 上方圆角 */
+        z-index: -1;
+    }
+
+    .input textarea { font-size: 16px; padding: 6px 0; }
+
+    #send, #stopBtn { width: 36px; height: 36px; }
+    .input .switch { display: none !important; }
+}
 
 /* 文本框 */
 .input textarea {
@@ -453,16 +497,16 @@
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     margin-bottom: 6px;
+    flex-shrink: 0;
 }
 .cancel-edit-btn:hover { filter: brightness(0.95); }
-.cancel-edit-btn svg { width: 16px; height: 16px; }
 
 /* 发送与停止按钮 */
 #send, #stopBtn {
     width: 42px; height: 42px;
     border-radius: 50% !important;
     border: none;
-    background: var(--text) !important; /* 实心黑/白 */
+    background: var(--text) !important;
     color: var(--bg);
     display: flex;
     align-items: center;
@@ -478,61 +522,5 @@
     background: var(--accent) !important;
     color: white;
 }
-/* 点击反馈 */
-#send:active, #stopBtn:active {
-    transform: scale(0.9) !important;
-}
-
-#send:disabled {
-    background: var(--muted) !important;
-    cursor: not-allowed;
-    opacity: 0.5;
-}
-
-/* 移动端适配 */
-@media (max-width: 960px) {
-    .input {
-        left: 0;
-        padding: 12px 12px 16px 12px; /* 紧凑 */
-        /* 移动端底部增加不透明背景，防止内容穿透 */
-        background: var(--panel);
-        border-top: 1px solid var(--border);
-        align-items: flex-end;
-        border-radius: var(--radius-l) var(--radius-l) 0 0;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
-    }
-
-    .input-inner {
-        border-radius: 24px;
-        min-height: 50px;
-        padding: 6px 8px 6px 16px;
-        /* 移动端输入框背景稍深一点以区分面板 */
-        background: var(--bg);
-        box-shadow: none;
-    }
-
-    .input-inner::after {
-        background: var(--bg);
-        border-radius: 22px;
-    }
-
-    /* 移动端光环微调 */
-    .input-inner::before {
-        filter: blur(5px);
-    }
-
-    .input-inner:focus-within {
-        transform: none;
-    }
-
-    .input textarea {
-        font-size: 16px; /* 避免 iOS 自动放大 */
-        padding: 6px 0;
-    }
-
-    #send, #stopBtn {
-        width: 36px; height: 36px;
-    }
-
-    .input .switch { display: none !important; }
-}
+#send:active, #stopBtn:active { transform: scale(0.9); }
+#send:disabled { background: var(--muted) !important; cursor: not-allowed; opacity: 0.5; }
