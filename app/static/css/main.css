@@ -36,6 +36,10 @@
     --radius-s: 8px;
     --radius-m: 16px;
     --radius-l: 24px;
+
+    /* 定义变量获取安全距离 */
+    --safe-top: env(safe-area-inset-top, 24px);
+    --safe-bottom: env(safe-area-inset-bottom, 24px);
 }
 
 /* 深色模式适配 */
