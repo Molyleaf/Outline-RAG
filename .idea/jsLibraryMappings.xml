@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="JavaScriptLibraryMappings">
-    <file url="file://$PROJECT_DIR$" libraries="{atom-one-dark, googlecode, highlight, light, marked.esm}" />
+    <file url="file://$PROJECT_DIR$" libraries="{atom-one-dark, auto-render, googlecode, highlight, katex, light, marked.esm}" />
   </component>
 </project>

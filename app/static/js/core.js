@@ -252,6 +252,8 @@ function renderMarkdown(md) {
     wrapper.className = 'md-body';
     wrapper.removeAttribute('style');
     wrapper.innerHTML = html;
+    // 渲染 LaTeX 公式
+    applyKaTeX(wrapper);
     if (window.hljs) {
         wrapper.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
     }
@@ -306,4 +308,20 @@ function toSameOriginUrl(c) {
         } catch (_) {}
     }
     return c?.id ? location.origin + '/chat/' + c.id : null;
+}
+
+/** KaTeX 渲染辅助函数 */
+function applyKaTeX(element) {
+    if (window.renderMathInElement) {
+        window.renderMathInElement(element, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ],
+            // 忽略渲染错误，显示原始文本而不是报错
+            throwOnError: false
+        });
+    }
 }

@@ -882,7 +882,13 @@ let currentStreamController = null; // 全局 AbortController
                 currentThinkingStreamingDiv.remove();
             }
 
-            // --- 修复 2: 在流式输出结束后，对整个消息容器重刷引用 ---
+            // 对整个消息容器进行 LaTeX 渲染
+            applyKaTeX(messageContainer);
+            if (currentThinkingMdBody) {
+                applyKaTeX(currentThinkingMdBody);
+            }
+
+            // 在流式输出结束后，对整个消息容器重刷引用
             // 这确保了因为流式输出而导致 SourceMap 后加载的情况下，前面的引用也能被正确替换
             processCitations(messageContainer);
 
