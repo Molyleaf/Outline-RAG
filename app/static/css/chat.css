@@ -376,7 +376,7 @@
     position: absolute;
     /* 边框厚度：这里控制流光的粗细 */
     inset: 2px;
-    border-radius: 30px; /* 比父级略小 */
+    border-radius: 31px; /* 比父级略小 */
     background: var(--panel);
     z-index: -1;
 }
@@ -443,7 +443,7 @@
         inset: 2px; /* 边框细致一点 */
         bottom: -50px; /* 底部不需要边框，把遮罩延伸出去 */
         background: var(--panel);
-        border-radius: 23px 23px 0 0;
+        border-radius: 31px 31px 0 0;
         z-index: -1;
     }
 
