@@ -1,4 +1,6 @@
 // app/static/js/core.js
+
+// --- 全局 DOM 元素引用 ---
 const avatar = document.getElementById('avatar');
 const menu = document.getElementById('menu');
 const chatEl = document.getElementById('chat');
@@ -12,9 +14,11 @@ const appRoot = document.querySelector('.app');
 const hamburger = document.querySelector('.topbar .hamburger');
 const sidebarVeil = document.querySelector('.sidebar-veil');
 
+// 计算输入框最大高度（屏幕 20%）
 let INPUT_MAX_PX = Math.floor(window.innerHeight * 0.2);
 const themeRadios = Array.from(document.querySelectorAll('.menu .menu-radio'));
 
+// --- 自定义移动端底部动作面板 (Action Sheet) ---
 const mobileSheetOverlay = document.createElement('div');
 mobileSheetOverlay.className = 'mobile-sheet-overlay';
 const mobileSheetPanel = document.createElement('div');
@@ -26,6 +30,9 @@ mobileSheetContent.className = 'mobile-sheet-content';
 mobileSheetPanel.append(mobileSheetHeader, mobileSheetContent);
 document.body.append(mobileSheetOverlay, mobileSheetPanel);
 
+/**
+ * 预加载 Shoelace 组件，防止网络延迟导致 UI 闪烁
+ */
 function preloadShoelaceComponents() {
     const components = ['sl-alert', 'sl-dialog', 'sl-input', 'sl-button', 'sl-icon'];
     const preloadContainer = document.createElement('div');
@@ -47,6 +54,7 @@ function preloadShoelaceComponents() {
     }
 }
 
+// --- 移动端面板控制函数 ---
 function showMobileSheet(contentHtml, label = '') {
     mobileSheetHeader.textContent = label;
     mobileSheetHeader.style.display = label ? 'block' : 'none';
@@ -61,11 +69,13 @@ function hideMobileSheet() {
 }
 mobileSheetOverlay.addEventListener('click', hideMobileSheet);
 
+// --- 全局状态变量 ---
 let MODELS = {};
 let currentModelId = localStorage.getItem('chat_model');
 let currentTemperature = 0.7;
 let currentTopP = 0.7;
 
+// 获取模型头像
 function getAvatarUrlForModel(m) {
     const defaultAvatar = '/chat/static/img/openai.svg';
     if (!m) return defaultAvatar;
@@ -83,12 +93,15 @@ function getAvatarUrlForModel(m) {
     else return defaultAvatar;
 }
 
+// 从 URL 初始化当前会话 ID
 let currentConvId = null;
 (function initConvIdFromUrl() {
     const m = location.pathname.replace(/\/+$/,'').match(/^\/chat\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$/);
     if (m) currentConvId = m[1];
 })();
 let userInfo = null;
+
+// --- UI 工具函数 (Toast, Dialog) ---
 
 function toast(message, variant = 'primary', timeout = 3000) {
     const el = document.createElement('sl-alert');
@@ -99,6 +112,7 @@ function toast(message, variant = 'primary', timeout = 3000) {
     if (typeof el.toast === 'function') {
         el.toast();
     } else {
+        // 降级处理
         el.setAttribute('open', '');
         el.classList.add('toast-fallback');
         el.style.position = 'fixed';
@@ -169,45 +183,67 @@ function promptDialog(title, defaultValue = '', { okText = '确定', cancelText 
 
 /**
  * 安全的 Markdown 解析函数
- * 防止 Markdown 引擎在解析时破坏 LaTeX 公式结构
+ * 作用：在调用 marked.parse 之前，先将 LaTeX 公式提取出来替换为纯字母占位符。
+ * 防止 Markdown 引擎破坏公式结构（例如将 _ 解析为斜体，或将 \\ 解析为转义符）。
+ * 解析完成后，再将占位符还原为原始 LaTeX 公式。
  */
 window.parseMarkdownSafe = function(md) {
     if (!md) return '';
 
     const mathMap = [];
-    // 匹配 LaTeX 公式并替换为占位符
+
+    // 正则匹配 LaTeX：
+    // 1. $$...$$ (块级)
+    // 2. \[...\] (块级)
+    // 3. \(...\) (行内)
+    // 4. $...$ (行内，排除转义的 \$)
+    // 关键：占位符 MATHMASK...ENDMASK 不包含下划线等特殊符号，Markdown 引擎会将其视为普通单词处理。
     const protectedMd = md.replace(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$[^$\n]+?(?<!\\)\$)/g, (match) => {
-        const key = `___MATH_PLACEHOLDER_${mathMap.length}___`;
+        const key = `MATHMASK${mathMap.length}ENDMASK`;
         mathMap.push({ key, content: match });
         return key;
     });
 
+    // 调用 Marked.js 进行解析
     const parse = window.marked.parse || window.marked.default?.parse;
+    // 如果 marked 未加载，则直接返回原文（避免报错）
     let html = parse ? parse(protectedMd, { breaks: true, gfm: true }) : protectedMd;
 
-    // 还原公式
+    // 还原 LaTeX 公式
     mathMap.forEach(item => {
-        html = html.replace(item.key, item.content);
+        // 使用 split/join 进行全局替换，比 replaceAll 兼容性更好，且不会解析 content 中的特殊字符
+        html = html.split(item.key).join(item.content);
     });
 
     return html;
 };
 
+/**
+ * 渲染 Markdown 的入口函数
+ * 1. 安全解析 Markdown -> HTML
+ * 2. 渲染 LaTeX (KaTeX)
+ * 3. 代码高亮 (Highlight.js)
+ */
 function renderMarkdown(md) {
+    // 使用自定义的安全解析器
     const html = window.parseMarkdownSafe(md || '');
+
     const wrapper = document.createElement('div');
     wrapper.className = 'md-body';
     wrapper.removeAttribute('style');
     wrapper.innerHTML = html;
 
+    // 渲染数学公式
     applyKaTeX(wrapper);
 
+    // 渲染代码高亮
     if (window.hljs) {
         wrapper.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
     }
     return wrapper;
 }
 
+// 简单的淡入动画
 function animateIn(el) {
     el.animate([{ transform: 'translateY(6px)', opacity: 0 }, { transform: 'translateY(0)', opacity: 1 }], {
         duration: 160,
@@ -224,6 +260,7 @@ function appendFadeInChunk(chunk, container) {
     chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+// 通用 API 请求封装
 async function api(path, opts) {
     const init = { credentials: 'include', ...(opts || {}) };
     init.headers = { 'Content-Type': 'application/json', ...(opts && opts.headers || {}) };
@@ -247,6 +284,10 @@ function toSameOriginUrl(c) {
     return c?.id ? location.origin + '/chat/' + c.id : null;
 }
 
+/**
+ * KaTeX 渲染函数
+ * 配置了常见的 LaTeX 分隔符
+ */
 function applyKaTeX(element) {
     if (window.renderMathInElement) {
         window.renderMathInElement(element, {

@@ -15,6 +15,10 @@ function appendFadeInChunk(text, container) {
     }
 }
 
+/**
+ * 引用标注处理
+ * 将 [来源 x] 文本转换为可点击的链接，并隐藏源数据
+ */
 function processCitations(element) {
     if (!element) return;
 
@@ -654,7 +658,8 @@ async function sendQuestion() {
     let thinking_has_been_collapsed = false;
 
     const triggerRegex = /(\n\n+)/;
-    // 使用 window.parseMarkdownSafe，如果 core.js 未加载则回退
+    // 使用 core.js 中定义的 window.parseMarkdownSafe
+    // 如果 core.js 未加载完成，则尝试回退到 marked.parse（但不安全）
     const safeParse = window.parseMarkdownSafe || (window.marked ? window.marked.parse : null);
 
     const finalizeStream = () => {
@@ -662,7 +667,7 @@ async function sendQuestion() {
         if (loader) loader.remove();
         messageContainer.classList.remove('streaming');
 
-        // 使用 safeParse 解析最终缓冲
+        // 结束时必须用 safeParse 解析最终缓冲
         if (safeParse && currentStreamingBuffer.trim() !== '') {
             try {
                 const finalParsedHtml = safeParse(currentStreamingBuffer);
@@ -673,6 +678,7 @@ async function sendQuestion() {
             currentStreamingDiv.remove();
         }
 
+        // 结束时思考块也必须用 safeParse
         if (safeParse && currentThinkingStreamingDiv && currentThinkingBuffer.trim() !== '') {
             try {
                 const finalParsedHtml = safeParse(currentThinkingBuffer);
@@ -783,6 +789,7 @@ async function sendQuestion() {
                                     appendFadeInChunk(textBeforeTrigger, currentThinkingStreamingDiv);
                                 }
                                 if (currentThinkingBuffer.trim() !== '') {
+                                    // [修复] 中间态渲染也强制使用 safeParse
                                     const parsedHtml = safeParse(currentThinkingBuffer);
                                     currentThinkingStreamingDiv.innerHTML = parsedHtml;
                                     if (window.hljs) currentThinkingStreamingDiv.querySelectorAll('pre code').forEach(block => { try{window.hljs.highlightElement(block)}catch(e){} });
@@ -824,6 +831,7 @@ async function sendQuestion() {
                                     appendFadeInChunk(textBeforeTrigger, currentStreamingDiv);
                                 }
                                 if (currentStreamingBuffer.trim() !== '') {
+                                    // [修复] 中间态渲染也强制使用 safeParse
                                     const parsedHtml = safeParse(currentStreamingBuffer);
                                     currentStreamingDiv.innerHTML = parsedHtml;
                                     if (window.hljs) currentStreamingDiv.querySelectorAll('pre code').forEach(block => { try{window.hljs.highlightElement(block)}catch(e){} });
