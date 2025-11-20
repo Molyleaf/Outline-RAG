@@ -638,6 +638,9 @@ async def api_ask(
                 {"cid": conv_id, "uid": user_id, "c": query}
             )
 
+    # 关键补充：将按 DESC 查询得到的 rs 反转成时间正序，供对话历史使用
+    chat_history_db = list(reversed(rs))
+
     if redis_client:
         await redis_client.delete(f"messages:{conv_id}")
 
