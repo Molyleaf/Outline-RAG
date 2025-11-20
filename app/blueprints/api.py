@@ -32,11 +32,15 @@ def get_current_user(request: Request) -> Dict[str, Any]:
     """FastAPI 依赖项：校验用户是否登录。"""
     if "user" not in request.session:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # 返回存储在 session 中的用户信息
     return request.session.get("user")
 
 # --- 依赖注入：获取数据库 Session ---
 async def get_db_session():
-    """FastAPI 依赖项：获取异步数据库 session。"""
+    """
+    FastAPI 依赖项：获取异步数据库 session。
+    每次请求都会创建独立的 AsyncSession，防止 Session 在并发请求间复用。
+    """
     async with AsyncSessionLocal() as session:
         yield session
 
@@ -350,6 +354,9 @@ async def api_ask(
     if not query or not conv_id:
         raise HTTPException(status_code=400, detail="missing query or conv_id")
 
+    # 在进入异步流程前，把 user_id 固定为局部不可变变量，避免闭包引用被“污染”
+    user_id = user["id"]
+
     try:
         await rag.initialize_rag_components()
     except Exception as e:
@@ -574,37 +581,62 @@ async def api_ask(
 
     chat_history_db = []
     async with session.begin():
-        if not (await session.execute(text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"), {"cid": conv_id, "u": user["id"]})).scalar():
+        # 权限校验：确保对话属于当前用户
+        if not (await session.execute(
+                text("SELECT 1 FROM conversations WHERE id=:cid AND user_id=:u"),
+                {"cid": conv_id, "u": user_id}
+        )).scalar():
             raise HTTPException(status_code=403, detail="无权限")
 
         rs = []
         if edit_source_message_id:
             try:
                 user_msg_id = int(edit_source_message_id)
-                owner_check = (await session.execute(text("SELECT 1 FROM messages WHERE id=:mid AND conv_id=:cid AND user_id=:uid AND role='user'"),
-                                                     {"mid": user_msg_id, "cid": conv_id, "uid": user["id"]})).scalar()
+                owner_check = (await session.execute(
+                    text(
+                        "SELECT 1 FROM messages "
+                        "WHERE id=:mid AND conv_id=:cid AND user_id=:uid AND role='user'"
+                    ),
+                    {"mid": user_msg_id, "cid": conv_id, "uid": user_id}
+                )).scalar()
                 if not owner_check:
                     raise HTTPException(status_code=403, detail="无权限编辑此消息")
 
-                await session.execute(text("DELETE FROM messages WHERE conv_id=:cid AND id > :mid"),
-                                      {"cid": conv_id, "mid": user_msg_id})
-                await session.execute(text("UPDATE messages SET content=:c, created_at=NOW() WHERE id=:mid AND conv_id=:cid"),
-                                      {"cid": conv_id, "c": query, "mid": user_msg_id})
+                await session.execute(
+                    text("DELETE FROM messages WHERE conv_id=:cid AND id > :mid"),
+                    {"cid": conv_id, "mid": user_msg_id}
+                )
+                await session.execute(
+                    text("UPDATE messages SET content=:c, created_at=NOW() "
+                         "WHERE id=:mid AND conv_id=:cid"),
+                    {"cid": conv_id, "c": query, "mid": user_msg_id}
+                )
                 rs = (await session.execute(
-                    text("SELECT role, content FROM messages WHERE conv_id=:cid AND id < :mid ORDER BY id DESC LIMIT :lim"),
+                    text(
+                        "SELECT role, content FROM messages "
+                        "WHERE conv_id=:cid AND id < :mid "
+                        "ORDER BY id DESC LIMIT :lim"
+                    ),
                     {"cid": conv_id, "mid": user_msg_id, "lim": config.MAX_HISTORY_MESSAGES}
                 )).mappings().all()
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="Invalid edit_source_message_id")
         else:
             rs = (await session.execute(
-                text("SELECT role, content FROM messages WHERE conv_id=:cid ORDER BY id DESC LIMIT :lim"),
+                text(
+                    "SELECT role, content FROM messages "
+                    "WHERE conv_id=:cid ORDER BY id DESC LIMIT :lim"
+                ),
                 {"cid": conv_id, "lim": config.MAX_HISTORY_MESSAGES}
             )).mappings().all()
-            await session.execute(text("INSERT INTO messages (conv_id, user_id, role, content) VALUES (:cid, :uid, 'user', :c)"),
-                                  {"cid": conv_id, "uid": user["id"], "c": query})
-
-        chat_history_db = reversed(rs)
+            # 插入当前用户的问题
+            await session.execute(
+                text(
+                    "INSERT INTO messages (conv_id, user_id, role, content) "
+                    "VALUES (:cid, :uid, 'user', :c)"
+                ),
+                {"cid": conv_id, "uid": user_id, "c": query}
+            )
 
     if redis_client:
         await redis_client.delete(f"messages:{conv_id}")
@@ -784,44 +816,89 @@ async def api_ask(
             if ping_task and not ping_task.done():
                 ping_task.cancel()
 
+            # 仅在 LLM 流实际启动后才尝试写入数据库
             if stream_started:
                 try:
-                    async with AsyncSessionLocal.begin() as db_session:
+                    # 使用独立、短生命周期的 AsyncSession，避免跨请求复用
+                    async with AsyncSessionLocal() as db_session:
+                        async with db_session.begin():
+                            # 再次校验 conversations 所有权，作为兜底防线
+                            owner = (await db_session.execute(
+                                text(
+                                    "SELECT 1 FROM conversations "
+                                    "WHERE id=:cid AND user_id=:uid"
+                                ),
+                                {"cid": conv_id, "uid": user_id}
+                            )).scalar()
 
-                        # 组装最终DB内容
-                        final_content_for_db = full_response # 纯 LLM 回答
+                            if not owner:
+                                logger.warning(
+                                    "[%s] 在保存助手消息时检测到会话所有权不匹配，"
+                                    "已跳过写入以防止会话混淆 (conv_id=%s, user_id=%s)。",
+                                    conv_id, conv_id, user_id
+                                )
+                                # 不写入消息，也不继续操作缓存
+                                return
 
-                        # 附加在循环中捕获的 sources_map
-                        if sources_map:
-                            try:
-                                map_str = json.dumps(sources_map, ensure_ascii=False)
-                                # 附加前端期望的魔术字符串
-                                final_content_for_db += f"\n\n[SourcesMap]: {map_str}"
-                            except Exception as json_e:
-                                logger.warning(f"[{conv_id}] Failed to serialize sources_map: {json_e}")
+                            # 组装最终 DB 内容（回答 + SourcesMap + 思考过程）
+                            final_content_for_db = full_response
 
-                        # 附加在循环中*累积*的完整思考块
-                        if thinking_response_for_db:
-                            full_content_with_thinking = f"\n{thinking_response_for_db}\n\n\n{final_content_for_db}"
-                        else:
-                            full_content_with_thinking = final_content_for_db
+                            if sources_map:
+                                try:
+                                    map_str = json.dumps(
+                                        sources_map,
+                                        ensure_ascii=False
+                                    )
+                                    final_content_for_db += f"\n\n[SourcesMap]: {map_str}"
+                                except Exception as json_e:
+                                    logger.warning(
+                                        "[%s] Failed to serialize sources_map: %s",
+                                        conv_id, json_e
+                                    )
 
-                        await db_session.execute(
-                            text("INSERT INTO messages (conv_id, user_id, role, content, model, temperature, top_p) VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"),
-                            {"cid": conv_id, "uid": user["id"], "c": full_content_with_thinking, "m": model_name, "t": temperature, "p": top_p}
-                        )
+                            if thinking_response_for_db:
+                                full_content_with_thinking = (
+                                    f"\n{thinking_response_for_db}"
+                                    f"\n\n\n{final_content_for_db}"
+                                )
+                            else:
+                                full_content_with_thinking = final_content_for_db
+
+                            await db_session.execute(
+                                text(
+                                    "INSERT INTO messages "
+                                    "(conv_id, user_id, role, content, model, temperature, top_p) "
+                                    "VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"
+                                ),
+                                {
+                                    "cid": conv_id,
+                                    "uid": user_id,
+                                    "c": full_content_with_thinking,
+                                    "m": model_name,
+                                    "t": temperature,
+                                    "p": top_p,
+                                },
+                            )
+
                     if redis_client:
                         await redis_client.delete(f"messages:{conv_id}")
                     logger.info(f"[{conv_id}] Gj (finally 块)。")
                 except Exception as db_e:
-                    logger.error(f"[{conv_id}] Gj finally 块中保存对话失败: {db_e}", exc_info=True)
+                    logger.error(
+                        "[%s] Gj finally 块中保存对话失败: %s",
+                        conv_id, db_e, exc_info=True
+                    )
             else:
                 logger.warning(f"[{conv_id}] 流未启动，未保存对话 (finally 块)。")
 
-    return StreamingResponse(generate(), media_type="text/event-stream; charset=utf-8", headers={
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no"
-    })
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # --- /api/upload ---
 @api_router.post("/api/upload")
