@@ -38,8 +38,10 @@
     --radius-l: 24px;
 
     /* 定义变量获取安全距离 */
-    --safe-top: env(safe-area-inset-top, 24px);
-    --safe-bottom: env(safe-area-inset-bottom, 24px);
+    /* 如果设备有刘海（如 47px），取 47px；如果是桌面（0px），取 24px */
+    --safe-top: max(env(safe-area-inset-top), 32px);
+    /* 同理，确保底部至少有 24px 的距离 */
+    --safe-bottom: max(env(safe-area-inset-bottom), 32px);
 }
 
 /* 深色模式适配 */
