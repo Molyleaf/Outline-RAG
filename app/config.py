@@ -2,13 +2,57 @@
 # 此文件集中管理所有从环境变量加载的配置项
 import os
 import secrets
+import tempfile
 
 # --- 基本配置 ---
 APP_NAME = os.getenv("APP_NAME", "Pigeon Chat")
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "WARN").upper()
-SECRET_KEY = secrets.token_hex(32)
+
+# --- SECRET_KEY 生成逻辑 ---
+def get_stable_secret_key():
+    """
+    获取一个在当前运行实例中稳定的 Secret Key。
+    使用原子操作解决 Gunicorn 多进程启动时的竞态条件问题。
+    """
+    # 1. 优先使用环境变量
+    if os.getenv("SECRET_KEY"):
+        return os.getenv("SECRET_KEY")
+
+    # 2. 定义临时文件路径
+    temp_dir = tempfile.gettempdir()
+    secret_file = os.path.join(temp_dir, f"{APP_NAME.replace(' ', '_')}_secret.key")
+
+    # 3. 尝试原子写入 (Atomic Write)
+    # 使用 os.open 的 O_CREAT | O_EXCL 标志确保只有一个进程能成功创建文件
+    try:
+        # 0o600 表示仅拥有者可读写，增加安全性
+        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(secrets.token_hex(32))
+    except FileExistsError:
+        # 如果捕获到此错误，说明另一个 Worker 刚刚已经创建了文件
+        # 我们只需要跳过写入，直接去读取即可
+        pass
+    except Exception:
+        # 兜底：如果发生权限等其他错误，只能返回内存随机值
+        # (这种情况下多 Worker 可能会有问题，但在标准容器内极少发生)
+        return secrets.token_hex(32)
+
+    # 4. 读取最终的密钥
+    try:
+        with open(secret_file, "r") as f:
+            key = f.read().strip()
+            if key:
+                return key
+    except Exception:
+        pass
+
+    # 5. 万一读取也失败了（极罕见），生成一个临时的
+    return secrets.token_hex(32)
+
+SECRET_KEY = get_stable_secret_key()
 
 # --- 数据库 ---
 DATABASE_URL = os.getenv("DATABASE_URL")
