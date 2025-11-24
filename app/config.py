@@ -10,27 +10,7 @@ PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "WARN").upper()
 
-# --- 密钥管理 (修改部分) ---
-# 锁定密钥文件位置到 /tmp/pigeon.key (内存文件系统，容器重启即丢失)
-SECRET_KEY_FILE = "/tmp/pigeon.key"
-
-def get_secret_key():
-    """
-    获取 Secret Key。
-    逻辑：只负责读取。
-    (生成动作交给 Docker CMD 在启动 uvicorn 之前完成，确保原子性)
-    """
-    # 尝试读取已存在的文件 (由启动命令生成)
-    try:
-        if os.path.exists(SECRET_KEY_FILE):
-            with open(SECRET_KEY_FILE, "r") as f:
-                key = f.read().strip()
-                if key:
-                    return key
-    except Exception:
-        pass
-
-SECRET_KEY = get_secret_key()
+SECRET_KEY = os.getenv("SECRET_KEY")
 # -----------------------------------
 
 # --- 数据库 ---

@@ -126,6 +126,15 @@ COPY --from=builder --chown=1001:1001 /app /app/
 RUN mkdir -p /app/data/attachments /app/data/archive \
     && chown -R 1001:1001 /app
 
+COPY app/entrypoint.sh /entrypoint.sh
+
+# 2. 赋予执行权限 (非常重要)
+RUN chmod +x /entrypoint.sh
+
+# 3. 设置入口点
+# 容器启动时，首先执行这个脚本
+ENTRYPOINT ["/entrypoint.sh"]
+
 # 切换到非 root 用户来运行应用
 USER 1001:1001
 
