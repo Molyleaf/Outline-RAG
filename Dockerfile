@@ -118,27 +118,16 @@ COPY --from=runtime_builder /home/outline/.local /home/outline/.local
 ENV PATH="/home/outline/.local/bin:${PATH}"
 
 USER root
-# (*** 已修改 ***) 从 'builder' 复制 *已构建好的* 应用代码
+# 从 'builder' 复制已构建好的应用代码
 COPY --from=builder --chown=1001:1001 /app /app/
 
-# (*** 已修改 ***)
 # 创建可持久化目录并授权
 RUN mkdir -p /app/data/attachments /app/data/archive \
     && chown -R 1001:1001 /app
-
-COPY app/entrypoint.sh /entrypoint.sh
-
-# 2. 赋予执行权限 (非常重要)
-RUN chmod +x /entrypoint.sh
-
-# 3. 设置入口点
-# 容器启动时，首先执行这个脚本
-ENTRYPOINT ["/entrypoint.sh"]
 
 # 切换到非 root 用户来运行应用
 USER 1001:1001
 
 EXPOSE 8080
 
-# (ASYNC REFACTOR) 使用 uvicorn 启动 main:app
-CMD ["/bin/sh", "-c", "python3 -c 'import secrets; open(\"/tmp/pigeon.key\", \"w\").write(secrets.token_hex(32))' && uvicorn --host 0.0.0.0 --port 8080 --workers 2 main:app"]
+CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "main:app"]
