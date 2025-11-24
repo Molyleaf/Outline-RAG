@@ -109,30 +109,39 @@
     color: var(--text);
 }
 
-/* 会话操作弹窗 */
-.sidebar .conv .conv-menu-pop {
-    position: absolute; right: 8px; top: 36px;
-    background: var(--panel); border: 1px solid var(--border);
-    box-shadow: var(--shadow-2); z-index: 10; border-radius: var(--radius-s);
-    visibility: hidden; opacity: 0;
+/* 会话操作弹窗：改为全局浮层，由 JS 定位到标题右下角 */
+.conv-menu-pop {
+    position: absolute;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    z-index: 200; /* 高于侧栏和聊天区的普通内容 */
+    border-radius: var(--radius-s);
+    visibility: hidden;
+    opacity: 0;
     transform: scale(0.95) translate(-5px, -5px);
     transform-origin: top left;
-    transition: all 0.15s ease;
+    transition: opacity 0.15s ease, transform 0.15s ease;
     min-width: 140px;
     padding: 4px;
-    /* 确保弹层本身始终可交互 */
     pointer-events: none;
 }
-.sidebar .conv .conv-menu-pop.visible {
-    visibility: visible; opacity: 1; transform: scale(1) translate(0, 0);
+.conv-menu-pop.visible {
+    visibility: visible;
+    opacity: 1;
+    transform: scale(1) translate(0, 0);
     pointer-events: auto;
 }
-.sidebar .conv .conv-menu-pop > div {
-    padding: 8px 12px; cursor: pointer;
-    border-radius: 4px; font-size: 13px;
-}
-.sidebar .conv .conv-menu-pop > div:hover { background: color-mix(in srgb, var(--bg) 90%, var(--text)); }
 
+.conv-menu-pop > div {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.conv-menu-pop > div:hover {
+    background: color-mix(in srgb, var(--bg) 90%, var(--text));
+}
 
 /* 移动端抽屉样式 */
 .app .sidebar-veil { display: none; }
@@ -148,23 +157,10 @@
         box-shadow: none;
         border-right: none;
     }
-    .app.sidebar-open .sidebar {
-        transform: translateX(0);
-        box-shadow: var(--shadow-2);
-    }
-    .app .sidebar-veil {
-        display: block;
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,.4);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity .3s;
-        z-index: 99;
-    }
+    /* ... existing code ... */
     .app.sidebar-open .sidebar-veil {
         opacity: 1; pointer-events: auto;
     }
-    /* 移动端仍然隐藏右侧菜单按钮，继续使用长按 Action Sheet 逻辑 */
+    /* 移动端仍然隐藏右侧菜单按钮，长按唤起 Action Sheet */
     .sidebar .conv .conv-menu { display: none; }
 }

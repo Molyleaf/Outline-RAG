@@ -164,7 +164,6 @@ async function loadConvs() {
         // 使用 Shoelace 重绘菜单按钮
         const menuBtn = document.createElement('sl-icon-button');
         menuBtn.className = 'conv-menu';
-        // 使用 Shoelace 默认 icon 名称，可根据自己引入的图标库调整
         menuBtn.setAttribute('name', 'three-dots-vertical');
         menuBtn.setAttribute('label', '更多操作');
         menuBtn.setAttribute('variant', 'text');
@@ -178,6 +177,9 @@ async function loadConvs() {
 
         rowMenu.appendChild(rename);
         rowMenu.appendChild(del);
+
+        // 记录关联的按钮，方便全局点击关闭时判断
+        rowMenu.__ownerButton = menuBtn;
 
         row.addEventListener('click', (e) => {
             if (menuBtn.contains(e.target) || rowMenu.contains(e.target)) return;
@@ -197,9 +199,10 @@ async function loadConvs() {
             if (e.key === 'Enter') { e.preventDefault(); row.click(); }
         });
 
-        // 简化的菜单点击逻辑，不再处理行内表单
+        // 菜单按钮：挂载到 body，并定位到标题右下角
         menuBtn.onclick = (e) => {
             e.stopPropagation();
+
             const wasVisible = rowMenu.classList.contains('visible');
 
             // 关闭所有已打开的菜单
@@ -207,9 +210,46 @@ async function loadConvs() {
                 p.classList.remove('visible');
             });
 
-            if (!wasVisible) {
-                rowMenu.classList.add('visible');
+            if (wasVisible) return;
+
+            // 首次使用时，将菜单挂到 body 上
+            if (!rowMenu.__attachedToBody) {
+                document.body.appendChild(rowMenu);
+                rowMenu.__attachedToBody = true;
             }
+
+            // 先让菜单可见（但不可见于眼睛）以获得尺寸
+            rowMenu.style.visibility = 'hidden';
+            rowMenu.style.opacity = '0';
+            rowMenu.style.transform = 'scale(1) translate(0,0)';
+            rowMenu.classList.add('visible');
+
+            // 计算标题位置，定位菜单到标题右下角
+            const titleRect = titleEl.getBoundingClientRect();
+            const menuRect = rowMenu.getBoundingClientRect();
+
+            let top = titleRect.bottom + 4 + window.scrollY;
+            let left = titleRect.right - menuRect.width + window.scrollX;
+
+            // 防止右侧溢出视口
+            const maxLeft = window.scrollX + window.innerWidth - menuRect.width - 8;
+            if (left > maxLeft) left = maxLeft;
+            if (left < window.scrollX + 8) left = window.scrollX + 8;
+
+            // 防止底部溢出视口：必要时翻转到标题上方
+            const bottom = top + menuRect.height;
+            const viewportBottom = window.scrollY + window.innerHeight;
+            if (bottom > viewportBottom - 8) {
+                top = titleRect.top - menuRect.height - 4 + window.scrollY;
+            }
+
+            rowMenu.style.top = `${top}px`;
+            rowMenu.style.left = `${left}px`;
+
+            // 恢复正常可见状态
+            rowMenu.style.visibility = '';
+            rowMenu.style.opacity = '';
+            rowMenu.style.transform = '';
         };
 
         // 重命名逻辑：使用全局 Shoelace Dialog
@@ -268,23 +308,18 @@ async function loadConvs() {
             document.addEventListener('click', (e) => {
                 const pops = document.querySelectorAll('.conv-menu-pop');
                 pops.forEach(pop => {
-                    const parent = pop.parentElement;
-                    const btn = parent?.querySelector('.conv-menu');
-                    if (pop.classList.contains('visible')
-                        && !pop.contains(e.target)
-                        && e.target !== btn
-                        && !btn?.contains(e.target)
-                    ) {
-                        pop.classList.remove('visible');
-                    }
+                    const btn = pop.__ownerButton;
+                    if (!pop.classList.contains('visible')) return;
+                    if (pop.contains(e.target)) return;
+                    if (btn && (btn === e.target || btn.contains(e.target))) return;
+                    pop.classList.remove('visible');
                 });
             });
             document.__convMenuCloserBound__ = true;
         }
 
-        // 关键：调整顺序，使 .conv-menu-pop 在 .conv-menu 之前
+        // 现在 row 里只放标题和按钮，菜单浮到 body
         row.appendChild(titleEl);
-        row.appendChild(rowMenu);
         row.appendChild(menuBtn);
 
         let touchTimer = null;

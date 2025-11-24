@@ -130,4 +130,4 @@ USER 1001:1001
 
 EXPOSE 8080
 
-CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "main:app"]
+CMD ["/app/entrypoint.sh"]
