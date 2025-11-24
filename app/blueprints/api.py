@@ -29,9 +29,8 @@ api_router = APIRouter()
 
 # --- 常量定义 ---
 NO_CACHE_HEADERS = {
-    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Cache-Control": "no-cache",
     "Pragma": "no-cache",
-    "Expires": "0",
 }
 
 # --- 依赖注入：用户认证 ---
@@ -147,27 +146,15 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
         return []
 
 # --- utils ---
-# --- utils ---
 def allowed_file(filename):
     """检查文件名后缀是否在允许列表中。"""
     return "." in filename and \
         filename.rsplit(".", 1)[1].lower() in config.ALLOWED_FILE_EXTENSIONS
+
 @api_router.get("/api/me")
-async def api_me(request: Request):
-    """
-    返回当前登录用户信息和可用模型列表。
-    重要变更：
-    - 不再使用强制认证依赖 `Depends(get_current_user)`。
-    - 如果未登录，则返回 {"user": null, "models": {}}，而不是 401。
-    这样可以避免前端在 /api/me 上因为 401 进入无限重定向登录的循环。
-    """
-    user = request.session.get("user")  # 可能为 None
-    user_id = user.get("id") if user else None
-    auth_user_ids = set(
-        uid.strip()
-        for uid in config.BETA_AUTHORIZED_USER_IDS.split(",")
-        if uid.strip()
-    )
+async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
+    user_id = user.get("id")
+    auth_user_ids = set(uid.strip() for uid in config.BETA_AUTHORIZED_USER_IDS.split(",") if uid.strip())
 
     try:
         all_models = json.loads(config.CHAT_MODELS_JSON)
@@ -178,22 +165,15 @@ async def api_me(request: Request):
     available_models = []
     for model in all_models:
         is_beta = model.get("beta", False)
-        # 未登录用户：只看到非 beta 模型
-        if not is_beta:
-            available_models.append(model)
-        # 已登录用户：根据白名单控制 beta 模型
-        elif user_id and user_id in auth_user_ids:
+        if not is_beta or (is_beta and user_id in auth_user_ids):
             available_models.append(model)
 
     models_dict = {model["id"]: model for model in available_models}
 
-    return JSONResponse(
-        {
-            "user": user,        # 未登录时为 None
-            "models": models_dict
-        },
-        headers=NO_CACHE_HEADERS
-    )
+    return JSONResponse({
+        "user": user,
+        "models": models_dict
+    }, headers=NO_CACHE_HEADERS)
 
 # Pydantic 模型
 class ConversationCreate(BaseModel):
