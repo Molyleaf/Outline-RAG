@@ -198,5 +198,11 @@ async def oidc_callback(request: Request, state: str = None, code: str = None, c
 
 @auth_router.get("/logout")
 async def logout(request: Request):
+    # 清空服务端 session 数据
     request.session.clear()
-    return RedirectResponse("/chat")
+    # 使用 303 明确告知客户端接下来用 GET 访问 /chat
+    response = RedirectResponse("/chat", status_code=303)
+    # 显式删除 session cookie，确保浏览器不再携带旧会话
+    # 默认 SessionMiddleware 的 cookie 名通常是 "session"，路径为 "/"
+    response.delete_cookie(key="session", path="/")
+    return response
