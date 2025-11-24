@@ -156,13 +156,18 @@ async function loadConvs() {
         row.className = 'conv' + (String(c.id) === String(currentConvId) ? ' active' : '');
         row.tabIndex = 0;
         row.dataset.id = c.id;
+
         const titleEl = document.createElement('span');
         titleEl.className = 'conv-title';
         titleEl.textContent = c.title || ('会话 ' + (c.id || '').slice(0,8));
 
-        const menuBtn = document.createElement('button');
+        // 使用 Shoelace 重绘菜单按钮
+        const menuBtn = document.createElement('sl-icon-button');
         menuBtn.className = 'conv-menu';
-        menuBtn.textContent = '⋯';
+        // 使用 Shoelace 默认 icon 名称，可根据自己引入的图标库调整
+        menuBtn.setAttribute('name', 'three-dots-vertical');
+        menuBtn.setAttribute('label', '更多操作');
+        menuBtn.setAttribute('variant', 'text');
 
         const rowMenu = document.createElement('div');
         rowMenu.className = 'conv-menu-pop';
@@ -265,7 +270,11 @@ async function loadConvs() {
                 pops.forEach(pop => {
                     const parent = pop.parentElement;
                     const btn = parent?.querySelector('.conv-menu');
-                    if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
+                    if (pop.classList.contains('visible')
+                        && !pop.contains(e.target)
+                        && e.target !== btn
+                        && !btn?.contains(e.target)
+                    ) {
                         pop.classList.remove('visible');
                     }
                 });
@@ -273,9 +282,10 @@ async function loadConvs() {
             document.__convMenuCloserBound__ = true;
         }
 
+        // 关键：调整顺序，使 .conv-menu-pop 在 .conv-menu 之前
         row.appendChild(titleEl);
-        row.appendChild(menuBtn);
         row.appendChild(rowMenu);
+        row.appendChild(menuBtn);
 
         let touchTimer = null;
         row.addEventListener('touchstart', (e) => {
@@ -292,7 +302,6 @@ async function loadConvs() {
                 if (renameBtn) {
                     renameBtn.onclick = () => {
                         hideMobileSheet();
-                        // 移动端也复用同样的 logic，promptDialog 已经在 mobile 里使用
                         (async () => {
                             const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
                             if (val == null) return;

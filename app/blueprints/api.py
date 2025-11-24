@@ -29,9 +29,13 @@ api_router = APIRouter()
 
 # --- 常量定义 ---
 NO_CACHE_HEADERS = {
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
+    "Expires": "0",
+    "Vary": "Cookie, Authorization",
 }
+# 完全禁止中间层缓存 /api/me、/api/conversations 之类的用户敏感接口
+# 让代理按照 Cookie/Authorization 维度区分缓存，避免未登录状态的 401 响应被复用
 
 # --- 依赖注入：用户认证 ---
 def get_current_user(request: Request) -> Dict[str, Any]:

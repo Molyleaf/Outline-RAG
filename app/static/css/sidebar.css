@@ -71,14 +71,43 @@
 /* 会话菜单按钮 */
 .sidebar .conv { position: relative; }
 .sidebar .conv .conv-menu {
-    visibility: hidden;
-    border: none; background: transparent;
-    cursor: pointer; color: var(--muted);
-    padding: 4px; border-radius: 4px;
-    display: flex; align-items: center;
+    /* 改为使用透明度 + pointer-events，避免 hover 抢占交互 */
+    opacity: 0;
+    pointer-events: none;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-.sidebar .conv:hover .conv-menu { visibility: visible; }
-.sidebar .conv .conv-menu:hover { background: rgba(0,0,0,0.1); color: var(--text); }
+
+/* 悬停整行时显示按钮 */
+.sidebar .conv:hover .conv-menu {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* 弹窗打开时，即便不 hover 也保持按钮可见 */
+.sidebar .conv .conv-menu-pop.visible ~ .conv-menu {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* 针对 Shoelace sl-icon-button 的基座样式 */
+.sidebar .conv .conv-menu::part(base) {
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--muted);
+}
+.sidebar .conv .conv-menu:hover::part(base) {
+    background: rgba(0,0,0,0.06);
+    color: var(--text);
+}
 
 /* 会话操作弹窗 */
 .sidebar .conv .conv-menu-pop {
@@ -91,9 +120,12 @@
     transition: all 0.15s ease;
     min-width: 140px;
     padding: 4px;
+    /* 确保弹层本身始终可交互 */
+    pointer-events: none;
 }
 .sidebar .conv .conv-menu-pop.visible {
     visibility: visible; opacity: 1; transform: scale(1) translate(0, 0);
+    pointer-events: auto;
 }
 .sidebar .conv .conv-menu-pop > div {
     padding: 8px 12px; cursor: pointer;
@@ -101,10 +133,6 @@
 }
 .sidebar .conv .conv-menu-pop > div:hover { background: color-mix(in srgb, var(--bg) 90%, var(--text)); }
 
-/* * 移除：行内重命名输入框相关样式
- * .conv-pop-input-group, .conv-pop-actions, .conv-pop-confirm-text
- * 这些样式不再需要，因为现在使用 Shoelace 的全局 Dialog
- */
 
 /* 移动端抽屉样式 */
 .app .sidebar-veil { display: none; }
@@ -137,5 +165,6 @@
     .app.sidebar-open .sidebar-veil {
         opacity: 1; pointer-events: auto;
     }
+    /* 移动端仍然隐藏右侧菜单按钮，继续使用长按 Action Sheet 逻辑 */
     .sidebar .conv .conv-menu { display: none; }
 }

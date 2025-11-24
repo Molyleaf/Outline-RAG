@@ -1,8 +1,6 @@
 # app/config.py
 # 此文件集中管理所有从环境变量加载的配置项
 import os
-import secrets
-import tempfile
 
 # --- 基本配置 ---
 APP_NAME = os.getenv("APP_NAME", "Pigeon Chat")
