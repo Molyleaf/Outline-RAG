@@ -101,25 +101,10 @@
 }
 .sidebar .conv .conv-menu-pop > div:hover { background: color-mix(in srgb, var(--bg) 90%, var(--text)); }
 
-/* 重命名输入框 */
-.sidebar .conv .conv-menu-pop .conv-pop-input-group {
-    padding: 8px; display: flex; flex-direction: column; gap: 8px;
-}
-.sidebar .conv .conv-menu-pop input {
-    width: 100%; padding: 6px;
-    border: 1px solid var(--accent); border-radius: 4px;
-    background: var(--bg); color: var(--text);
-    font-size: 13px; outline: none;
-}
-.sidebar .conv .conv-menu-pop .conv-pop-actions {
-    display: flex; justify-content: flex-end; gap: 6px;
-}
-.sidebar .conv .conv-menu-pop .conv-pop-actions button {
-    padding: 4px 8px; font-size: 12px; height: auto;
-}
-.sidebar .conv .conv-menu-pop .conv-pop-actions button.primary {
-    background: var(--accent); color: white; border: none;
-}
+/* * 移除：行内重命名输入框相关样式
+ * .conv-pop-input-group, .conv-pop-actions, .conv-pop-confirm-text
+ * 这些样式不再需要，因为现在使用 Shoelace 的全局 Dialog
+ */
 
 /* 移动端抽屉样式 */
 .app .sidebar-veil { display: none; }

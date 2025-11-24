@@ -192,96 +192,73 @@ async function loadConvs() {
             if (e.key === 'Enter') { e.preventDefault(); row.click(); }
         });
 
+        // 简化的菜单点击逻辑，不再处理行内表单
         menuBtn.onclick = (e) => {
             e.stopPropagation();
-            const wasOpen = rowMenu.classList.contains('visible');
-            const isCustomState = rowMenu.querySelector('.conv-pop-input-group') || rowMenu.querySelector('.conv-pop-confirm-text');
+            const wasVisible = rowMenu.classList.contains('visible');
+
+            // 关闭所有已打开的菜单
             document.querySelectorAll('.conv-menu-pop.visible').forEach(p => {
-                if (p !== rowMenu) {
-                    p.classList.remove('visible');
-                    const otherRename = p.querySelector('[data-action="rename"]');
-                    const otherDel = p.querySelector('[data-action="delete"]');
-                    if (otherRename && otherDel) {
-                        p.innerHTML = '';
-                        p.appendChild(otherRename);
-                        p.appendChild(otherDel);
-                    }
-                }
+                p.classList.remove('visible');
             });
-            rowMenu.innerHTML = '';
-            rowMenu.appendChild(rename);
-            rowMenu.appendChild(del);
-            if (!wasOpen || isCustomState) rowMenu.classList.add('visible');
-            else rowMenu.classList.remove('visible');
+
+            if (!wasVisible) {
+                rowMenu.classList.add('visible');
+            }
         };
 
+        // 重命名逻辑：使用全局 Shoelace Dialog
         rename.onclick = async (e) => {
             e.stopPropagation();
-            const oldTitle = titleEl.textContent;
-            rowMenu.innerHTML =
-                '<div class="conv-pop-input-group">' +
-                '<input type="text" value="' + oldTitle.replace(/"/g, '&quot;') + '">' +
-                '<div class="conv-pop-actions">' +
-                '<button class="cancel">取消</button>' +
-                '<button class="primary ok">确定</button>' +
-                '</div>' +
-                '</div>';
-            const input = rowMenu.querySelector('input');
-            input.focus();
-            input.select();
-            rowMenu.querySelector('.cancel').onclick = (e) => { e.stopPropagation(); rowMenu.classList.remove('visible'); };
-            const handleRename = async () => {
-                const val = input.value;
-                const t = val.trim();
-                if (!t) { toast('标题不能为空', 'warning'); return; }
-                if (t === oldTitle) { rowMenu.classList.remove('visible'); return; }
-                const res = await api(`/chat/api/conversations/${c.id}/rename`, {
-                    method: 'POST',
-                    body: JSON.stringify({ title: t })
-                });
-                if (res && (res.ok === true || res.status === 'ok' || res.httpOk === true)) {
-                    await loadConvs();
-                    toast('已重命名', 'success');
-                } else {
-                    toast(res?.error || '重命名失败', 'danger');
-                }
-                rowMenu.classList.remove('visible');
-            };
-            rowMenu.querySelector('.ok').onclick = (e) => { e.stopPropagation(); handleRename(); };
-            input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleRename(); } };
+            rowMenu.classList.remove('visible'); // 立即关闭小菜单
+
+            const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
+            if (val === null) return; // 用户取消
+
+            const t = val.trim();
+            if (!t) { toast('标题不能为空', 'warning'); return; }
+            if (t === titleEl.textContent) return; // 未修改
+
+            const res = await api(`/chat/api/conversations/${c.id}/rename`, {
+                method: 'POST',
+                body: JSON.stringify({ title: t })
+            });
+            if (res && (res.ok === true || res.status === 'ok' || res.httpOk === true)) {
+                await loadConvs();
+                toast('已重命名', 'success');
+            } else {
+                toast(res?.error || '重命名失败', 'danger');
+            }
         };
 
+        // 删除逻辑：使用全局 Shoelace Dialog
         del.onclick = async (e) => {
             e.stopPropagation();
-            rowMenu.innerHTML =
-                '<div class="conv-pop-confirm-text">确定删除该会话？</div>' +
-                '<div class="conv-pop-actions">' +
-                '<button class="cancel">取消</button>' +
-                '<button class="primary delete">删除</button>' +
-                '</div>';
-            rowMenu.querySelector('.cancel').onclick = (e) => { e.stopPropagation(); rowMenu.classList.remove('visible'); };
-            rowMenu.querySelector('.delete').onclick = async (e) => {
-                e.stopPropagation();
-                const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
-                if (res && (res.ok === true || res.status === 'ok' || res.httpOk === true)) {
-                    if (String(currentConvId) === String(c.id)) {
-                        currentConvId = null; chatEl.innerHTML = '';
-                        try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
-                        document.getElementById('greeting')?.remove();
-                        loadMessages();
-                    }
-                    await loadConvs();
-                    toast('已删除', 'success');
-                } else {
-                    toast(res?.error || '删除失败', 'danger');
+            rowMenu.classList.remove('visible'); // 立即关闭小菜单
+
+            const ok = await confirmDialog('确定删除该会话？此操作不可恢复。', { okText: '删除', cancelText: '取消' });
+            if (!ok) return;
+
+            const res = await api(`/chat/api/conversations/${c.id}/delete`, { method: 'POST' });
+            if (res && (res.ok === true || res.status === 'ok' || res.httpOk === true)) {
+                if (String(currentConvId) === String(c.id)) {
+                    currentConvId = null;
+                    chatEl.innerHTML = '';
+                    try { history.replaceState(null, '', '/chat'); } catch(_) { location.href = '/chat'; return; }
+                    document.getElementById('greeting')?.remove();
+                    loadMessages();
                 }
-                rowMenu.classList.remove('visible');
-            };
+                await loadConvs();
+                toast('已删除', 'success');
+            } else {
+                toast(res?.error || '删除失败', 'danger');
+            }
         };
 
         rename.dataset.action = 'rename';
         del.dataset.action = 'delete';
 
+        // 注册全局点击关闭菜单（仅需执行一次）
         if (!document.__convMenuCloserBound__) {
             document.addEventListener('click', (e) => {
                 const pops = document.querySelectorAll('.conv-menu-pop');
@@ -290,13 +267,6 @@ async function loadConvs() {
                     const btn = parent?.querySelector('.conv-menu');
                     if (pop.classList.contains('visible') && !pop.contains(e.target) && e.target !== btn) {
                         pop.classList.remove('visible');
-                        const renameTpl = pop.querySelector('[data-action="rename"]');
-                        const delTpl = pop.querySelector('[data-action="delete"]');
-                        if(renameTpl && delTpl) {
-                            pop.innerHTML = '';
-                            pop.appendChild(renameTpl);
-                            pop.appendChild(delTpl);
-                        }
                     }
                 });
             });
@@ -322,6 +292,7 @@ async function loadConvs() {
                 if (renameBtn) {
                     renameBtn.onclick = () => {
                         hideMobileSheet();
+                        // 移动端也复用同样的 logic，promptDialog 已经在 mobile 里使用
                         (async () => {
                             const val = await promptDialog('重命名会话', titleEl.textContent, { placeholder: '请输入新标题' });
                             if (val == null) return;

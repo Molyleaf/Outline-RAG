@@ -27,6 +27,13 @@ from werkzeug.utils import secure_filename
 logger = logging.getLogger(__name__)
 api_router = APIRouter()
 
+# --- 常量定义 ---
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 # --- 依赖注入：用户认证 ---
 def get_current_user(request: Request) -> Dict[str, Any]:
     """FastAPI 依赖项：校验用户是否登录。"""
@@ -167,7 +174,7 @@ async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
     return JSONResponse({
         "user": user,
         "models": models_dict
-    })
+    }, headers=NO_CACHE_HEADERS)
 
 # Pydantic 模型
 class ConversationCreate(BaseModel):
@@ -207,7 +214,10 @@ async def api_get_conversations(
         )).mappings().all()
 
     items = [{"id": r["id"], "title": r["title"], "created_at": r['created_at'].isoformat(), "url": f"/chat/{r['id']}"} for r in rs]
-    return JSONResponse({"items": items, "total": total, "page": page, "page_size": page_size})
+    return JSONResponse(
+        {"items": items, "total": total, "page": page, "page_size": page_size},
+        headers=NO_CACHE_HEADERS
+    )
 
 
 @api_router.post("/api/conversations")
@@ -317,7 +327,11 @@ async def api_messages(
         cached_data = await redis_client.get(cache_key)
         if cached_data:
             # 用户已通过权限检查，可以安全返回缓存数据
-            return Response(content=cached_data, media_type='application/json')
+            return Response(
+                content=cached_data,
+                media_type='application/json',
+                headers=NO_CACHE_HEADERS
+            )
 
     # --- 第三步：缓存未命中，从数据库获取 ---
     # (我们不再需要在这里重复 session.begin() 或权限检查)
@@ -336,7 +350,11 @@ async def api_messages(
         # (确保对话ID和用户ID都经过了验证)
         await redis_client.set(cache_key, response_json)
 
-    return Response(content=response_json, media_type='application/json')
+    return Response(
+        content=response_json,
+        media_type='application/json',
+        headers=NO_CACHE_HEADERS
+    )
 
 
 @api_router.post("/api/ask")
@@ -948,14 +966,17 @@ async def update_all(_user: Dict[str, Any] = Depends(get_current_user)):
 @api_router.get("/api/refresh/status")
 async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)):
     if not redis_client:
-        return JSONResponse({"status": "disabled", "message": "Redis not configured"})
+        return JSONResponse(
+            {"status": "disabled", "message": "Redis not configured"},
+            headers=NO_CACHE_HEADERS
+        )
 
     status_json = await redis_client.get("refresh:status")
     if status_json:
-        return JSONResponse(json.loads(status_json))
+        return JSONResponse(json.loads(status_json), headers=NO_CACHE_HEADERS)
 
     if not await redis_client.get("refresh:lock"):
-        return JSONResponse({"status": "idle", "message": "空闲"})
+        return JSONResponse({"status": "idle", "message": "空闲"}, headers=NO_CACHE_HEADERS)
 
     try:
         counts = await redis_client.mget([
@@ -977,13 +998,13 @@ async def refresh_status(_user: Dict[str, Any] = Depends(get_current_user)):
             p.delete("refresh:lock", "refresh:total_queued", "refresh:success_count", "refresh:skipped_count")
             await p.execute()
 
-            return JSONResponse(status)
+            return JSONResponse(status, headers=NO_CACHE_HEADERS)
         else:
             progress_msg = f"刷新中... ({processed_count}/{total_queued})"
-            return JSONResponse({"status": "running", "message": progress_msg})
+            return JSONResponse({"status": "running", "message": progress_msg}, headers=NO_CACHE_HEADERS)
 
     except (ValueError, TypeError):
-        return JSONResponse({"status": "running", "message": "正在计算..."})
+        return JSONResponse({"status": "running", "message": "正在计算..."}, headers=NO_CACHE_HEADERS)
 
 # --- /update/webhook ---
 @api_router.post("/update/webhook")
