@@ -131,6 +131,5 @@ USER 1001:1001
 
 EXPOSE 8080
 
-# (*** 已修改 ***)
 # (ASYNC REFACTOR) 使用 uvicorn 启动 main:app
-CMD ["uvicorn", "--host", "0.0.0.0", "--port", "8080", "--workers", "2", "main:app"]
+CMD ["/bin/sh", "-c", "python3 -c 'import secrets; open(\"/tmp/pigeon.key\", \"w\").write(secrets.token_hex(32))' && uvicorn --host 0.0.0.0 --port 8080 --workers 2 main:app"]

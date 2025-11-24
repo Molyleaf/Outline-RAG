@@ -10,49 +10,28 @@ PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "WARN").upper()
 
-# --- SECRET_KEY 生成逻辑 ---
-def get_stable_secret_key():
+# --- 密钥管理 (修改部分) ---
+# 锁定密钥文件位置到 /tmp/pigeon.key (内存文件系统，容器重启即丢失)
+SECRET_KEY_FILE = "/tmp/pigeon.key"
+
+def get_secret_key():
     """
-    获取一个在当前运行实例中稳定的 Secret Key。
-    使用原子操作解决 Gunicorn 多进程启动时的竞态条件问题。
+    获取 Secret Key。
+    逻辑：只负责读取。
+    (生成动作交给 Docker CMD 在启动 uvicorn 之前完成，确保原子性)
     """
-    # 1. 优先使用环境变量
-    if os.getenv("SECRET_KEY"):
-        return os.getenv("SECRET_KEY")
-
-    # 2. 定义临时文件路径
-    temp_dir = tempfile.gettempdir()
-    secret_file = os.path.join(temp_dir, f"{APP_NAME.replace(' ', '_')}_secret.key")
-
-    # 3. 尝试原子写入 (Atomic Write)
-    # 使用 os.open 的 O_CREAT | O_EXCL 标志确保只有一个进程能成功创建文件
+    # 尝试读取已存在的文件 (由启动命令生成)
     try:
-        # 0o600 表示仅拥有者可读写，增加安全性
-        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            f.write(secrets.token_hex(32))
-    except FileExistsError:
-        # 如果捕获到此错误，说明另一个 Worker 刚刚已经创建了文件
-        # 我们只需要跳过写入，直接去读取即可
-        pass
-    except Exception:
-        # 兜底：如果发生权限等其他错误，只能返回内存随机值
-        # (这种情况下多 Worker 可能会有问题，但在标准容器内极少发生)
-        return secrets.token_hex(32)
-
-    # 4. 读取最终的密钥
-    try:
-        with open(secret_file, "r") as f:
-            key = f.read().strip()
-            if key:
-                return key
+        if os.path.exists(SECRET_KEY_FILE):
+            with open(SECRET_KEY_FILE, "r") as f:
+                key = f.read().strip()
+                if key:
+                    return key
     except Exception:
         pass
 
-    # 5. 万一读取也失败了（极罕见），生成一个临时的
-    return secrets.token_hex(32)
-
-SECRET_KEY = get_stable_secret_key()
+SECRET_KEY = get_secret_key()
+# -----------------------------------
 
 # --- 数据库 ---
 DATABASE_URL = os.getenv("DATABASE_URL")
