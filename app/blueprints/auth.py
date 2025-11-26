@@ -174,14 +174,16 @@ async def oidc_callback(request: Request, state: str = None, code: str = None, c
     finally:
         await client.aclose()
 
-    request.session.pop("oidc_state", None)
-    request.session.pop("oidc_state_exp", None)
-    request.session.pop("code_verifier", None)
+    # 这里不再逐个 pop，而是整体清空旧会话，避免沿用旧的 session 内容，
+    # 并强制生成一个新的 session 标识，从而让浏览器拿到一个“全新”的 Cookie。
+    request.session.clear()
 
     user_id = idp.get("sub")
     name = idp.get("name") or idp.get("preferred_username") or "user"
     avatar_url = idp.get("picture")
 
+    # 为每次登录生成一个随机的会话 nonce，确保 Cookie 在“退出并重新登录”后必然变化
+    request.session["sid"] = secrets.token_urlsafe(16)
     request.session["user"] = {"id": user_id, "name": name, "avatar_url": avatar_url}
 
     try:
