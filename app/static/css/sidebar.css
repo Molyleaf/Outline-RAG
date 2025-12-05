@@ -8,6 +8,11 @@
     overflow: hidden;
 }
 
+/* 全局：遮罩在桌面端默认隐藏 */
+.app .sidebar-veil {
+    display: none;
+}
+
 .titlebar {
     display: flex;
     align-items: center;
@@ -144,23 +149,46 @@
 }
 
 /* 移动端抽屉样式 */
-.app .sidebar-veil { display: none; }
 @media (max-width: 960px) {
     .app { grid-template-columns: 1fr; }
+
     .sidebar {
         position: fixed;
         inset: 0 auto 0 0;
-        width: 80%; max-width: 300px;
+        width: 80%;
+        max-width: 300px;
         transform: translateX(-102%);
         transition: transform .3s cubic-bezier(0.4, 0, 0.2, 1);
         z-index: 100;
         box-shadow: none;
         border-right: none;
     }
-    /* ... existing code ... */
-    .app.sidebar-open .sidebar-veil {
-        opacity: 1; pointer-events: auto;
+
+    /* 在 sidebar-open 时拉出侧边栏 */
+    .app.sidebar-open .sidebar {
+        transform: translateX(0);
+        box-shadow: 0 0 20px rgba(0, 0, 0, .25);
+        border-right: 1px solid var(--border);
     }
+
+    /* 移动端遮罩基础样式 */
+    .app .sidebar-veil {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, .4);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .3s ease;
+        z-index: 90;
+    }
+
+    /* 打开侧栏时，启用遮罩点击与可见性 */
+    .app.sidebar-open .sidebar-veil {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
     /* 移动端仍然隐藏右侧菜单按钮，长按唤起 Action Sheet */
     .sidebar .conv .conv-menu { display: none; }
 }
