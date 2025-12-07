@@ -7,9 +7,7 @@ APP_NAME = os.getenv("APP_NAME", "Pigeon Chat")
 PORT = int(os.getenv("PORT", "8080"))
 VECTOR_DIM = int(os.getenv("VECTOR_DIM", "1024"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "WARN").upper()
-
 SECRET_KEY = os.getenv("SECRET_KEY")
-# -----------------------------------
 
 # --- 数据库 ---
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -34,8 +32,8 @@ BASE_CHAT_MODEL = os.getenv("BASE_CHAT_MODEL", "Qwen/Qwen3-Next-80B-A3B-Instruct
 # 模型列表配置
 CHAT_MODELS_JSON = """[
   {
-    "id": "deepseek-ai/DeepSeek-V3.2-Exp",
-    "name": "Deepseek V3.2",
+    "id": "deepseek-ai/DeepSeek-V3.2",
+    "name": "DeepSeek V3.2",
     "icon": "/chat/static/img/DeepSeek.svg",
     "temp": 0.7,
     "top_p": 0.7,
@@ -198,6 +196,7 @@ DEFAULT_CLASSIFIER_PROMPT_TEMPLATE = f"""
 * **示例 1 (歧义分析):**
     * **历史:** (空)
     * **问题:** "总结这个游戏的内容。"
+    * **问题:** "这是个什么网站？"
     * **输出 (json):**
       {{{{
         "knowledge_base_relevance": "High",
