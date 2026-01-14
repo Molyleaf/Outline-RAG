@@ -420,7 +420,6 @@ async def api_ask(
         "model": model_id, # 使用模型 ID
         "temperature": temperature,
         "top_p": top_p,
-        "streaming": True
     }
 
     # 1. (控制解析) 如果 'use_reasoning_parser' 为 true，添加 stream_options
@@ -449,7 +448,6 @@ async def api_ask(
         "model": config.BASE_CHAT_MODEL,
         "temperature": 0.0,
         "top_p": 1.0,
-        "streaming": False,
         "response_format": {"type": "json_object"}
     }
     # 辅助任务总是使用标准的、非思考的 llm 实例
@@ -462,7 +460,6 @@ async def api_ask(
         "model": config.BASE_CHAT_MODEL,
         "temperature": 0.0,
         "top_p": 1.0,
-        "streaming": False,
     }
     # 辅助任务总是使用标准的、非思考的 llm 实例
     rewriter_llm = llm.bind(**rewriter_params)

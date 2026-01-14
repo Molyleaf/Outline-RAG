@@ -5,330 +5,142 @@
     background: var(--bg);
 }
 
-@media (max-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
-@media (max-width: 960px)  {
-    .chat {
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-bottom: 120px;
-    }
-}
+/* 兼容超宽屏 */
+@media (min-width: 1280px) { .chat { padding-left: 8%; padding-right: 8%; } }
+@media (min-width: 1440px) { .chat { padding-left: 12%; padding-right: 12%; } }
 
-/* 欢迎/问候语 */
-.greeting {
-    max-width: 720px;
-    margin: 10vh auto 4vh;
-    color: var(--text);
-    text-align: center;
-}
-.greet-title {
-    font-size: 32px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin-bottom: 12px;
-    background: linear-gradient(90deg, #4285f4, #9b72cb, #d96570);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-}
-.greet-sub { font-size: 16px; color: var(--muted); margin-bottom: 24px; }
-.greet-suggestions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-
-/* 建议 Chip */
-.chip {
-    border: 1px solid var(--border);
-    background: var(--panel);
-    color: var(--text);
-    padding: 8px 16px;
-    border-radius: 12px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background 0.2s, transform 0.2s;
-}
-.chip:hover {
-    background: var(--surface-hover);
-    transform: translateY(-1px);
-}
-
-/* 消息行布局 */
-.msg {
-    margin: 24px 0;
-    display: grid;
-    gap: 16px;
-    align-items: flex-start;
-    max-width: 100%;
-}
-
-/* AI 消息布局 */
-.msg.assistant {
-    display: grid;
-    grid-template-columns: 32px 1fr;
-    grid-template-rows: auto 1fr;
-    grid-template-areas: "avatar meta" "content content";
-    row-gap: 4px;
-    column-gap: 16px;
+/* --- 消息气泡区 --- */
+.message {
     max-width: 900px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-/* 用户消息布局 */
-.msg.user {
-    grid-template-columns: 1fr;
-    justify-items: end;
-}
-
-/* 头像 */
-.msg .avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    background-size: cover;
-    flex-shrink: 0;
-    user-select: none;
-}
-.msg.user .avatar { display: none; }
-.msg.assistant .avatar {
-    background-size: 85%;
-    background-repeat: no-repeat;
-}
-
-/* 气泡容器 */
-.msg .bubble {
+    margin: 0 auto 14px auto;
     display: flex;
-    flex-direction: column;
-    max-width: 100%;
+    gap: 10px;
+    align-items: flex-start;
+    animation: geminiPopIn .25s var(--ease) both;
+}
+
+.message .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    background: var(--panel);
+    flex: 0 0 auto;
+}
+
+.message .bubble {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 12px 14px;
+    box-shadow: var(--shadow-sm);
+    line-height: 1.55;
+    color: var(--text);
+    flex: 1 1 auto;
     min-width: 0;
 }
-.msg.assistant .bubble {
-    display: contents; /* AI 消息直接使用 Grid */
+
+.message.user {
+    justify-content: flex-end;
 }
-.msg.user .bubble {
-    max-width: 85%;
-    align-items: flex-end;
-    position: relative;
+.message.user .bubble {
+    background: rgba(26,115,232,0.10);
+    border-color: rgba(26,115,232,0.15);
 }
 
-/* 气泡内容 */
-.msg .bubble-inner {
-    padding: 10px 12px 0 12px;
-    word-wrap: break-word;
-    position: relative;
+/* 代码块 */
+.bubble pre {
+    margin: 10px 0 0;
+    padding: 12px 12px;
+    border-radius: 14px;
+    background: rgba(0,0,0,0.06);
+    overflow: auto;
 }
+:root[data-theme="dark"] .bubble pre { background: rgba(255,255,255,0.06); }
+.bubble code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-.msg.user .bubble-inner {
-    background: var(--bubble-user);
-    color: var(--text);
-    border-radius: 20px 3px 20px 20px;
-    box-shadow: none;
-    line-height: 1.6;
-}
-
-.msg.assistant .bubble-inner {
-    grid-area: content;
-    background: transparent;
-    padding: 0;
-    box-shadow: none;
-    border-radius: 0;
-    border: none;
-}
-
-/* 消息元数据 */
-.msg.assistant .msg-meta {
-    grid-area: meta;
-    font-size: 12px;
-    color: var(--muted);
-    align-self: center;
-}
-
-/* 消息操作栏 */
-.bubble-actions {
-    position: absolute;
-    bottom: -36px;
-    right: 0;
-    display: flex;
-    gap: 6px;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    z-index: 1;
-}
-.msg.assistant .bubble-inner .bubble-actions {
-    top: -36px;
-    bottom: auto;
-}
-.msg:hover .bubble-actions, .bubble-actions:hover { opacity: 1; }
-
-/* 操作按钮 */
-.btn-icon {
-    width: 30px; height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    background: transparent;
-    border: none;
-    color: var(--muted);
-    cursor: pointer;
-}
-.btn-icon:hover {
-    background: var(--surface-hover);
-    color: var(--text);
-}
-.btn-icon svg { width: 16px; height: 16px; }
-
-/* --- 思考过程块 (Thinking Block) --- */
+/* --- thinking-block --- */
 .thinking-block {
+    margin-top: 8px;
     border: 1px solid var(--border);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--panel) 60%, var(--bg));
-    margin: 12px 0;
+    border-radius: 14px;
     overflow: hidden;
+    background: rgba(0,0,0,0.02);
 }
-
+:root[data-theme="dark"] .thinking-block { background: rgba(255,255,255,0.03); }
 .thinking-block summary {
-    padding: 10px 14px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--muted);
+    list-style: none;
     cursor: pointer;
+    padding: 10px 12px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    font-weight: 600;
+    color: var(--muted);
     user-select: none;
-    list-style: none;
-    transition: background 0.2s;
+    transition: background .2s var(--ease);
 }
-.thinking-block summary:hover {
-    background: color-mix(in srgb, var(--panel) 90%, var(--text));
-}
+.thinking-block summary:hover { background: rgba(0,0,0,0.03); }
+:root[data-theme="dark"] .thinking-block summary:hover { background: rgba(255,255,255,0.04); }
+
 .thinking-block summary svg {
-    width: 14px; height: 14px;
-    color: var(--accent);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform .2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .thinking-block[open] summary svg {
     transform: rotate(180deg);
 }
 .thinking-block summary::-webkit-details-marker, .thinking-block summary::marker { display: none; }
 
-/* 思考内容动画 - 使用 Grid 行高过渡实现平滑展开 */
-.thinking-content {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    background: var(--bg);
-    border-top: 1px solid transparent;
-}
-
-.thinking-content > .md-body {
-    min-height: 0;
-    overflow: hidden; /* 必须隐藏溢出才能生效 */
-    padding: 0 16px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.thinking-content > .md-body > .md-body {
-    font-size: 14px;
-}
-
-/* 展开状态 */
-.thinking-block[open] .thinking-content {
-    grid-template-rows: 1fr;
-    border-top-color: var(--border);
-}
-.thinking-block[open] .thinking-content > .md-body {
-    padding: 12px 16px;
-    opacity: 1;
-}
-
-/* 隐藏 SourcesMap 源数据 */
-/* 如果后端生成的HTML包含特定包裹，或配合 app.js 隐藏 */
-.sources-map, [data-type="sources-map"] {
-    display: none !important;
-}
-
-/* Markdown 内容排版 */
-.md-body {
-    line-height: 1.7;
-    font-size: 16px;
+.thinking-block .content {
+    padding: 10px 12px 12px;
     color: var(--text);
-    word-wrap: break-word;
-}
-.md-body p { margin: 0 0 12px 0; }
-.md-body h1, .md-body h2, .md-body h3 { margin: 1.2em 0 0.6em; font-weight: 600; }
-.md-body ul, .md-body ol { padding-left: 1.2em; margin: 0.6em 0; }
-.md-body code {
-    background: color-mix(in srgb, var(--panel) 85%, var(--muted));
-    padding: 2px 6px;
-    border-radius: 6px;
-    font-family: ui-monospace, monospace;
-    font-size: 0.9em;
-}
-.md-body pre {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-    overflow: auto;
-    margin: 12px 0;
-}
-.md-body pre code { background: transparent; padding: 0; border: none; }
-
-/* 引用链接 */
-.citation {
-    font-size: 0.75em;
-    font-weight: 700;
-    color: var(--accent);
-    background: var(--accent-bg);
-    padding: 2px 6px;
-    border-radius: 6px;
-    margin: 0 2px;
-    vertical-align: super;
-    text-decoration: none;
-    transition: background 0.2s;
-}
-.citation:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
-
-/* 表格 */
-.md-body table {
-    border-collapse: collapse;
-    margin: 1em 0;
-    width: 100%;
-    overflow: hidden;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-}
-.md-body th, .md-body td {
-    border: 1px solid var(--border);
-    padding: 10px 14px;
-    text-align: left;
-}
-.md-body th { background: var(--surface-hover); font-weight: 600; }
-
-/* 渐显动画 */
-.fade-in-chunk {
-    display: inline;
-    opacity: 0;
-    animation: geminiPopIn 0.4s cubic-bezier(0.2, 0, 0, 1) forwards;
+    border-top: 1px solid var(--border);
 }
 
-/* --- 输入区域 (Input Area) --- */
+/* --- 移动端整体 padding 调整 --- */
+@media (max-width: 960px) {
+    .chat { padding-left: 12px; padding-right: 12px; padding-bottom: 160px; }
+    .message { max-width: 100%; }
+}
+
+/* --- 输入区域容器（悬浮） --- */
 .input {
     position: fixed;
-    left: 280px;
+    left: 0;
     right: 0;
-    bottom: 0;
-    padding: 24px 15% 30px;
-    /* 底部背景渐变，防止遮挡内容时太生硬 */
-    background: linear-gradient(to top, var(--bg) 60%, transparent);
-    z-index: 20;
+    bottom: 18px;
+    z-index: 80;
     display: flex;
     justify-content: center;
-    pointer-events: none;
+    pointer-events: none; /* 仅内部可交互 */
 }
-.input > * { pointer-events: auto; }
 
-/* 定义水平流动动画：背景位置从左向右移动 */
+/* 输入框内层 */
+.input-inner {
+    pointer-events: auto;
+    position: relative;
+    width: 100%;
+    max-width: 900px;
+    min-height: 62px;
+    padding: 10px 56px 10px 18px;
+    border-radius: 33px;
+
+    /* 真实边框（底层流光由 ::before 提供） */
+    border: 1px solid rgba(0,0,0,0.06);
+    background: transparent;
+
+    /* 玻璃拟态 */
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    background: var(--glass);
+    box-shadow: var(--shadow-md);
+
+    transition: transform .2s var(--ease), box-shadow .2s var(--ease), border-color .2s var(--ease);
+}
+
+/* 定义水平流动动画：背景位置从左向右移动（无缝） */
 @keyframes flow-horizontal {
     0% { background-position: 0 50%; }
     100% { background-position: 200% 50%; }
@@ -338,22 +150,10 @@
 .input-inner {
     width: 100%;
     max-width: 900px;
-    min-height: 64px;
-    border-radius: 32px;
-    position: relative;
-    background: var(--panel);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    padding: 10px 12px 10px 24px;
-    transition: transform 0.2s ease, box-shadow 0.3s;
-    z-index: 1;
-    /* 关键：隐藏溢出，将光环限制在边框内 */
-    overflow: hidden;
+    min-height: 62px;
 }
 
-/* 桌面端：流光层 - 改为水平线性渐变 */
+/* 输入框：水平无限流光渐变层 */
 .input-inner::before {
     content: "";
     position: absolute;
@@ -383,23 +183,17 @@
     transform: none;
 }
 
-/* 桌面端交互状态：聚焦或编辑时 */
-.input-inner:focus-within::before, .input-inner.is-editing::before {
+/* 聚焦时变亮 */
+.input-inner:focus-within::before { opacity: 0.8; }
+
+/* 编辑态：更亮 + 更清晰 + 更快 */
+.input-inner.is-editing::before {
     opacity: 0.8; /* 变亮 */
     filter: blur(6px); /* 聚焦时轮廓稍微清晰一点 */
     animation-duration: 1.5s; /* 流速加快 */
 }
 
-/* 编辑模式下的特殊配色 */
-.input-inner.is-editing::before {
-    background: linear-gradient(
-            90deg,
-            var(--accent), var(--panel), var(--accent), var(--panel), var(--accent)
-    );
-    background-size: 200% 100%;
-}
-
-/* 桌面端：内部遮罩 (形成边框效果) */
+/* 遮罩层：只露出边缘流光 */
 .input-inner::after {
     content: "";
     position: absolute;
@@ -410,34 +204,53 @@
     z-index: -1;
 }
 
-/* 桌面端交互状态 */
-.input-inner:focus-within, .input-inner.is-editing {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(66, 133, 244, 0.15); /* 激活时增加外阴影 */
+/* 文本输入 */
+#prompt {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.5;
+    padding: 8px 0;
 }
 
-/* 深色模式微调 */
-:root[data-theme="dark"] .input-inner { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
-:root[data-theme="dark"] .input-inner::before { opacity: 0.5; filter: blur(12px); }
-:root[data-theme="dark"] .input-inner:focus-within::before { opacity: 0.8; }
+/* 发送/停止按钮 */
+#send, #stopBtn {
+    position: absolute;
+    right: 12px;
+    bottom: 50%;
+    transform: translateY(50%);
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: transform .15s var(--ease), background .2s var(--ease);
+}
+#send:hover, #stopBtn:hover { background: var(--surface-hover); }
+#send:active, #stopBtn:active { transform: translateY(50%) scale(0.92); }
 
-/* --- 移动端适配 --- */
+/* --- 移动端输入框 --- */
 @media (max-width: 960px) {
     .input {
-        left: 0;
-        padding: 12px 12px 16px 12px;
-        /* 移动端移除渐变背景，改用实体面板色，因为要做外发光 */
-        background: var(--panel);
-        border-radius: var(--safe-bottom);
-        align-items: flex-end;
-        pointer-events: auto;
-        position: fixed;
-        z-index: 20;
-        /* 移动端光环包裹在 .input 外层 */
-        overflow: hidden;
+        padding: 0 12px;
+        bottom: 14px;
     }
 
-    /* 移动端：流光层适配 */
+    .input-inner {
+        max-width: 100%;
+        min-height: 56px;
+        padding: 10px 54px 10px 16px;
+        border-radius: 28px;
+    }
+
+    /* 移动端：流光放在外层 .input 上（覆盖整个输入区域） */
     .input::before {
         content: "";
         position: absolute;
@@ -457,91 +270,15 @@
         transition: opacity 0.3s;
     }
 
-    /* 移动端：遮罩层 (遮住中间，露出顶部边框) */
-    .input::after {
-        content: "";
-        position: absolute;
-        inset: 2px; /* 边框细致一点 */
-        bottom: -50px; /* 底部不需要边框，把遮罩延伸出去 */
-        background: var(--panel);
-        border-radius: 31px 31px 0 0;
-        z-index: -1;
-    }
-
     .input:focus-within::before {
         opacity: 1;
     }
 
-    /* 重置 input-inner 样式为透明容器 */
-    .input-inner {
-        border-radius: 24px;
-        min-height: 50px;
-        padding: 6px 8px 6px 16px;
-        background: var(--bg); /* 输入框内部深色一点 */
-        box-shadow: none;
-        transform: none !important;
-        overflow: visible;
-        width: 100%;
-    }
-
-    /* 移除桌面端专用的伪元素 */
+    /* 移动端禁用桌面端伪元素，避免叠加 */
     .input-inner::before, .input-inner::after { display: none; }
-
-    .input textarea { font-size: 16px; padding: 6px 0; }
-    #send, #stopBtn { width: 36px; height: 36px; }
-    .input .switch { display: none !important; }
 }
 
-/* --- 通用控件样式 (保持不变) --- */
-.input textarea {
-    flex: 1;
-    height: 28px;
-    max-height: 35vh;
-    resize: none;
-    border: none;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-size: 17px;
-    line-height: 1.6;
-    padding: 8px 0;
-    font-family: inherit;
-}
-
-.cancel-edit-btn {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    border: 1px solid var(--danger-border);
-    color: var(--danger);
-    background: var(--danger-bg);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    margin-bottom: 6px;
-    flex-shrink: 0;
-}
-.cancel-edit-btn:hover { filter: brightness(0.95); }
-
-#send, #stopBtn {
-    width: 42px; height: 42px;
-    border-radius: 50% !important;
-    border: none;
-    background: var(--text) !important;
-    color: var(--bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: transform 0.2s, background 0.2s;
-    margin-bottom: 2px;
-    flex-shrink: 0;
-    box-shadow: none !important;
-}
-#send:hover, #stopBtn:hover {
-    transform: scale(1.05);
-    background: var(--accent) !important;
-    color: white;
-}
-#send:active, #stopBtn:active { transform: scale(0.9); }
+/* --- 禁用态 --- */
 #send:disabled { background: var(--muted) !important; cursor: not-allowed; opacity: 0.5; }
 
 .source-map-hidden { display: none !important; }

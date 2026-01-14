@@ -38,7 +38,7 @@ USER 1001:1001
 ENV PATH="/home/outline/.local/bin:${PATH}"
 
 # 安装 Python 依赖（作为非 root 用户）
-RUN pip config set global.index-url https://mirrors.pku.edu.cn/pypi/simple/ \
+RUN pip config set global.index-url https://mirrors.zju.edu.cn/pypi/web/simple/ \
     && pip install --no-cache-dir --user -r requirements.txt
 
 COPY --chown=1001:1001 app/. /app/
@@ -72,7 +72,7 @@ USER 1001:1001
 ENV PATH="/home/outline/.local/bin:${PATH}"
 
 # (*** 已修改 ***) 只安装 *运行时* 依赖
-RUN pip config set global.index-url https://mirrors.pku.edu.cn/pypi/simple/ \
+RUN pip config set global.index-url https://mirrors.zju.edu.cn/pypi/web/simple/ \
     && pip install --no-cache-dir --user -r requirements-runtime.txt
 
 
