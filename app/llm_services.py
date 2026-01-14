@@ -1,25 +1,64 @@
+"""Shared LLM/Embedding services.
+
+Target versions:
+
+* langchain==1.2.3 / langchain-core==1.2.7
+* langchain-classic==1.0.1 (legacy modules moved here)
+* langchain-siliconflow==1.0.0
+
+Migration notes:
+* CacheBackedEmbeddings moved from `langchain.embeddings.cache`
+  -> `langchain_classic.embeddings.cache`
+* Some retriever/storage utilities moved into `langchain_classic`.
+"""
+
 # app/llm_services.py
 import hashlib
 import logging
+import os
 from typing import Sequence, Any, List, Tuple
 
 import httpx
 import tiktoken
 from httpx import Response
 from httpx_retries import RetryTransport, Retry
-from langchain.embeddings.cache import CacheBackedEmbeddings
+
+try:
+    # LangChain v1+ (preferred)
+    from langchain_classic.embeddings.cache import CacheBackedEmbeddings
+except Exception:  # pragma: no cover
+    # Backward compat (older projects)
+    from langchain.embeddings.cache import CacheBackedEmbeddings  # type: ignore
 from langchain_community.cache import AsyncRedisCache
 from langchain_community.storage.sql import SQLStore, LangchainKeyValueStores
 from langchain_core.documents import BaseDocumentCompressor
 from langchain_core.documents import Document
-from langchain_siliconflow.chat_models import ChatSiliconFlow
-from langchain_siliconflow.embeddings import SiliconFlowEmbeddings
+from langchain_core.globals import set_llm_cache
+from langchain_siliconflow import ChatSiliconFlow, SiliconFlowEmbeddings
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import config
 from database import async_engine, redis_client
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_siliconflow_base_url(base_url: str) -> str:
+    """Ensure SiliconFlow base_url ends with `/v1` (OpenAI-compatible style)."""
+    base = (base_url or "").rstrip("/")
+    if not base:
+        return base
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+SILICONFLOW_BASE_URL_V1 = _normalize_siliconflow_base_url(config.SILICONFLOW_BASE_URL)
+
+# Ensure downstream SDKs that rely on env vars can still work even if callers
+# only configured `config.py`.
+if config.SILICONFLOW_API_KEY:
+    os.environ.setdefault("SILICONFLOW_API_KEY", config.SILICONFLOW_API_KEY)
+if SILICONFLOW_BASE_URL_V1:
+    os.environ.setdefault("SILICONFLOW_BASE_URL", SILICONFLOW_BASE_URL_V1)
 
 
 class IdempotentSQLStore(SQLStore):
@@ -150,7 +189,7 @@ def _create_retry_client() -> httpx.AsyncClient:
 # 'model' 参数已移除，它将在 api.py 中通过 .bind() 动态提供
 llm = ChatSiliconFlow(
     api_key=config.SILICONFLOW_API_KEY,
-    base_url=f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1"
+    base_url=SILICONFLOW_BASE_URL_V1
 )
 
 # [--- 修复：移除 llm_thinking 实例 ---]
@@ -161,11 +200,16 @@ if redis_client:
     try:
         # 你可以根据需要调整 ttl (Time-To-Live)，单位为秒
         # 例如：ttl=3600 表示缓存 1 小时
-        llm_cache = AsyncRedisCache(
-            redis_=redis_client,
-            ttl=3600
-        )
-        llm.cache = llm_cache # [--- 修复：确保缓存指向 'llm' ---]
+        # langchain-community 在不同版本里构造参数名略有差异，这里做一次兼容。
+        try:
+            llm_cache = AsyncRedisCache(redis=redis_client, ttl=3600)  # type: ignore
+        except TypeError:
+            llm_cache = AsyncRedisCache(redis_=redis_client, ttl=3600)  # type: ignore
+
+        # 全局缓存（推荐） + 兼容旧写法（某些版本允许实例级 cache）
+        set_llm_cache(llm_cache)
+        if hasattr(llm, "cache"):
+            llm.cache = llm_cache  # type: ignore
         logger.info("LLM 异步缓存已启用 (AsyncRedisCache, TTL=3600s)。")
     except Exception as e:
         logger.warning(f"无法配置 AsyncRedisCache: {e}", exc_info=True)
@@ -189,21 +233,34 @@ else:
 
 # 从 config.py 中读取标准变量
 _siliconflow_api_key = config.SILICONFLOW_API_KEY
-# 我们传递 *不带* /v1 的 base_url，
-# 因为 `utils.validate_environment` 会自动为我们添加 /v1。
-_siliconflow_base_url_for_embeddings = config.SILICONFLOW_BASE_URL.rstrip('/')
 
-# 删除手动创建的 `_embedding_client` 和 `_embedding_async_client`
+# SiliconFlowEmbeddings 在不同版本里参数名可能不同（例如 api_key vs siliconflow_api_key）。
+# 这里按“可用参数”动态组装 kwargs，避免在升级时被 Pydantic 校验卡死。
+_emb_kwargs: dict[str, Any] = {"model": config.EMBEDDING_MODEL}
 
-# 将 `base_url` 显式注入 SiliconFlowEmbeddings 构造函数
-_base_embeddings = SiliconFlowEmbeddings(
-    model=config.EMBEDDING_MODEL,
-    # 显式传递 base_url 和 api_key
-    base_url=_siliconflow_base_url_for_embeddings, # type: ignore
-    siliconflow_api_key=_siliconflow_api_key
-    # 验证器将使用这些值自动创建
-    # 正确的 'client' 和 'async_client'
-) # type: ignore
+try:
+    import inspect
+
+    sig = inspect.signature(SiliconFlowEmbeddings)
+    params = sig.parameters
+
+    # api key
+    if "api_key" in params:
+        _emb_kwargs["api_key"] = _siliconflow_api_key
+    elif "siliconflow_api_key" in params:
+        _emb_kwargs["siliconflow_api_key"] = _siliconflow_api_key
+
+    # base url
+    if "base_url" in params:
+        _emb_kwargs["base_url"] = SILICONFLOW_BASE_URL_V1
+    elif "siliconflow_base_url" in params:
+        _emb_kwargs["siliconflow_base_url"] = SILICONFLOW_BASE_URL_V1
+
+except Exception:
+    # 回退：完全依赖环境变量
+    pass
+
+_base_embeddings = SiliconFlowEmbeddings(**_emb_kwargs)  # type: ignore
 
 store = None
 try:
@@ -238,7 +295,7 @@ class SiliconFlowReranker(BaseDocumentCompressor):
     """
     model: str = config.RERANKER_MODEL
     # 使用新的标准环境变量
-    api_url: str = f"{config.SILICONFLOW_BASE_URL.rstrip('/')}/v1/rerank"
+    api_url: str = f"{SILICONFLOW_BASE_URL_V1.rstrip('/')}/rerank"
     api_token: str = config.SILICONFLOW_API_KEY
     top_n: int = config.K
 

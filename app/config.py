@@ -2,6 +2,17 @@
 # 此文件集中管理所有从环境变量加载的配置项
 import os
 
+
+def env_bool(name: str, default: bool = False) -> bool:
+    """Parse a boolean-ish env var.
+
+    Accepts: 1/0, true/false, yes/no, on/off (case-insensitive).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
 # --- 基本配置 ---
 APP_NAME = os.getenv("APP_NAME", "Pigeon Chat")
 PORT = int(os.getenv("PORT", "8080"))
@@ -18,10 +29,12 @@ OUTLINE_API_URL = os.getenv("OUTLINE_API_URL", "").rstrip("/")
 OUTLINE_DISPLAY_URL = os.getenv("OUTLINE_DISPLAY_URL", "").rstrip("/")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN", "")
 OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "123").strip()
-OUTLINE_WEBHOOK_SIGN = os.getenv("OUTLINE_WEBHOOK_SIGN", "True").lower() == "True"
+OUTLINE_WEBHOOK_SIGN = env_bool("OUTLINE_WEBHOOK_SIGN", True)
 
 SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
-SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn").rstrip("/")
+# SiliconFlow 的 OpenAI 兼容端点通常以 /v1 结尾。
+# 这里的默认值遵循 langchain-siliconflow README 的建议。
+SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1").rstrip("/")
 
 # 保留模型名称配置
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
@@ -260,8 +273,8 @@ GITLAB_URL = os.getenv("GITLAB_URL", "").rstrip("/")
 OIDC_REDIRECT_URI = os.getenv("OIDC_REDIRECT_URI", "")
 
 # --- 功能开关与限制 ---
-USE_JOSE_VERIFY = os.getenv("USE_JOSE_VERIFY", "True").lower() == "True"
-SAFE_LOG_CHAT_INPUT = os.getenv("SAFE_LOG_CHAT_INPUT", "True").lower() == "True"
+USE_JOSE_VERIFY = env_bool("USE_JOSE_VERIFY", True)
+SAFE_LOG_CHAT_INPUT = env_bool("SAFE_LOG_CHAT_INPUT", True)
 MAX_LOG_INPUT_CHARS = int(os.getenv("MAX_LOG_INPUT_CHARS", "4000"))
 MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "10485760"))  # 10MB
 ALLOWED_FILE_EXTENSIONS = set([e.strip().lower() for e in os.getenv("ALLOWED_FILE_EXTENSIONS", "txt,md,pdf").split(",") if e.strip()])

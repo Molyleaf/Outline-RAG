@@ -63,7 +63,13 @@ else:
     logger.warning("REDIS_URL not set, refresh task status will not be available.")
 
 # 基础表结构 SQL
-PRE_TX_SQL = "CREATE EXTENSION IF NOT EXISTS vector;"
+#
+# * `vector`  : pgvector extension
+# * `pgcrypto`: provides gen_random_uuid() (used by our vector table default)
+PRE_TX_SQL = "\n".join([
+    "CREATE EXTENSION IF NOT EXISTS vector;",
+    "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+])
 
 TX_INIT_SQL = f"""
 CREATE TABLE IF NOT EXISTS users (
@@ -120,6 +126,10 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
     langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT,
     embedding vector({VECTOR_DIM}),
+
+    -- JSON metadata column used by langchain-postgres v2 vectorstores
+    -- (kept even if you primarily rely on the explicit metadata columns below).
+    langchain_metadata JSONB,
     
     source_id TEXT,
     title TEXT,
@@ -129,6 +139,13 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 """
+
+# 对于“已有旧表”的场景，CREATE TABLE IF NOT EXISTS 不会补齐缺失字段。
+# 因此我们额外执行一次 ALTER TABLE 来确保必要列存在。
+PGVECTOR_ALTER_SQL = """
+                     ALTER TABLE langchain_pg_embedding
+                         ADD COLUMN IF NOT EXISTS langchain_metadata JSONB; \
+                     """
 
 # 2. 将 CREATE INDEX 移到单独的变量
 PGVECTOR_INDEX_SQL = f"""
@@ -158,6 +175,8 @@ async def db_init():
                         await conn_tx.execute(text(sql_command))
                     # 新增: 确保 PGVector 表存在
                     await conn_tx.execute(text(PGVECTOR_TABLE_SQL))
+                    # 对于旧表，补齐缺失列（例如 langchain_metadata）
+                    await conn_tx.execute(text(PGVECTOR_ALTER_SQL))
                     await conn_tx.execute(text("ANALYZE"))
 
             logger.info("数据库表结构初始化/检查完成 (异步)。")

@@ -1,3 +1,9 @@
+"""RAG pipeline.
+
+Updated for the LangChain v1 split where a number of legacy components moved
+into `langchain_classic`.
+"""
+
 # app/rag.py
 import asyncio
 import json
@@ -6,15 +12,26 @@ import pickle
 from datetime import datetime, timezone
 from typing import Optional
 
-from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
-from langchain.storage import EncoderBackedStore
+try:
+    # LangChain v1+ (preferred)
+    from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
+    from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
+    from langchain_classic.storage import EncoderBackedStore
+except Exception:  # pragma: no cover
+    # Backward compat (older projects)
+    from langchain.retrievers.contextual_compression import ContextualCompressionRetriever  # type: ignore
+    from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline  # type: ignore
+    from langchain.storage import EncoderBackedStore  # type: ignore
 from langchain_community.storage.sql import SQLStore
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.stores import BaseStore
 from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
-from langchain_postgres.v2.engine import PGEngine
+try:
+    # langchain-postgres 0.0.16+ exports PGEngine at top-level
+    from langchain_postgres import PGEngine
+except Exception:  # pragma: no cover
+    from langchain_postgres.v2.engine import PGEngine  # type: ignore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy import text
 
