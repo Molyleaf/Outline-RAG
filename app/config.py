@@ -68,8 +68,8 @@ CHAT_MODELS_JSON = """[
     "top_p": 0.95
   },
   {
-    "id": "zai-org/GLM-4.6",
-    "name": "ChatGLM-4.6",
+    "id": "zai-org/GLM-4.7",
+    "name": "ChatGLM-4.7",
     "icon": "/chat/static/img/thudm.svg",
     "temp": 0.6,
     "top_p": 0.95,
@@ -91,7 +91,6 @@ CHAT_MODELS_JSON = """[
     "icon": "/chat/static/img/moonshotai_new.png",
     "temp": 0.6,
     "top_p": 0.7,
-    "beta": true,
     "use_reasoning_parser": true
   }
 ]
