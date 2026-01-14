@@ -45,33 +45,6 @@
 }
 
 /* 深色模式适配 */
-@media (prefers-color-scheme: dark) {
-    :root[data-theme="system"] {
-        --bg: #131314;
-        --panel: #1e1f20;
-        --surface-hover: #2d2e30;
-
-        --text: #e3e3e3;
-        --muted: #c4c7c5;
-        --border: #444746;
-
-        --bubble-user: #2c333e;
-        --bubble-assistant: #1e1f20;
-
-        --accent: #a8c7fa;
-        --accent-hover: #d3e3fd;
-        --accent-bg: rgba(168, 199, 250, 0.1);
-
-        --danger: #f2b8b5;
-        --danger-bg: #601410;
-        --danger-border: #8c1d18;
-
-        --shadow-1: 0 1px 3px rgba(0,0,0,0.3);
-        --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
-        --shadow-glow: 0 0 20px rgba(168, 199, 250, 0.1);
-    }
-}
-
 :root[data-theme="dark"] {
     --bg: #131314;
     --panel: #1e1f20;

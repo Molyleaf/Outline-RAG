@@ -330,7 +330,7 @@
 
 /* 定义水平流动动画：背景位置从左向右移动 */
 @keyframes flow-horizontal {
-    0% { background-position: 0% 50%; }
+    0% { background-position: 0 50%; }
     100% { background-position: 200% 50%; }
 }
 
