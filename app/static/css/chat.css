@@ -328,10 +328,10 @@
 }
 .input > * { pointer-events: auto; }
 
-/* 定义流光动画 */
-@keyframes flow-rotate {
-    0% { transform: translate(-50%, -50%) rotate(0deg); }
-    100% { transform: translate(-50%, -50%) rotate(360deg); }
+/* 定义水平流动动画：背景位置从左向右移动 */
+@keyframes flow-horizontal {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
 }
 
 /* --- 桌面端输入框样式 --- */
@@ -353,21 +353,50 @@
     overflow: hidden;
 }
 
-/* 桌面端：流光层 */
+/* 桌面端：流光层 - 改为水平线性渐变 */
 .input-inner::before {
     content: "";
     position: absolute;
-    top: 50%;
-    left: 50%;
+    /* 填满容器即可，不需要之前的超大尺寸 */
+    inset: 0;
     width: 100%;
-    height: 1250%;
-    background: conic-gradient(from 0deg, #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4);
-    transform: translate(-50%, -50%);
-    animation: flow-rotate 4s linear infinite;
+    height: 100%;
+
+    /* 使用线性渐变，颜色首尾相接 (#00ff7e) 以实现无缝循环 */
+    background: linear-gradient(
+            90deg,
+            #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4, #00ff7e
+    );
+
+    /* 拉长背景宽度，配合动画移动 */
+    background-size: 200% 100%;
+
+    /* 应用新的水平动画 */
+    animation: flow-horizontal 3s linear infinite;
+
     z-index: -2;
-    opacity: 0.5; /* 默认淡雅 */
-    filter: blur(10px); /* 柔化边缘，形成光晕感 */
-    transition: opacity 0.3s ease;
+    opacity: 0.5;
+    filter: blur(8px); /* 保持柔化，制造光晕感 */
+    transition: opacity 0.3s ease, filter 0.3s ease;
+
+    /* 移除之前的旋转变换 */
+    transform: none;
+}
+
+/* 桌面端交互状态：聚焦或编辑时 */
+.input-inner:focus-within::before, .input-inner.is-editing::before {
+    opacity: 0.8; /* 变亮 */
+    filter: blur(6px); /* 聚焦时轮廓稍微清晰一点 */
+    animation-duration: 1.5s; /* 流速加快 */
+}
+
+/* 编辑模式下的特殊配色 */
+.input-inner.is-editing::before {
+    background: linear-gradient(
+            90deg,
+            var(--accent), var(--panel), var(--accent), var(--panel), var(--accent)
+    );
+    background-size: 200% 100%;
 }
 
 /* 桌面端：内部遮罩 (形成边框效果) */
@@ -387,21 +416,10 @@
     box-shadow: 0 8px 30px rgba(66, 133, 244, 0.15); /* 激活时增加外阴影 */
 }
 
-.input-inner:focus-within::before, .input-inner.is-editing::before {
-    opacity: 1; /* 激活时流光变亮 */
-    animation-duration: 2.5s; /* 激活时流速稍微加快 */
-}
-.input-inner.is-editing::before {
-    /* 编辑模式使用单一警示色或强调色 */
-    background: conic-gradient(from 0deg, var(--accent), var(--panel), var(--accent));
-    filter: blur(5px);
-}
-
 /* 深色模式微调 */
 :root[data-theme="dark"] .input-inner { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
 :root[data-theme="dark"] .input-inner::before { opacity: 0.5; filter: blur(12px); }
 :root[data-theme="dark"] .input-inner:focus-within::before { opacity: 0.8; }
-
 
 /* --- 移动端适配 --- */
 @media (max-width: 960px) {
@@ -419,20 +437,23 @@
         overflow: hidden;
     }
 
-    /* 移动端：流光层 */
+    /* 移动端：流光层适配 */
     .input::before {
         content: "";
         position: absolute;
-        top: 50%;
-        left: 50%;
+        /* 移动端覆盖整个输入区域 */
+        inset: 0;
         width: 100%;
-        height: 1250%; /* 移动端只要覆盖正方形区域即可 */
-        background: conic-gradient(from 0deg, #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4);
-        transform: translate(-50%, -50%);
-        animation: flow-rotate 5s linear infinite;
+        height: 100%;
+        /* 同步使用水平渐变 */
+        background: linear-gradient(90deg, #00ff7e, #9743f8, #ff41e2, #f9ab00, #4285f4, #00ff7e);
+        background-size: 200% 100%;
+        /* 移除之前的旋转和位移 */
+        transform: none;
+        animation: flow-horizontal 4s linear infinite;
         z-index: -2;
         opacity: 0.5;
-        filter: blur(15px); /* 移动端光晕更散一些 */
+        filter: blur(12px); /* 移动端光晕更散一些 */
         transition: opacity 0.3s;
     }
 
