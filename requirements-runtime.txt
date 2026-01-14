@@ -11,6 +11,7 @@ langchain-openai
 langchain-postgres
 langchain-siliconflow
 langchain-text-splitters
+langchain-classic
 langgraph-checkpoint
 langgraph-sdk
 langsmith
