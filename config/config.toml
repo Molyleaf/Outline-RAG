@@ -1,80 +1,154 @@
+# =========================
+# Outline LightRAG 配置文件
+# =========================
+#
+# 说明：
+# 1. 支持 `${ENV_NAME}` 和 `${ENV_NAME:默认值}` 两种环境变量占位写法。
+# 2. 所有路径相对仓库根目录解析。
+# 3. 当前运行时界面为 LightRAG 官方 WebUI，访问路径固定为 `/chat`。
+
 [app]
+# 应用显示名称，同时用于部分页面标题。
 name = "Outline LightRAG"
+# FastAPI 监听端口。
 port = 8080
+# 日志级别，可选 DEBUG / INFO / WARNING / ERROR / CRITICAL。
 log_level = "INFO"
+# Session 加密密钥。生产环境必须改为高强度随机值。
 secret_key = "${SECRET_KEY}"
 
 [database]
+# 可选：用于落库 OIDC 用户信息。留空时只使用 Session，不初始化数据库。
 url = "${DATABASE_URL:}"
+# 可选：用于缓存 OIDC Discovery/JWKS。留空时退化为每次直接请求。
 redis_url = "${REDIS_URL:}"
 
 [outline]
+# Outline 服务 API 根地址，例如 `https://wiki.example.com`。
 api_url = "${OUTLINE_API_URL:}"
+# 对外展示地址。若为空，则回退使用 api_url。
 display_url = "${OUTLINE_DISPLAY_URL:}"
+# Outline API Token，用于拉取文档和导出内容。
 api_token = "${OUTLINE_API_TOKEN:}"
+# Outline Webhook 签名密钥。
 webhook_secret = "${OUTLINE_WEBHOOK_SECRET:}"
+# 是否校验 Outline Webhook 签名。
 webhook_sign = true
+# 收到连续 webhook 后的防抖秒数，超时后触发一次全量同步。
 webhook_debounce_seconds = 60
 
 [oidc]
+# GitLab OIDC Client ID。
 gitlab_client_id = "${GITLAB_CLIENT_ID:}"
+# GitLab OIDC Client Secret。
 gitlab_client_secret = "${GITLAB_CLIENT_SECRET:}"
+# GitLab 根地址，例如 `https://gitlab.example.com`。
 gitlab_url = "${GITLAB_URL:}"
+# 可选：显式指定回调地址。留空时使用运行时自动推导的 `/chat/oidc/callback`。
 redirect_uri = "${OIDC_REDIRECT_URI:}"
 
 [lightrag]
+# LightRAG 工作目录，保存图、向量、文档状态和同步清单。
 working_dir = "./data/lightrag"
+# LightRAG 输入目录。当前主要保留给官方文档上传接口使用。
 input_dir = "./data/lightrag_inputs"
+# LightRAG workspace。单实例通常可留空。
 workspace = ""
+# 默认查询模式，可选 local / global / hybrid / naive / mix / bypass。
 query_mode = "mix"
+# 多轮对话时发送给模型的历史轮数上限。
 history_turns = 3
+# 图检索 Top K。
 top_k = 10
+# 文本块检索 Top K。
 chunk_top_k = 20
+# LightRAG 内部最大异步并发数。
 max_async = 4
+# 文档插入阶段的最大并行数。
 max_parallel_insert = 2
+# 图接口返回的最大节点数。
 max_graph_nodes = 1000
+# 文本切块大小。
 chunk_size = 1200
+# 文本切块重叠大小。
 chunk_overlap_size = 100
+# 实体/关系摘要语言。
 summary_language = "Chinese"
+# 实体抽取时允许的实体类型列表。
 entity_types = ["organization", "person", "geo", "event"]
+# 摘要阶段单次最大 token 数。
 summary_max_tokens = 1200
+# 摘要上下文大小。
 summary_context_size = 10000
+# 推荐摘要长度。
 summary_length_recommended = 600
+# 查询总 token 预算。
 max_total_tokens = 30000
+# 实体上下文 token 预算。
 max_entity_tokens = 12000
+# 关系上下文 token 预算。
 max_relation_tokens = 12000
+# 每个实体/关系关联抓取的文本块数量。
 related_chunk_number = 10
+# 向量召回余弦阈值。
 cosine_threshold = 0.2
+# KV 存储实现。当前默认使用本地 JSON 文件。
 kv_storage = "JsonKVStorage"
+# 文档状态存储实现。
 doc_status_storage = "JsonDocStatusStorage"
+# 图存储实现。
 graph_storage = "NetworkXStorage"
+# 向量存储实现。
 vector_storage = "NanoVectorDBStorage"
+# LightRAG 内部 JWT 密钥。留空时回退使用 app.secret_key。
 token_secret = "${LIGHTRAG_TOKEN_SECRET:}"
+# 用户 token 过期小时数。
 token_expire_hours = 48
+# guest token 过期小时数。当前主要给 WebUI 内部 API 调用使用。
 guest_token_expire_hours = 24
+# LightRAG 内部 JWT 算法。
 jwt_algorithm = "HS256"
+# WebUI 页面标题。
 webui_title = "Outline LightRAG"
+# WebUI 页面描述。
 webui_description = "Outline knowledge base powered by LightRAG"
 
 [llm]
+# 最终问答模型提供商。目前支持 `siliconflow` 或 `openai`。
 provider = "siliconflow"
+# OpenAI 兼容接口根地址。SiliconFlow 建议填到 `/v1`。
 base_url = "https://api.siliconflow.cn/v1"
+# 模型 API Key。
 api_key = "${SILICONFLOW_API_KEY:}"
+# 用于生成最终回答的模型名。
 model = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+# 采样温度。
 temperature = 0.2
+# Top P。
 top_p = 1.0
+# 最大生成 token 数。
 max_completion_tokens = 4096
+# 推理强度，主要给 OpenAI 兼容推理模型使用。
 reasoning_effort = "medium"
+# 透传给 OpenAI 兼容接口的额外 body。通常保持空字典即可。
 extra_body = {}
 
 [embedding]
+# Embedding 提供商。目前支持 `siliconflow` 或 `openai`。
 provider = "siliconflow"
+# Embedding 接口根地址。若和 LLM 同源，可保持一致。
 base_url = "https://api.siliconflow.cn/v1"
+# Embedding API Key。
 api_key = "${SILICONFLOW_API_KEY:}"
+# Embedding 模型名。
 model = "BAAI/bge-m3"
+# Embedding 维度。必须与实际模型输出一致。
 dimension = 1024
+# 是否显式把维度参数发送给 embedding 接口。
 send_dimension = false
 
 [features]
+# 是否对用户输入做安全截断日志。
 safe_log_chat_input = true
+# 当启用输入日志时，最多记录多少字符。
 max_log_input_chars = 4000

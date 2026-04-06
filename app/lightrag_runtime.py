@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 from contextlib import asynccontextmanager

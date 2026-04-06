@@ -1,6 +1,7 @@
 """运行时配置加载器。
 
 所有配置统一从仓库根目录的 `config/config.toml` 读取，并导出为模块常量。
+配置文件本身包含中文注释，支持 `${ENV}` / `${ENV:default}` 占位写法。
 """
 
 from __future__ import annotations

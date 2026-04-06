@@ -30,6 +30,7 @@
 ## 配置
 
 所有配置都放在 [`config/config.toml`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/config/config.toml)。
+该文件已经补齐中文注释，直接按注释逐项填写即可。
 
 最常用的环境变量：
 
@@ -58,6 +59,7 @@ REDIS_URL=redis://:password@host:6379/0
 - `DATABASE_URL` 现在是可选项。未配置时，OIDC 用户信息仅保存在 Session Cookie 中。
 - LightRAG 默认使用仓库内 `./data/lightrag` 与 `./data/lightrag_inputs` 作为工作目录。
 - 由于当前使用本地文件存储，默认建议 `UVICORN_WORKERS=1`。
+- 如果你需要调模型或检索参数，优先直接修改 `config/config.toml`，不要把新配置散落到业务代码里。
 
 ## Docker 示例
 
@@ -153,5 +155,5 @@ flask --app app/app.py assets build
 ```powershell
 python -m compileall app
 flask --app app/app.py assets build
-python -m py_compile app/main.py app/database.py app/rag.py app/blueprints/api.py app/siliconflow_services.py app/openai_services.py
+python -m py_compile app/main.py app/database.py app/rag.py app/blueprints/api.py app/blueprints/auth.py app/lightrag_runtime.py app/siliconflow_services.py app/openai_services.py
 ```
