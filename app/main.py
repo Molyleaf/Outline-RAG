@@ -13,7 +13,7 @@ import config
 import rag
 from blueprints.api import api_router
 from blueprints.auth import auth_router
-from database import async_engine, db_init, redis_client
+from database import close_database, db_init, redis_client
 from lightrag_runtime import get_runtime
 
 logging.basicConfig(
@@ -51,8 +51,7 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("FastAPI 应用关闭...")
         await rag.shutdown_background_tasks()
-        if async_engine:
-            await async_engine.dispose()
+        await close_database()
         if redis_client:
             await redis_client.close()
         logger.info("资源已释放。")

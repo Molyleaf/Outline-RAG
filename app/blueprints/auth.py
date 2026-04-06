@@ -17,10 +17,9 @@ from fastapi.responses import RedirectResponse, Response
 from httpx_retries import Retry, RetryTransport
 from jose import jwt
 from jose.exceptions import JOSEError
-from sqlalchemy import text
 
 import config
-from database import AsyncSessionLocal, redis_client
+from database import execute, redis_client
 
 auth_router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -181,28 +180,20 @@ def get_oidc_client() -> httpx.AsyncClient:
 
 
 async def _upsert_user(user_id: str, name: str, avatar_url: str | None) -> None:
-    if AsyncSessionLocal is None:
-        return
-
     try:
-        async with AsyncSessionLocal.begin() as session:
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO users (id, name, avatar_url, updated_at)
-                    VALUES (:id, :name, :avatar_url, NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        avatar_url = EXCLUDED.avatar_url,
-                        updated_at = NOW()
-                    """
-                ),
-                {
-                    "id": user_id,
-                    "name": name,
-                    "avatar_url": avatar_url,
-                },
-            )
+        await execute(
+            """
+            INSERT INTO users (id, name, avatar_url, updated_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                avatar_url = EXCLUDED.avatar_url,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            user_id,
+            name,
+            avatar_url,
+        )
     except Exception as exc:  # pragma: no cover
         logger.error("更新用户表失败: %s", exc, exc_info=True)
 

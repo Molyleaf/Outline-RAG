@@ -4,7 +4,7 @@
 
 ## 1. 仓库事实
 
-- 后端主栈：`FastAPI + LightRAG + OIDC + 可选 SQLAlchemy Async + 可选 Redis`
+- 后端主栈：`FastAPI + LightRAG + OIDC + asyncpg + 可选 Redis`
 - 主应用入口：[`app/main.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/main.py)
 - LightRAG 运行时适配：[`app/lightrag_runtime.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/lightrag_runtime.py)
 - `/chat` 兼容接口与 Outline 刷新入口：[`app/blueprints/api.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/blueprints/api.py)
@@ -15,6 +15,7 @@
 - 配置源：[`config/config.toml`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/config/config.toml)
 - 静态资源构建入口：[`app/app.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/app.py)
 - 运行时 UI：LightRAG 官方 WebUI，挂载在 `/chat`
+- 默认存储后端：LightRAG 官方 `PGKVStorage + PGVectorStorage + PGDocStatusStorage + Neo4JStorage`
 - 本地静态源码：
   - [`app/static/js/core.js`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/static/js/core.js)
   - [`app/static/js/app.js`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/static/js/app.js)
@@ -64,9 +65,10 @@
 ### 4.1 API 与数据库
 
 - 用户敏感接口必须做会话校验。
-- 数据库现在是可选依赖；新增表结构统一写入 [`app/database.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/database.py)。
+- Postgres 现在是必选依赖，并要求启用 `pgvector` 扩展；Neo4j 也是必选依赖。
+- 应用侧新增表结构统一写入 [`app/database.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/database.py)。
 - 不需要再兼容旧 LangChain 表结构，也不要把旧消息/会话表重新加回来。
-- `AsyncSession` 上下文要短，避免长事务。
+- `asyncpg` 连接和事务作用域要短，避免长事务。
 
 ### 4.2 错误处理
 
@@ -90,6 +92,7 @@
 
 - 可以调整占位资源、构建逻辑、重定向页。
 - 可以修改 [`app/lightrag_runtime.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/lightrag_runtime.py) 中对官方 WebUI 的 `/chat` 路径适配。
+- 除非 LightRAG 官方实现本身无法满足约束，否则不要新增自定义 `PG*Storage` 替代实现。
 - 不要引入新的前端框架，也不要再维护一套平行聊天 UI。
 
 ## 6. 验证命令

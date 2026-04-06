@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.datastructures import MutableHeaders
 
 import config
+from database import parse_database_url
 from openai_services import build_openai_binding
 from siliconflow_services import build_siliconflow_binding
 
@@ -102,6 +103,36 @@ def _build_provider_binding(
             model=model,
         )
     raise ValueError(f"不支持的提供商: {provider}")
+
+
+def _apply_storage_environment() -> None:
+    postgres = parse_database_url()
+    workspace = config.LIGHTRAG_WORKSPACE or "default"
+
+    if not config.NEO4J_URI or not config.NEO4J_USERNAME or not config.NEO4J_PASSWORD:
+        raise RuntimeError("使用 Neo4JStorage 时必须配置 neo4j.uri / neo4j.username / neo4j.password。")
+
+    os.environ["POSTGRES_HOST"] = postgres["host"]
+    os.environ["POSTGRES_PORT"] = postgres["port"]
+    os.environ["POSTGRES_USER"] = postgres["user"]
+    os.environ["POSTGRES_PASSWORD"] = postgres["password"]
+    os.environ["POSTGRES_DATABASE"] = postgres["database"]
+    os.environ["POSTGRES_WORKSPACE"] = workspace
+    os.environ["POSTGRES_MAX_CONNECTIONS"] = str(config.DATABASE_MAX_CONNECTIONS)
+    os.environ["POSTGRES_ENABLE_VECTOR"] = "true"
+    os.environ["POSTGRES_VECTOR_INDEX_TYPE"] = config.LIGHTRAG_POSTGRES_VECTOR_INDEX_TYPE
+    os.environ["POSTGRES_HNSW_M"] = str(config.LIGHTRAG_POSTGRES_HNSW_M)
+    os.environ["POSTGRES_HNSW_EF"] = str(config.LIGHTRAG_POSTGRES_HNSW_EF)
+
+    ssl_mode = config.DATABASE_SSL_MODE or postgres.get("sslmode", "")
+    if ssl_mode:
+        os.environ["POSTGRES_SSL_MODE"] = ssl_mode
+
+    os.environ["NEO4J_URI"] = config.NEO4J_URI
+    os.environ["NEO4J_USERNAME"] = config.NEO4J_USERNAME
+    os.environ["NEO4J_PASSWORD"] = config.NEO4J_PASSWORD
+    os.environ["NEO4J_DATABASE"] = config.NEO4J_DATABASE
+    os.environ["NEO4J_WORKSPACE"] = workspace
 
 
 def _build_lightrag_args() -> argparse.Namespace:
@@ -327,6 +358,7 @@ def get_runtime() -> LightRAGRuntime:
 
     os.environ["WEBUI_TITLE"] = config.LIGHTRAG_WEBUI_TITLE
     os.environ["WEBUI_DESCRIPTION"] = config.LIGHTRAG_WEBUI_DESCRIPTION
+    _apply_storage_environment()
 
     args = _build_lightrag_args()
 

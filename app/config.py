@@ -72,6 +72,7 @@ app_cfg = _section("app")
 database_cfg = _section("database")
 outline_cfg = _section("outline")
 oidc_cfg = _section("oidc")
+neo4j_cfg = _section("neo4j")
 lightrag_cfg = _section("lightrag")
 llm_cfg = _section("llm")
 embedding_cfg = _section("embedding")
@@ -87,6 +88,14 @@ SECRET_KEY = str(app_cfg.get("secret_key", "")).strip()
 # --- 数据库 / Redis ---
 DATABASE_URL = str(database_cfg.get("url", "")).strip()
 REDIS_URL = str(database_cfg.get("redis_url", "")).strip()
+DATABASE_MAX_CONNECTIONS = int(database_cfg.get("max_connections", 20))
+DATABASE_SSL_MODE = str(database_cfg.get("ssl_mode", "")).strip()
+
+# --- Neo4j ---
+NEO4J_URI = str(neo4j_cfg.get("uri", "")).strip()
+NEO4J_USERNAME = str(neo4j_cfg.get("username", "")).strip()
+NEO4J_PASSWORD = str(neo4j_cfg.get("password", "")).strip()
+NEO4J_DATABASE = str(neo4j_cfg.get("database", "neo4j")).strip() or "neo4j"
 
 # --- Outline ---
 OUTLINE_API_URL = str(outline_cfg.get("api_url", "")).rstrip("/")
@@ -150,16 +159,21 @@ LIGHTRAG_RELATED_CHUNK_NUMBER = int(
     lightrag_cfg.get("related_chunk_number", 10)
 )
 LIGHTRAG_COSINE_THRESHOLD = float(lightrag_cfg.get("cosine_threshold", 0.2))
-LIGHTRAG_KV_STORAGE = str(lightrag_cfg.get("kv_storage", "JsonKVStorage")).strip()
+LIGHTRAG_KV_STORAGE = str(lightrag_cfg.get("kv_storage", "PGKVStorage")).strip()
 LIGHTRAG_DOC_STATUS_STORAGE = str(
-    lightrag_cfg.get("doc_status_storage", "JsonDocStatusStorage")
+    lightrag_cfg.get("doc_status_storage", "PGDocStatusStorage")
 ).strip()
 LIGHTRAG_GRAPH_STORAGE = str(
-    lightrag_cfg.get("graph_storage", "NetworkXStorage")
+    lightrag_cfg.get("graph_storage", "Neo4JStorage")
 ).strip()
 LIGHTRAG_VECTOR_STORAGE = str(
-    lightrag_cfg.get("vector_storage", "NanoVectorDBStorage")
+    lightrag_cfg.get("vector_storage", "PGVectorStorage")
 ).strip()
+LIGHTRAG_POSTGRES_VECTOR_INDEX_TYPE = str(
+    lightrag_cfg.get("postgres_vector_index_type", "HNSW")
+).strip() or "HNSW"
+LIGHTRAG_POSTGRES_HNSW_M = int(lightrag_cfg.get("postgres_hnsw_m", 16))
+LIGHTRAG_POSTGRES_HNSW_EF = int(lightrag_cfg.get("postgres_hnsw_ef", 64))
 LIGHTRAG_TOKEN_SECRET = (
     str(lightrag_cfg.get("token_secret", "")).strip() or SECRET_KEY
 )

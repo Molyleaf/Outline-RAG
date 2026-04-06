@@ -18,10 +18,25 @@ log_level = "INFO"
 secret_key = "${SECRET_KEY}"
 
 [database]
-# 可选：用于落库 OIDC 用户信息。留空时只使用 Session，不初始化数据库。
-url = "${DATABASE_URL:}"
+# Postgres 连接串。当前是必填项，必须指向已安装 pgvector 扩展的数据库。
+# 推荐写法：`postgresql+asyncpg://user:password@host:5432/dbname`
+url = "${DATABASE_URL}"
+# 应用侧 asyncpg 连接池最大连接数。LightRAG 自己会维护独立的 PG 连接池。
+max_connections = 20
+# 可选：显式指定 SSL 模式，例如 require / verify-full。
+ssl_mode = "${POSTGRES_SSL_MODE:}"
 # 可选：用于缓存 OIDC Discovery/JWKS。留空时退化为每次直接请求。
 redis_url = "${REDIS_URL:}"
+
+[neo4j]
+# Neo4j Bolt 地址，例如 `bolt://neo4j.example.com:7687`。
+uri = "${NEO4J_URI}"
+# Neo4j 用户名。
+username = "${NEO4J_USERNAME}"
+# Neo4j 密码。
+password = "${NEO4J_PASSWORD}"
+# Neo4j 数据库名。Neo4j 5 默认通常为 `neo4j`。
+database = "${NEO4J_DATABASE:neo4j}"
 
 [outline]
 # Outline 服务 API 根地址，例如 `https://wiki.example.com`。
@@ -48,7 +63,7 @@ gitlab_url = "${GITLAB_URL:}"
 redirect_uri = "${OIDC_REDIRECT_URI:}"
 
 [lightrag]
-# LightRAG 工作目录，保存图、向量、文档状态和同步清单。
+# LightRAG 工作目录。PGVector/Neo4j 承担主存储，这里主要保留官方运行时缓存和中间产物。
 working_dir = "./data/lightrag"
 # LightRAG 输入目录。当前主要保留给官方文档上传接口使用。
 input_dir = "./data/lightrag_inputs"
@@ -92,14 +107,20 @@ max_relation_tokens = 12000
 related_chunk_number = 10
 # 向量召回余弦阈值。
 cosine_threshold = 0.2
-# KV 存储实现。当前默认使用本地 JSON 文件。
-kv_storage = "JsonKVStorage"
+# KV 存储实现。当前默认使用 LightRAG 官方 Postgres KV 存储。
+kv_storage = "PGKVStorage"
 # 文档状态存储实现。
-doc_status_storage = "JsonDocStatusStorage"
+doc_status_storage = "PGDocStatusStorage"
 # 图存储实现。
-graph_storage = "NetworkXStorage"
+graph_storage = "Neo4JStorage"
 # 向量存储实现。
-vector_storage = "NanoVectorDBStorage"
+vector_storage = "PGVectorStorage"
+# PGVector 索引类型。默认使用 LightRAG 官方支持的 HNSW。
+postgres_vector_index_type = "HNSW"
+# HNSW 索引参数 M。
+postgres_hnsw_m = 16
+# HNSW 索引参数 ef_construction。
+postgres_hnsw_ef = 64
 # LightRAG 内部 JWT 密钥。留空时回退使用 app.secret_key。
 token_secret = "${LIGHTRAG_TOKEN_SECRET:}"
 # 用户 token 过期小时数。

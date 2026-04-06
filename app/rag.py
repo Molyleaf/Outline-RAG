@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 import config
+from database import fetch_all, postgres_connection
 from lightrag_runtime import get_runtime
 from outline_client import outline_export_doc, outline_list_docs
 
@@ -31,28 +30,64 @@ _refresh_state: dict[str, Any] = {
 }
 
 
-def _manifest_path() -> Path:
-    return Path(config.LIGHTRAG_WORKING_DIR) / "outline_sync_manifest.json"
+def _manifest_workspace() -> str:
+    return config.LIGHTRAG_WORKSPACE or "default"
 
 
-def _load_manifest() -> dict[str, dict[str, Any]]:
-    path = _manifest_path()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        logger.warning("Outline 同步清单损坏，已忽略并重建。")
-        return {}
-
-
-def _save_manifest(manifest: dict[str, dict[str, Any]]) -> None:
-    path = _manifest_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
+async def _load_manifest() -> dict[str, dict[str, Any]]:
+    rows = await fetch_all(
+        """
+        SELECT outline_id, doc_id, file_source, title, updated_at
+        FROM outline_sync_manifest
+        WHERE workspace = $1
+        """,
+        _manifest_workspace(),
     )
+    return {
+        str(row["outline_id"]): {
+            "doc_id": str(row["doc_id"]),
+            "file_source": str(row["file_source"] or ""),
+            "title": str(row["title"] or ""),
+            "updated_at": str(row["updated_at"] or ""),
+        }
+        for row in rows
+    }
+
+
+async def _save_manifest(manifest: dict[str, dict[str, Any]]) -> None:
+    workspace = _manifest_workspace()
+    async with postgres_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM outline_sync_manifest WHERE workspace = $1",
+                workspace,
+            )
+            if manifest:
+                await conn.executemany(
+                    """
+                    INSERT INTO outline_sync_manifest (
+                        workspace,
+                        outline_id,
+                        doc_id,
+                        file_source,
+                        title,
+                        updated_at,
+                        synced_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+                    """,
+                    [
+                        (
+                            workspace,
+                            outline_id,
+                            str(entry.get("doc_id") or _stable_doc_id(outline_id)),
+                            str(entry.get("file_source") or ""),
+                            str(entry.get("title") or ""),
+                            str(entry.get("updated_at") or ""),
+                        )
+                        for outline_id, entry in manifest.items()
+                    ],
+                )
 
 
 def _stable_doc_id(outline_id: str) -> str:
@@ -82,7 +117,7 @@ async def refresh_all_task() -> None:
     async with _refresh_lock:
         runtime = get_runtime()
         rag = runtime.rag
-        manifest = _load_manifest()
+        manifest = await _load_manifest()
         next_manifest: dict[str, dict[str, Any]] = {}
         started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -177,7 +212,7 @@ async def refresh_all_task() -> None:
                     track_id=track_id,
                 )
 
-            _save_manifest(next_manifest)
+            await _save_manifest(next_manifest)
 
             _refresh_state.update(
                 {

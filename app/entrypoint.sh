@@ -11,7 +11,7 @@ PY
   export SECRET_KEY
 fi
 
-# LightRAG 默认使用本地文件存储，运行期建议单 worker。
+# 默认保持单 worker；如需多 worker，请确认你的部署方式能接受重复后台刷新任务。
 UVICORN_PORT="${PORT:-8080}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 

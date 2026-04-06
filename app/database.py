@@ -1,46 +1,149 @@
-"""数据库与 Redis 初始化。
-
-LightRAG 主数据改为文件存储；数据库仅用于可选的用户信息落库。
-"""
+"""应用侧 Postgres 与 Redis 初始化。"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import urllib.parse
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
+import asyncpg
 import redis.asyncio as redis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 import config
 
 logger = logging.getLogger(__name__)
 
+_db_pool: asyncpg.Pool | None = None
+_db_pool_lock = asyncio.Lock()
 
-async_engine: AsyncEngine | None = None
-AsyncSessionLocal: async_sessionmaker[AsyncSession] | None = None
+APP_SCHEMA_SQL = [
+    "CREATE EXTENSION IF NOT EXISTS vector",
+    """
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      avatar_url TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS outline_sync_manifest (
+      workspace TEXT NOT NULL,
+      outline_id TEXT NOT NULL,
+      doc_id TEXT NOT NULL,
+      file_source TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (workspace, outline_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_outline_sync_manifest_workspace_doc_id
+      ON outline_sync_manifest (workspace, doc_id)
+    """,
+]
 
-if config.DATABASE_URL:
-    async_engine = create_async_engine(
-        config.DATABASE_URL,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-    )
-    AsyncSessionLocal = async_sessionmaker(
-        autocommit=False,
-        autoflush=False,
-        bind=async_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    logger.info("AsyncEngine 已配置。")
-else:
-    logger.warning("DATABASE_URL 未配置，用户信息将仅保存在会话 Cookie 中。")
+
+def normalize_database_url(raw_url: str) -> str:
+    value = (raw_url or "").strip()
+    if not value:
+        raise RuntimeError("DATABASE_URL 未配置，当前架构要求 Postgres 为必选依赖。")
+    if value.startswith("postgresql+psycopg://"):
+        raise RuntimeError("DATABASE_URL 不再支持 psycopg DSN，请改为 postgresql+asyncpg:// 或 postgresql://。")
+    if value.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + value.removeprefix("postgresql+asyncpg://")
+    return value
+
+
+def parse_database_url(raw_url: str | None = None) -> dict[str, str]:
+    normalized = normalize_database_url(raw_url or config.DATABASE_URL)
+    parsed = urllib.parse.urlparse(normalized)
+    database = urllib.parse.unquote(parsed.path.lstrip("/"))
+
+    if not parsed.hostname or parsed.username is None or not database:
+        raise RuntimeError("DATABASE_URL 缺少 host / username / database，无法初始化 Postgres。")
+
+    query = urllib.parse.parse_qs(parsed.query)
+    return {
+        "dsn": normalized,
+        "host": parsed.hostname,
+        "port": str(parsed.port or 5432),
+        "user": urllib.parse.unquote(parsed.username),
+        "password": urllib.parse.unquote(parsed.password or ""),
+        "database": database,
+        "sslmode": query.get("sslmode", [""])[0],
+    }
+
+
+async def get_db_pool() -> asyncpg.Pool:
+    global _db_pool
+
+    if _db_pool is not None:
+        return _db_pool
+
+    async with _db_pool_lock:
+        if _db_pool is None:
+            _db_pool = await asyncpg.create_pool(
+                dsn=parse_database_url()["dsn"],
+                min_size=1,
+                max_size=max(config.DATABASE_MAX_CONNECTIONS, 1),
+                command_timeout=60,
+            )
+            logger.info("应用侧 asyncpg 连接池已初始化。")
+    return _db_pool
+
+
+@asynccontextmanager
+async def postgres_connection() -> AsyncIterator[asyncpg.Connection]:
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        yield conn
+
+
+async def fetch_all(sql: str, *params: Any) -> list[dict[str, Any]]:
+    async with postgres_connection() as conn:
+        rows = await conn.fetch(sql, *params)
+    return [dict(row) for row in rows]
+
+
+async def fetch_one(sql: str, *params: Any) -> dict[str, Any] | None:
+    async with postgres_connection() as conn:
+        row = await conn.fetchrow(sql, *params)
+    return dict(row) if row else None
+
+
+async def execute(sql: str, *params: Any) -> None:
+    async with postgres_connection() as conn:
+        await conn.execute(sql, *params)
+
+
+async def executemany(sql: str, params_seq: list[tuple[Any, ...]]) -> None:
+    if not params_seq:
+        return
+    async with postgres_connection() as conn:
+        async with conn.transaction():
+            await conn.executemany(sql, params_seq)
+
+
+async def db_init() -> None:
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for statement in APP_SCHEMA_SQL:
+                await conn.execute(statement)
+    logger.info("应用侧 Postgres 表结构初始化完成。")
+
+
+async def close_database() -> None:
+    global _db_pool
+
+    if _db_pool is not None:
+        await _db_pool.close()
+        _db_pool = None
+        logger.info("应用侧 asyncpg 连接池已关闭。")
 
 
 redis_client = None
@@ -67,34 +170,3 @@ if config.REDIS_URL:
         redis_client = None
 else:
     logger.info("REDIS_URL 未配置，OIDC 元数据缓存将退化为进程内请求。")
-
-
-TX_INIT_SQL = """
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  name TEXT,
-  avatar_url TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"""
-
-
-async def db_init() -> None:
-    """初始化最小数据库结构。"""
-    if not async_engine:
-        return
-
-    async with async_engine.connect() as conn_lock:
-        conn_ac = await conn_lock.execution_options(isolation_level="AUTOCOMMIT")
-        await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
-        logger.info("数据库咨询锁已获取。")
-
-        try:
-            async with async_engine.begin() as conn_tx:
-                commands = [cmd.strip() for cmd in TX_INIT_SQL.split(";") if cmd.strip()]
-                for sql_command in commands:
-                    await conn_tx.execute(text(sql_command))
-            logger.info("数据库表结构初始化完成。")
-        finally:
-            await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
-            logger.info("数据库咨询锁已释放。")

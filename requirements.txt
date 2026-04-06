@@ -2,9 +2,10 @@ Flask-Assets
 cssmin
 jsmin
 flask
-sqlalchemy
+asyncpg
+pgvector
+neo4j
 python-jose[cryptography]
-psycopg
 itsdangerous
 fastapi
 uvicorn[standard]

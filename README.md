@@ -1,19 +1,20 @@
 # Outline LightRAG
 
-一个基于 **LightRAG** 的 Outline 知识库问答服务。
+一个基于 **LightRAG 官方 WebUI** 的 Outline 知识库问答服务。
 
-当前版本已经从 LangChain 全量迁移到 `lightrag-hku[api]`，运行时界面直接使用 **LightRAG 官方 WebUI**，并适配到现有的 **`/chat`** 路径下。OIDC 登录流程保持不变。
+当前版本已经从 LangChain 全量迁移到 `lightrag-hku[api]`，运行时聊天界面挂载在 **`/chat`**，并保留原有 **OIDC** 登录流程与 `/chat/api/ask` 兼容接口。
 
 ## 当前架构
 
-- Web UI: LightRAG 官方 WebUI，实际访问路径为 `/chat`
+- Web UI: LightRAG 官方 WebUI，访问路径为 `/chat`
 - RAG 引擎: LightRAG
-- 文档同步: 从 Outline API 拉取文档并写入 LightRAG 文件存储
+- 文档同步: 从 Outline API 拉取文档并写入 LightRAG
 - 鉴权: GitLab OIDC，会话 Cookie 保护 `/chat`
 - 存储:
-  - LightRAG 主数据使用本地文件目录
-  - 数据库仅用于可选的用户信息落库
-  - 不再依赖 LangChain、pgvector、旧会话消息表
+  - KV / 向量 / 文档状态: LightRAG 官方 `PGKVStorage + PGVectorStorage + PGDocStatusStorage`
+  - 图存储: LightRAG 官方 `Neo4JStorage`
+  - 应用侧附加表: `users`、`outline_sync_manifest`
+  - 数据库驱动: `asyncpg`
 
 ## 关键路径
 
@@ -27,15 +28,26 @@
 - `/chat/api/ask`: 旧流式聊天接口兼容层
 - `/healthz`: 容器健康检查
 
+## 运行前提
+
+- PostgreSQL 已安装 `pgvector` 扩展
+- Neo4j 可通过 Bolt 协议访问
+- 已准备好 Outline API Token 与 GitLab OIDC 配置
+
 ## 配置
 
-所有配置都放在 [`config/config.toml`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/config/config.toml)。
-该文件已经补齐中文注释，直接按注释逐项填写即可。
+所有配置都放在 `config/config.toml`，文件内已经带中文注释。
 
 最常用的环境变量：
 
 ```env
 SECRET_KEY=replace-me
+
+DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
+NEO4J_URI=bolt://neo4j.example.com:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=replace-me
+NEO4J_DATABASE=neo4j
 
 OUTLINE_API_URL=https://outline.example.com
 OUTLINE_DISPLAY_URL=https://outline.example.com
@@ -50,27 +62,52 @@ OIDC_REDIRECT_URI=https://your-domain.example.com/chat/oidc/callback
 SILICONFLOW_API_KEY=replace-me
 
 # 可选
-DATABASE_URL=postgresql+psycopg://user:password@host:5432/dbname
 REDIS_URL=redis://:password@host:6379/0
 ```
 
 说明：
 
-- `DATABASE_URL` 现在是可选项。未配置时，OIDC 用户信息仅保存在 Session Cookie 中。
-- LightRAG 默认使用仓库内 `./data/lightrag` 与 `./data/lightrag_inputs` 作为工作目录。
-- 由于当前使用本地文件存储，默认建议 `UVICORN_WORKERS=1`。
-- 如果你需要调模型或检索参数，优先直接修改 `config/config.toml`，不要把新配置散落到业务代码里。
+- `DATABASE_URL` 现在是必填项，必须指向启用 `pgvector` 的 Postgres。
+- `NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD` 也是必填项。
+- `working_dir` 与 `input_dir` 仍然保留，但主要用于 LightRAG 运行时缓存、上传和中间产物，不再是主数据源。
+- 如果需要调整 PGVector 索引类型，可直接修改 `config/config.toml` 里的 `postgres_vector_index_type`、`postgres_hnsw_m`、`postgres_hnsw_ef`。
 
 ## Docker 示例
 
 ```yaml
 services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: always
+    environment:
+      POSTGRES_DB: outline_rag
+      POSTGRES_USER: outline
+      POSTGRES_PASSWORD: replace-me
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  neo4j:
+    image: neo4j:5
+    restart: always
+    environment:
+      NEO4J_AUTH: neo4j/replace-me
+    volumes:
+      - ./data/neo4j:/data
+
   outline-lightrag:
     build: .
     restart: always
+    depends_on:
+      - postgres
+      - neo4j
     environment:
       PORT: 8080
       SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql+asyncpg://outline:replace-me@postgres:5432/outline_rag
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: replace-me
+      NEO4J_DATABASE: neo4j
       OUTLINE_API_URL: https://outline.example.com
       OUTLINE_DISPLAY_URL: https://outline.example.com
       OUTLINE_API_TOKEN: ${OUTLINE_API_TOKEN}
@@ -80,9 +117,8 @@ services:
       GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET}
       OIDC_REDIRECT_URI: https://your-domain.example.com/chat/oidc/callback
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
-      UVICORN_WORKERS: 1
-      DATABASE_URL: ${DATABASE_URL:-}
       REDIS_URL: ${REDIS_URL:-}
+      UVICORN_WORKERS: 1
     volumes:
       - ./data/lightrag:/app/data/lightrag
       - ./data/lightrag_inputs:/app/data/lightrag_inputs
@@ -118,16 +154,6 @@ server {
     }
 }
 ```
-
-## Outline Webhook
-
-建议在 Outline 侧把变更通知打到：
-
-```text
-POST https://your-domain.example.com/chat/update/webhook
-```
-
-服务端会做一个 60 秒的防抖，再触发一次全量同步。
 
 ## 本地开发
 
