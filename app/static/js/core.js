@@ -74,6 +74,22 @@ let MODELS = {};
 let currentModelId = localStorage.getItem('chat_model');
 let currentTemperature = 0.7;
 let currentTopP = 0.7;
+let customOpenAIConfig = null;
+const RESPONSE_MODES = {
+    answer: {
+        id: 'answer',
+        name: '助手回答',
+        shortName: '回答',
+        description: '调用模型直接生成答案'
+    },
+    copy_prompt: {
+        id: 'copy_prompt',
+        name: '外部提问',
+        shortName: '复制',
+        description: '只复制提示词和召回文档'
+    }
+};
+let currentResponseMode = localStorage.getItem('chat_response_mode') || RESPONSE_MODES.answer.id;
 
 // 获取模型头像
 function getAvatarUrlForModel(m) {
@@ -91,6 +107,37 @@ function getAvatarUrlForModel(m) {
     else if (provider === 'zai-org' || provider === 'thudm') return '/chat/static/img/thudm.svg';
     else if (provider === 'inclusionai') return '/chat/static/img/ling.png';
     else return defaultAvatar;
+}
+
+function getModelLabel(modelId) {
+    const modelConf = MODELS[modelId] || {};
+    if (modelConf.name) return modelConf.name;
+    const normalized = String(modelId || '');
+    return normalized.includes('/') ? normalized.split('/')[1] : normalized || 'N/A';
+}
+
+async function copyTextToClipboard(text) {
+    const value = String(text ?? '');
+    if (!value) return false;
+
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(value);
+            return true;
+        } catch (_) {}
+    }
+
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.style.position = 'absolute';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        return document.execCommand('copy');
+    } finally {
+        document.body.removeChild(ta);
+    }
 }
 
 // 从 URL 初始化当前会话 ID

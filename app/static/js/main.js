@@ -214,6 +214,24 @@ qEl.addEventListener('keydown', (e) => {
             '<input type="range" class="param-range" value="' + value + '" min="0" max="' + max + '" step="' + step + '">' +
             '</div>';
 
+        const escapeAttr = (value) => String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+
+        const renderModeItem = (mode) =>
+            '<div class="mode-item ' + (mode.id === currentResponseMode ? 'active' : '') + '" data-mode="' + mode.id + '">' +
+            '<div class="mode-item-title">' + mode.name + '</div>' +
+            '<div class="mode-item-desc">' + mode.description + '</div>' +
+            '</div>';
+
+        const renderModelItem = ([id, model]) =>
+            '<div class="model-item ' + (id === currentModelId ? 'active' : '') + '" data-id="' + id + '" data-custom="' + (model.is_custom ? 'true' : 'false') + '">' +
+            '<img src="' + model.icon + '" alt="' + model.name + '">' +
+            '<span>' + model.name + '</span>' +
+            (model.is_custom ? '<span class="model-badge ' + (model.configured ? 'configured' : 'pending') + '">' + (model.configured ? '已配置' : '配置') + '</span>' : '') +
+            '</div>';
+
         const uploadLabel = actionsContainer.querySelector('label.upload');
         const uploadSpan = uploadLabel ? uploadLabel.querySelector('span.btn') : null;
         if (uploadSpan) {
@@ -225,6 +243,20 @@ qEl.addEventListener('keydown', (e) => {
             uploadSpan.style.display = 'inline-flex';
             uploadSpan.style.alignItems = 'center';
             uploadSpan.style.justifyContent = 'center';
+        }
+
+        function getModeIcon(modeId) {
+            if (modeId === RESPONSE_MODES.copy_prompt.id) {
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+            }
+            return '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+        }
+
+        function updateModeButtonLook(modeId, btnElement) {
+            const mode = RESPONSE_MODES[modeId] || RESPONSE_MODES.answer;
+            btnElement.innerHTML = getModeIcon(mode.id);
+            btnElement.title = '模式: ' + mode.name;
+            btnElement.dataset.mode = mode.id;
         }
 
         function updateModelButtonLook(modelId, btnElement) {
@@ -246,23 +278,44 @@ qEl.addEventListener('keydown', (e) => {
                 iconHtml = '<img src="' + iconSrc + '" alt="' + altTextValue + '" style="width:32px;height:32px;border-radius:50%;background-color: white;padding: 2px;">';
             }
             btnElement.innerHTML = iconHtml;
+            btnElement.title = '模型: ' + getModelLabel(modelId);
         }
+
+        function applyModelSelection(modelId) {
+            currentModelId = modelId;
+            localStorage.setItem('chat_model', currentModelId);
+            const modelConf = MODELS[currentModelId] || {};
+            if (typeof modelConf.temp === 'number') currentTemperature = modelConf.temp;
+            if (typeof modelConf.top_p === 'number') currentTopP = modelConf.top_p;
+            updateModelButtonLook(currentModelId, modelBtn);
+        }
+
+        function renderModeMenuHtml() {
+            return '<div class="mode-menu">' + Object.values(RESPONSE_MODES).map(renderModeItem).join('') + '</div>';
+        }
+
+        function renderModelMenuHtml() {
+            return (
+                (Object.keys(MODELS).length > 0 ?
+                    '<div class="model-menu">' + Object.entries(MODELS).map(renderModelItem).join('') + '</div>' :
+                    '<div class="popover-placeholder">无可用模型</div>'
+                ) +
+                '<div class="popover-divider"></div>' +
+                paramSliderHtml('Temperature', currentTemperature, 2, 0.05) +
+                '<div class="popover-divider"></div>' +
+                paramSliderHtml('Top-P', currentTopP, 2, 0.05)
+            );
+        }
+
+        const modeBtn = document.createElement('button');
+        modeBtn.className = 'btn tonal';
+        updateModeButtonLook(currentResponseMode, modeBtn);
 
         const modelBtn = document.createElement('button');
         modelBtn.className = 'btn tonal';
         updateModelButtonLook(currentModelId, modelBtn);
 
-        const tempBtn = document.createElement('button');
-        tempBtn.className = 'btn tonal';
-        tempBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 13.25a3.25 3.25 0 1 0 0-6.5a3.25 3.25 0 0 0 0 6.5M13.5 4.636a.75.75 0 0 1-.75.75a4.75 4.75 0 0 0 0 9.228a.75.75 0 0 1 0 1.5a6.25 6.25 0 0 1 0-12.228a.75.75 0 0 1 .75.75M12 1.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V2a.75.75 0 0 1 .75-.75M12 20.25a.75.75 0 0 1 .75.75v.255a.75.75 0 0 1-1.5 0V21a.75.75 0 0 1 .75-.75m-6.79-2.54a.75.75 0 1 1-1.06-1.06l.176-.177a.75.75 0 0 1 1.06 1.06zm12.52 0a.75.75 0 1 1 1.06 1.06l-.176.177a.75.75 0 0 1-1.06-1.06z"/></svg>';
-        tempBtn.title = 'Temperature: ' + currentTemperature;
-
-        const topPBtn = document.createElement('button');
-        topPBtn.className = 'btn tonal';
-        topPBtn.innerHTML = '<b>P</b>';
-        topPBtn.title = 'Top-P: ' + currentTopP;
-
-        [modelBtn, tempBtn, topPBtn].forEach(btn => {
+        [modeBtn, modelBtn].forEach(btn => {
             btn.style.width = '32px';
             btn.style.height = '32px';
             btn.style.borderRadius = '50%';
@@ -270,185 +323,212 @@ qEl.addEventListener('keydown', (e) => {
         });
 
         if (uploadLabel) {
+            actionsContainer.insertBefore(modeBtn, uploadLabel);
             actionsContainer.insertBefore(modelBtn, uploadLabel);
-            actionsContainer.insertBefore(tempBtn, uploadLabel);
-            actionsContainer.insertBefore(topPBtn, uploadLabel);
         }
 
-        const mobileModelMenuHtml = () =>
-            '<div class="mobile-sheet-group">' +
-            '<div class="mobile-sheet-label">模型</div>' +
-            '<div class="model-menu mobile">' +
-            (Object.keys(MODELS).length > 0 ?
-                    Object.entries(MODELS).map(([id, m]) =>
-                        '<div class="model-item ' + (id === currentModelId ? 'active' : '') + '" data-id="' + id + '">' +
-                        '<img src="' + m.icon + '" alt="' + m.name + '"><span>' + m.name + '</span>' +
-                        '</div>'
-                    ).join('') :
-                    '<div class="popover-placeholder">无可用模型</div>'
-            ) +
-            '</div>' +
-            '</div>' +
-            '<div class="mobile-sheet-group">' +
-            paramSliderHtml('Temperature', currentTemperature, 2, 0.05) +
-            '</div>' +
-            '<div class="mobile-sheet-group">' +
-            paramSliderHtml('Top-P', currentTopP, 2, 0.05) +
-            '</div>';
+        const modelPop = document.createElement('div');
+        modelPop.className = 'toolbar-popover';
+        document.body.appendChild(modelPop);
 
-        function createPopover(btn, contentHtml, onOpen) {
-            const pop = document.createElement('div');
-            pop.className = 'toolbar-popover';
-            pop.innerHTML = contentHtml;
-            document.body.appendChild(pop);
+        const modePop = document.createElement('div');
+        modePop.className = 'toolbar-popover';
+        document.body.appendChild(modePop);
 
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
+        function positionPopover(btn, pop) {
+            const rect = btn.getBoundingClientRect();
+            pop.style.top = rect.bottom + 8 + 'px';
+            pop.style.left = 'auto';
+            pop.style.right = (window.innerWidth - rect.right) + 'px';
+            pop.style.transform = '';
+        }
 
-                if (window.innerWidth <= 768 && (btn === tempBtn || btn === topPBtn || btn === modelBtn)) {
+        async function openCustomOpenAIConfigDialog(selectAfterSave = true) {
+            return new Promise(resolve => {
+                const dlg = document.createElement('sl-dialog');
+                dlg.label = customOpenAIConfig?.configured ? '编辑自定义 OpenAI' : '配置自定义 OpenAI';
+                dlg.innerHTML =
+                    '<div class="custom-model-form">' +
+                    '<sl-input class="endpoint" label="Endpoint" placeholder="https://example.com/v1" value="' + escapeAttr(customOpenAIConfig?.endpoint) + '"></sl-input>' +
+                    '<sl-input class="model-name" label="模型名" placeholder="gpt-4o-mini" value="' + escapeAttr(customOpenAIConfig?.model_name) + '"></sl-input>' +
+                    '<sl-input class="api-key" type="password" label="API Key" placeholder="' + (customOpenAIConfig?.configured ? '留空表示沿用已保存的 Key' : 'sk-...') + '"></sl-input>' +
+                    '<div class="custom-model-hint">API Key 仅保存到当前用户私有配置中。</div>' +
+                    '</div>' +
+                    '<div slot="footer" style="display:flex;gap:8px;justify-content:flex-end">' +
+                    '<sl-button class="cancel" variant="neutral">取消</sl-button>' +
+                    '<sl-button class="ok" variant="primary">保存并使用</sl-button>' +
+                    '</div>';
+                document.body.appendChild(dlg);
 
-                    const fullMobileHtml = mobileModelMenuHtml();
-                    showMobileSheet(fullMobileHtml, '模型设置');
+                const endpointInput = dlg.querySelector('.endpoint');
+                const modelInput = dlg.querySelector('.model-name');
+                const apiKeyInput = dlg.querySelector('.api-key');
+                const okBtn = dlg.querySelector('.ok');
+                const cancelBtn = dlg.querySelector('.cancel');
 
-                    mobileSheetContent.querySelectorAll('.model-item').forEach(item => {
-                        item.addEventListener('click', () => {
-                            currentModelId = item.dataset.id;
-                            localStorage.setItem('chat_model', currentModelId);
-                            const modelConf = MODELS[currentModelId];
-                            currentTemperature = modelConf.temp;
-                            currentTopP = modelConf.top_p;
+                const hideDialog = () => {
+                    if (typeof dlg.hide === 'function') dlg.hide(); else dlg.removeAttribute('open');
+                };
 
-                            updateModelButtonLook(currentModelId, modelBtn);
-                            tempBtn.title = 'Temperature: ' + currentTemperature;
-                            topPBtn.title = 'Top-P: ' + currentTopP;
+                dlg.addEventListener('sl-after-hide', () => dlg.remove());
+                cancelBtn.addEventListener('click', () => {
+                    hideDialog();
+                    resolve(false);
+                });
 
-                            hideMobileSheet();
-                        });
+                okBtn.addEventListener('click', async () => {
+                    const endpoint = (endpointInput.value || '').trim();
+                    const modelName = (modelInput.value || '').trim();
+                    const apiKey = (apiKeyInput.value || '').trim();
+                    if (!endpoint || !modelName) {
+                        toast('Endpoint 和模型名不能为空', 'warning');
+                        return;
+                    }
+
+                    okBtn.loading = true;
+                    const res = await api('/chat/api/user-custom-openai', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            endpoint,
+                            model_name: modelName,
+                            api_key: apiKey
+                        })
                     });
+                    okBtn.loading = false;
 
-                    const tempSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(2) .param-slider');
-                    if (tempSliderBox) {
-                        setupSlider(tempSliderBox, (val) => {
-                            currentTemperature = val;
-                        }, tempBtn, 'Temperature');
+                    if (!res || !res.ok || !res.model) {
+                        toast(res?.detail || res?.error || '保存失败', 'danger');
+                        return;
                     }
 
-                    const topPSliderBox = mobileSheetContent.querySelector('.mobile-sheet-group:nth-of-type(3) .param-slider');
-                    if (topPSliderBox) {
-                        setupSlider(topPSliderBox, (val) => {
-                            currentTopP = val;
-                        }, topPBtn, 'Top-P');
-                    }
+                    customOpenAIConfig = res.custom_openai || { configured: true, endpoint, model_name: modelName };
+                    MODELS[res.model.id] = res.model;
+                    if (selectAfterSave) applyModelSelection(res.model.id);
+                    updateModelButtonLook(currentModelId, modelBtn);
+                    hideDialog();
+                    toast('已保存自定义 OpenAI 配置', 'success', 1800);
+                    resolve(true);
+                });
 
-                    return;
-                }
-
-                const allPops = document.querySelectorAll('.toolbar-popover');
-                const wasOpen = pop.classList.contains('visible');
-
-                allPops.forEach(p => { p.classList.remove('visible'); });
-
-                if (!wasOpen) {
-                    const rect = btn.getBoundingClientRect();
-                    pop.style.top = rect.bottom + 8 + 'px';
-                    pop.style.left = 'auto';
-                    pop.style.right = (window.innerWidth - rect.right) + 'px';
-                    pop.style.transform = '';
-
-                    pop.classList.add('visible');
-                    if (onOpen) onOpen(pop);
-                }
+                if (typeof dlg.show === 'function') dlg.show(); else dlg.setAttribute('open', '');
             });
-            return pop;
         }
 
-        const desktopModelMenuHtml =
-            (Object.keys(MODELS).length > 0 ?
-                    '<div class="model-menu">' + Object.entries(MODELS).map(([id, m]) =>
-                        '<div class="model-item ' + (id === currentModelId ? 'active' : '') + '" data-id="' + id + '">' +
-                        '<img src="' + m.icon + '" alt="' + m.name + '"><span>' + m.name + '</span>' +
-                        '</div>'
-                    ).join('') +
-                    '</div>' :
-                    '<div class="popover-placeholder">无可用模型</div>'
-            ) +
-            '<div class="popover-divider"></div>' +
-            paramSliderHtml('Temperature', currentTemperature, 2, 0.05) +
-            '<div class="popover-divider"></div>' +
-            paramSliderHtml('Top-P', currentTopP, 2, 0.05);
-
-        tempBtn.style.display = 'none';
-        topPBtn.style.display = 'none';
-
-        const modelPop = createPopover(modelBtn, desktopModelMenuHtml, (pop) => {
-            const sliders = pop.querySelectorAll('.param-slider');
-            if (sliders.length >= 2) {
-                const tempInput = sliders[0].querySelector('.param-input');
-                const tempRange = sliders[0].querySelector('.param-range');
-                const topPInput = sliders[1].querySelector('.param-input');
-                const topPRange = sliders[1].querySelector('.param-range');
-
-                if (tempInput) tempInput.value = currentTemperature.toFixed(2);
-                if (tempRange) tempRange.value = currentTemperature;
-                if (topPInput) topPInput.value = currentTopP.toFixed(2);
-                if (topPRange) topPRange.value = currentTopP;
-            }
-
-            pop.querySelectorAll('.model-item').forEach(item => {
-                item.classList.toggle('active', item.dataset.id === currentModelId);
-            });
-        });
-
-        modelPop.querySelectorAll('.model-item').forEach(item => {
-            item.addEventListener('click', () => {
-                currentModelId = item.dataset.id;
-                localStorage.setItem('chat_model', currentModelId);
-                const modelConf = MODELS[currentModelId];
-                currentTemperature = modelConf.temp;
-                currentTopP = modelConf.top_p;
-
-                updateModelButtonLook(currentModelId, modelBtn);
-                tempBtn.title = 'Temperature: ' + currentTemperature;
-                topPBtn.title = 'Top-P: ' + currentTopP;
-
-                modelPop.querySelectorAll('.model-item').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                modelPop.classList.remove('visible');
-            });
-        });
-
-        function setupSlider(pop, stateUpdater, btn, titlePrefix) {
-            if (!pop) {
-                console.error('setupSlider received null element. This might be a selector error.');
-                return;
-            }
-            const input = pop.querySelector('.param-input');
-            const range = pop.querySelector('.param-range');
-
-            if (!input || !range) {
-                console.error('Slider input or range not found inside', pop);
-                return;
-            }
+        function setupSlider(box, stateUpdater) {
+            if (!box) return;
+            const input = box.querySelector('.param-input');
+            const range = box.querySelector('.param-range');
+            if (!input || !range) return;
 
             const update = (val) => {
                 const num = parseFloat(val);
-                if (!isNaN(num)) {
-                    stateUpdater(num);
-                    input.value = num.toFixed(2);
-                    range.value = num;
-                    btn.title = titlePrefix + ': ' + num.toFixed(2);
-                }
+                if (Number.isNaN(num)) return;
+                stateUpdater(num);
+                input.value = num.toFixed(2);
+                range.value = String(num);
             };
+
             input.addEventListener('input', (e) => update(e.target.value));
             range.addEventListener('input', (e) => update(e.target.value));
         }
 
-        const desktopSliders = modelPop.querySelectorAll('.param-slider');
-        if (desktopSliders.length >= 2) {
-            setupSlider(desktopSliders[0], (val) => currentTemperature = val, tempBtn, 'Temperature');
-            setupSlider(desktopSliders[1], (val) => currentTopP = val, topPBtn, 'Top-P');
+        function bindModelMenu(container, closeMenu) {
+            container.querySelectorAll('.model-item').forEach(item => {
+                item.addEventListener('click', async () => {
+                    if (item.dataset.custom === 'true') {
+                        closeMenu();
+                        await openCustomOpenAIConfigDialog(true);
+                        return;
+                    }
+                    applyModelSelection(item.dataset.id);
+                    closeMenu();
+                });
+            });
+
+            const sliders = container.querySelectorAll('.param-slider');
+            if (sliders.length >= 2) {
+                setupSlider(sliders[0], (val) => currentTemperature = val);
+                setupSlider(sliders[1], (val) => currentTopP = val);
+            }
         }
 
+        function openModeMobileSheet() {
+            const html =
+                '<div class="mobile-sheet-group">' +
+                '<div class="mobile-sheet-label">模式</div>' +
+                Object.values(RESPONSE_MODES).map(mode =>
+                    '<div class="mobile-menu-item mode-mobile-item ' + (mode.id === currentResponseMode ? 'active' : '') + '" data-mode="' + mode.id + '">' +
+                    '<div class="mode-item-title">' + mode.name + '</div>' +
+                    '<div class="mode-item-desc">' + mode.description + '</div>' +
+                    '</div>'
+                ).join('') +
+                '</div>';
+            showMobileSheet(html, '提问模式');
+            mobileSheetContent.querySelectorAll('.mode-mobile-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    currentResponseMode = item.dataset.mode;
+                    localStorage.setItem('chat_response_mode', currentResponseMode);
+                    updateModeButtonLook(currentResponseMode, modeBtn);
+                    hideMobileSheet();
+                });
+            });
+        }
+
+        function openModelMobileSheet() {
+            const html =
+                '<div class="mobile-sheet-group">' +
+                '<div class="mobile-sheet-label">模型</div>' +
+                '<div class="model-menu mobile">' +
+                (Object.keys(MODELS).length > 0 ?
+                    Object.entries(MODELS).map(renderModelItem).join('') :
+                    '<div class="popover-placeholder">无可用模型</div>'
+                ) +
+                '</div>' +
+                '</div>' +
+                '<div class="mobile-sheet-group">' + paramSliderHtml('Temperature', currentTemperature, 2, 0.05) + '</div>' +
+                '<div class="mobile-sheet-group">' + paramSliderHtml('Top-P', currentTopP, 2, 0.05) + '</div>';
+            showMobileSheet(html, '模型设置');
+            bindModelMenu(mobileSheetContent, hideMobileSheet);
+        }
+
+        function togglePopover(btn, pop, html, binder) {
+            const wasOpen = pop.classList.contains('visible');
+            document.querySelectorAll('.toolbar-popover.visible').forEach(p => p.classList.remove('visible'));
+            if (wasOpen) return;
+            pop.innerHTML = html();
+            positionPopover(btn, pop);
+            pop.classList.add('visible');
+            binder(pop);
+        }
+
+        modeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.innerWidth <= 768) {
+                openModeMobileSheet();
+                return;
+            }
+            togglePopover(modeBtn, modePop, renderModeMenuHtml, (popEl) => {
+                popEl.querySelectorAll('.mode-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        currentResponseMode = item.dataset.mode;
+                        localStorage.setItem('chat_response_mode', currentResponseMode);
+                        updateModeButtonLook(currentResponseMode, modeBtn);
+                        modePop.classList.remove('visible');
+                    });
+                });
+            });
+        });
+
+        modelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (window.innerWidth <= 768) {
+                openModelMobileSheet();
+                return;
+            }
+            togglePopover(modelBtn, modelPop, renderModelMenuHtml, (popEl) => {
+                bindModelMenu(popEl, () => modelPop.classList.remove('visible'));
+            });
+        });
 
         document.addEventListener('click', () => {
             document.querySelectorAll('.toolbar-popover').forEach(p => p.classList.remove('visible'));

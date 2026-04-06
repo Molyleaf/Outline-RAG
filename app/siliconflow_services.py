@@ -1,4 +1,4 @@
-"""Shared LLM/Embedding services.
+"""SiliconFlow 聊天、Embedding 与 Reranker 服务。
 
 Target versions:
 
@@ -12,7 +12,6 @@ Migration notes:
 * Some retriever/storage utilities moved into `langchain_classic`.
 """
 
-# app/llm_services.py
 import hashlib
 import logging
 import os
@@ -183,16 +182,47 @@ def _create_retry_client() -> httpx.AsyncClient:
 
 
 # --- 聊天模型 (LLM) ---
-
-# [--- 修复：恢复为单个 LLM 实例 ---]
-# 我们将在 api.py 中使用 'extra_body' 动态传递 'enable_thinking'
-# 'model' 参数已移除，它将在 api.py 中通过 .bind() 动态提供
-llm = ChatSiliconFlow(
+siliconflow_llm = ChatSiliconFlow(
     api_key=config.SILICONFLOW_API_KEY,
     base_url=SILICONFLOW_BASE_URL_V1
 )
 
-# [--- 修复：移除 llm_thinking 实例 ---]
+
+def build_chat_model(
+    *,
+    model: str,
+    temperature: float,
+    top_p: float,
+    enable_thinking: bool | None = None,
+    use_reasoning_parser: bool = False,
+):
+    params: dict[str, Any] = {
+        "model": model,
+        "temperature": temperature,
+        "top_p": top_p,
+    }
+    if use_reasoning_parser:
+        params["stream_options"] = {"include_reasoning": True}
+    if enable_thinking is not None:
+        params["extra_body"] = {"enable_thinking": enable_thinking}
+    return siliconflow_llm.bind(**params)
+
+
+def build_aux_chat_model(
+    *,
+    model: str,
+    temperature: float,
+    top_p: float,
+    response_format: dict[str, Any] | None = None,
+):
+    params: dict[str, Any] = {
+        "model": model,
+        "temperature": temperature,
+        "top_p": top_p,
+    }
+    if response_format:
+        params["response_format"] = response_format
+    return siliconflow_llm.bind(**params)
 
 
 # --- 启用 LLM 异步缓存 ---
@@ -208,8 +238,8 @@ if redis_client:
 
         # 全局缓存（推荐） + 兼容旧写法（某些版本允许实例级 cache）
         set_llm_cache(llm_cache)
-        if hasattr(llm, "cache"):
-            llm.cache = llm_cache  # type: ignore
+        if hasattr(siliconflow_llm, "cache"):
+            siliconflow_llm.cache = llm_cache  # type: ignore
         logger.info("LLM 异步缓存已启用 (AsyncRedisCache, TTL=3600s)。")
     except Exception as e:
         logger.warning(f"无法配置 AsyncRedisCache: {e}", exc_info=True)

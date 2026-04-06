@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   model TEXT,
+  mode TEXT,
   temperature REAL,
   top_p REAL
 );
@@ -110,6 +111,27 @@ CREATE TABLE IF NOT EXISTS attachments (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS user_private_openai_configs (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  endpoint_encrypted TEXT NOT NULL,
+  api_key_encrypted TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS message_prompt_bundles (
+  message_id BIGINT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  response_mode TEXT NOT NULL DEFAULT 'answer',
+  prompt_text TEXT NOT NULL,
+  context_text TEXT NOT NULL,
+  clipboard_text TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_prompt_bundles_user_id ON message_prompt_bundles(user_id);
 
 CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
     key TEXT NOT NULL,
@@ -143,6 +165,8 @@ CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
 # 对于“已有旧表”的场景，CREATE TABLE IF NOT EXISTS 不会补齐缺失字段。
 # 因此我们额外执行一次 ALTER TABLE 来确保必要列存在。
 PGVECTOR_ALTER_SQL = """
+                     ALTER TABLE messages
+                         ADD COLUMN IF NOT EXISTS mode TEXT;
                      ALTER TABLE langchain_pg_embedding
                          ADD COLUMN IF NOT EXISTS langchain_metadata JSONB; \
                      """

@@ -1,15 +1,17 @@
 # app/blueprints/api.py
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import re
 import time
 import uuid
-from operator import itemgetter
 from typing import List, Dict, Any
 
 import config # type: ignore
 import rag # type: ignore
+from cryptography.fernet import Fernet, InvalidToken
 from database import AsyncSessionLocal, redis_client # type: ignore
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -17,15 +19,18 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableBranch, RunnableLambda
-from llm_services import llm # type: ignore
+from langchain_core.runnables import RunnableParallel
+from openai_services import build_openai_chat_model # type: ignore
 from outline_client import verify_outline_signature # type: ignore
 from pydantic import BaseModel
+from siliconflow_services import build_aux_chat_model, build_chat_model # type: ignore
 from sqlalchemy import text
 from werkzeug.utils import secure_filename
 
 logger = logging.getLogger(__name__)
 api_router = APIRouter()
+RESPONSE_MODE_ANSWER = "answer"
+RESPONSE_MODE_COPY_PROMPT = "copy_prompt"
 
 # --- 常量定义 ---
 NO_CACHE_HEADERS = {
@@ -53,6 +58,127 @@ async def get_db_session():
     """
     async with AsyncSessionLocal() as session:
         yield session
+
+
+def _build_fernet() -> Fernet:
+    secret_bytes = (config.SECRET_KEY or "").encode("utf-8")
+    if not secret_bytes:
+        raise RuntimeError("SECRET_KEY 未设置，无法初始化私有配置加密器。")
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret_bytes).digest())
+    return Fernet(key)
+
+
+_PRIVATE_FERNET = _build_fernet()
+
+
+def _encrypt_private_value(value: str) -> str:
+    return _PRIVATE_FERNET.encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_private_value(value: str) -> str:
+    try:
+        return _PRIVATE_FERNET.decrypt(value.encode("utf-8")).decode("utf-8")
+    except InvalidToken as exc:
+        raise HTTPException(status_code=500, detail="用户私有模型配置解密失败") from exc
+
+
+def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
+    return "\n".join([f"{m.type}: {m.content}" for m in messages])
+
+
+def _stringify_prompt_value(prompt_value) -> str:
+    sections = []
+    for message in getattr(prompt_value, "messages", []):
+        role = getattr(message, "type", "message")
+        content = getattr(message, "content", "")
+        sections.append(f"[{role}]\n{content}")
+    return "\n\n".join(sections).strip()
+
+
+def _build_clipboard_text(
+    *,
+    decision: str,
+    prompt_text: str,
+    context_text: str,
+    sources_map: dict[str, str],
+) -> str:
+    parts = [
+        f"任务路由: {decision or 'General'}",
+        "提示词:",
+        prompt_text or "(空)",
+    ]
+    if context_text:
+        parts.extend(["", "召回文档:", context_text])
+    if sources_map:
+        parts.extend(["", "来源映射:", json.dumps(sources_map, ensure_ascii=False, indent=2)])
+    return "\n".join(parts).strip()
+
+
+def _strip_hidden_message_metadata(content: str) -> str:
+    return re.sub(r"\n\n\[SourcesMap\]:\s*\{[\s\S]*\}\s*$", "", content or "").strip()
+
+
+def _build_custom_openai_model_definition(summary: dict[str, Any] | None) -> dict[str, Any]:
+    configured = bool(summary and summary.get("configured"))
+    display_model_name = (summary or {}).get("model_name") or config.CUSTOM_OPENAI_DISPLAY_NAME
+    name = f"{config.CUSTOM_OPENAI_DISPLAY_NAME} · {display_model_name}" if configured else config.CUSTOM_OPENAI_DISPLAY_NAME
+    return {
+        "id": config.CUSTOM_OPENAI_MODEL_ID,
+        "provider": "openai",
+        "name": name,
+        "icon": config.CUSTOM_OPENAI_ICON,
+        "temp": config.CUSTOM_OPENAI_DEFAULT_TEMP,
+        "top_p": config.CUSTOM_OPENAI_DEFAULT_TOP_P,
+        "is_custom": True,
+        "configured": configured,
+    }
+
+
+async def _get_user_custom_openai_summary(session, user_id: str) -> dict[str, Any] | None:
+    row = (await session.execute(
+        text(
+            "SELECT model_name, endpoint_encrypted, api_key_encrypted, updated_at "
+            "FROM user_private_openai_configs WHERE user_id=:uid"
+        ),
+        {"uid": user_id},
+    )).mappings().first()
+    if not row:
+        return None
+    return {
+        "configured": True,
+        "model_name": row["model_name"],
+        "endpoint": _decrypt_private_value(row["endpoint_encrypted"]),
+        "has_api_key": bool(row["api_key_encrypted"]),
+        "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+    }
+
+
+async def _get_user_custom_openai_secrets(session, user_id: str) -> dict[str, str] | None:
+    row = (await session.execute(
+        text(
+            "SELECT model_name, endpoint_encrypted, api_key_encrypted "
+            "FROM user_private_openai_configs WHERE user_id=:uid"
+        ),
+        {"uid": user_id},
+    )).mappings().first()
+    if not row:
+        return None
+    return {
+        "model_name": row["model_name"],
+        "endpoint": _decrypt_private_value(row["endpoint_encrypted"]),
+        "api_key": _decrypt_private_value(row["api_key_encrypted"]),
+    }
+
+
+def _build_available_models_for_user(user_id: str, custom_summary: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    auth_user_ids = set(config.BETA_AUTHORIZED_USER_IDS)
+    available_models = []
+    for model in config.CHAT_MODELS:
+        is_beta = model.get("beta", False)
+        if not is_beta or user_id in auth_user_ids:
+            available_models.append(dict(model))
+    available_models.append(_build_custom_openai_model_definition(custom_summary))
+    return available_models
 
 # --- 溯源格式化函数 ---
 def _format_docs_with_metadata(docs: List[Document]) -> dict:
@@ -149,6 +275,111 @@ async def _get_reranked_parent_docs(query: str) -> List[Document]:
         logger.error(f"Failed to amget parent docs ({parent_ids}) from store: {e}", exc_info=True)
         return []
 
+
+async def _prepare_prompt_bundle(
+    *,
+    query: str,
+    chat_history: List[AIMessage | HumanMessage],
+    classifier_llm,
+    rewriter_llm,
+) -> dict[str, Any]:
+    classifier_chain = (
+        RunnableParallel({
+            "input": lambda x: x["input"],
+            "history": lambda x: _format_history_str(x["chat_history"]),
+        })
+        | PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
+        | classifier_llm
+        | JsonOutputParser()
+    )
+
+    rewrite_chain = (
+        RunnableParallel({
+            "history": lambda x: _format_history_str(x["chat_history"]),
+            "query": lambda x: x["input"],
+        })
+        | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
+        | rewriter_llm
+        | StrOutputParser()
+    )
+
+    chain_input = {"input": query, "chat_history": chat_history}
+
+    try:
+        classification_data = await classifier_chain.ainvoke(chain_input)
+    except Exception as exc:
+        logger.error("请求分类失败，回退到 General。", exc_info=True)
+        classification_data = {"decision": "General", "error": str(exc)}
+
+    decision = ((classification_data or {}).get("decision") or "General").strip() or "General"
+    sources_map: dict[str, str] = {}
+    context_text = ""
+
+    if decision in {"Query", "Creative", "Roleplay"}:
+        try:
+            rewritten_query = await rewrite_chain.ainvoke(chain_input)
+            docs = await _get_reranked_parent_docs(rewritten_query)
+        except Exception as exc:
+            logger.error("RAG 检索预处理失败，回退到 General。", exc_info=True)
+            decision = "General"
+            classification_data = {
+                **classification_data,
+                "retrieval_error": str(exc),
+                "decision": "General",
+            }
+            docs = []
+
+        if decision in {"Query", "Creative", "Roleplay"}:
+            formatted_data = _format_docs_with_metadata(docs)
+            context_text = formatted_data["context"]
+            sources_map = formatted_data["sources_map"]
+            system_prompt = {
+                "Query": config.SYSTEM_PROMPT_QUERY,
+                "Creative": config.SYSTEM_PROMPT_CREATIVE,
+                "Roleplay": config.SYSTEM_PROMPT_ROLEPLAY,
+            }[decision]
+            prompt_value = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE),
+            ]).invoke({
+                "chat_history": chat_history,
+                "context": context_text,
+                "query": query,
+            })
+        else:
+            prompt_value = None
+    else:
+        prompt_value = None
+
+    if prompt_value is None:
+        prompt_value = ChatPromptTemplate.from_messages([
+            ("system", config.SYSTEM_PROMPT_GENERAL),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("user", "{input}"),
+        ]).invoke({
+            "chat_history": chat_history,
+            "input": query,
+        })
+
+    prompt_text = _stringify_prompt_value(prompt_value)
+    clipboard_text = _build_clipboard_text(
+        decision=decision,
+        prompt_text=prompt_text,
+        context_text=context_text,
+        sources_map=sources_map,
+    )
+
+    return {
+        "decision": decision,
+        "classification_data": classification_data,
+        "prompt_value": prompt_value,
+        "prompt_text": prompt_text,
+        "context_text": context_text,
+        "sources_map": sources_map,
+        "clipboard_text": clipboard_text,
+    }
+
 # --- utils ---
 def allowed_file(filename):
     """检查文件名后缀是否在允许列表中。"""
@@ -156,27 +387,19 @@ def allowed_file(filename):
         filename.rsplit(".", 1)[1].lower() in config.ALLOWED_FILE_EXTENSIONS
 
 @api_router.get("/api/me")
-async def api_me(user: Dict[str, Any] = Depends(get_current_user)):
+async def api_me(
+        user: Dict[str, Any] = Depends(get_current_user),
+        session=Depends(get_db_session)
+):
     user_id = user.get("id")
-    auth_user_ids = set(uid.strip() for uid in config.BETA_AUTHORIZED_USER_IDS.split(",") if uid.strip())
-
-    try:
-        all_models = json.loads(config.CHAT_MODELS_JSON)
-    except json.JSONDecodeError:
-        logger.error("CHAT_MODELS_JSON 环境变量格式错误，将返回空模型列表。")
-        all_models = []
-
-    available_models = []
-    for model in all_models:
-        is_beta = model.get("beta", False)
-        if not is_beta or (is_beta and user_id in auth_user_ids):
-            available_models.append(model)
-
+    custom_summary = await _get_user_custom_openai_summary(session, user_id)
+    available_models = _build_available_models_for_user(user_id, custom_summary)
     models_dict = {model["id"]: model for model in available_models}
 
     return JSONResponse({
         "user": user,
-        "models": models_dict
+        "models": models_dict,
+        "custom_openai": custom_summary or {"configured": False},
     }, headers=NO_CACHE_HEADERS)
 
 # Pydantic 模型
@@ -186,6 +409,11 @@ class ConversationCreate(BaseModel):
 class ConversationRename(BaseModel):
     title: str
 
+class UserCustomOpenAIConfigUpdate(BaseModel):
+    api_key: str | None = None
+    endpoint: str
+    model_name: str
+
 class AskRequest(BaseModel):
     query: str
     conv_id: str
@@ -193,6 +421,57 @@ class AskRequest(BaseModel):
     temperature: float | None = 0.7
     top_p: float | None = 0.7
     edit_source_message_id: int | None = None
+    response_mode: str | None = RESPONSE_MODE_ANSWER
+
+
+@api_router.post("/api/user-custom-openai")
+async def api_upsert_user_custom_openai(
+        body: UserCustomOpenAIConfigUpdate,
+        user: Dict[str, Any] = Depends(get_current_user),
+        session=Depends(get_db_session)
+):
+    endpoint = (body.endpoint or "").strip().rstrip("/")
+    model_name = (body.model_name or "").strip()
+    api_key = (body.api_key or "").strip()
+
+    if not endpoint:
+        raise HTTPException(status_code=400, detail="endpoint 不能为空")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="模型名不能为空")
+
+    async with session.begin():
+        existing = await _get_user_custom_openai_secrets(session, user["id"])
+    if not api_key and existing:
+        api_key = existing["api_key"]
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 不能为空")
+
+    async with session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO user_private_openai_configs "
+                "(user_id, endpoint_encrypted, api_key_encrypted, model_name) "
+                "VALUES (:uid, :endpoint, :api_key, :model_name) "
+                "ON CONFLICT (user_id) DO UPDATE SET "
+                "endpoint_encrypted=EXCLUDED.endpoint_encrypted, "
+                "api_key_encrypted=EXCLUDED.api_key_encrypted, "
+                "model_name=EXCLUDED.model_name, "
+                "updated_at=NOW()"
+            ),
+            {
+                "uid": user["id"],
+                "endpoint": _encrypt_private_value(endpoint),
+                "api_key": _encrypt_private_value(api_key),
+                "model_name": model_name,
+            },
+        )
+
+    summary = await _get_user_custom_openai_summary(session, user["id"])
+    return JSONResponse({
+        "ok": True,
+        "custom_openai": summary,
+        "model": _build_custom_openai_model_definition(summary),
+    }, headers=NO_CACHE_HEADERS)
 
 
 @api_router.get("/api/conversations")
@@ -340,7 +619,11 @@ async def api_messages(
     # (我们不再需要在这里重复 session.begin() 或权限检查)
     async with session.begin():
         rs = (await session.execute(
-            text("SELECT id, role, content, created_at, model, temperature, top_p FROM messages WHERE conv_id=:cid ORDER BY id ASC"),
+            text(
+                "SELECT m.id, m.role, m.content, m.created_at, m.model, m.mode, m.temperature, m.top_p, "
+                "EXISTS(SELECT 1 FROM message_prompt_bundles b WHERE b.message_id = m.id) AS has_prompt_bundle "
+                "FROM messages m WHERE m.conv_id=:cid ORDER BY m.id ASC"
+            ),
             {"cid": conv_id}
         )).mappings().all()
 
@@ -360,6 +643,28 @@ async def api_messages(
     )
 
 
+@api_router.get("/api/messages/{message_id}/prompt-bundle")
+async def api_message_prompt_bundle(
+        message_id: int,
+        user: Dict[str, Any] = Depends(get_current_user),
+        session=Depends(get_db_session)
+):
+    async with session.begin():
+        row = (await session.execute(
+            text(
+                "SELECT clipboard_text, prompt_text, context_text, response_mode "
+                "FROM message_prompt_bundles "
+                "WHERE message_id=:mid AND user_id=:uid"
+            ),
+            {"mid": message_id, "uid": user["id"]},
+        )).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="提示词包不存在")
+
+    return JSONResponse(dict(row), headers=NO_CACHE_HEADERS)
+
+
 @api_router.post("/api/ask")
 async def api_ask(
         body: AskRequest,
@@ -371,9 +676,12 @@ async def api_ask(
     query, conv_id = (body.query or "").strip(), body.conv_id
     model_id, temperature, top_p = body.model, body.temperature, body.top_p
     edit_source_message_id = body.edit_source_message_id
+    response_mode = (body.response_mode or RESPONSE_MODE_ANSWER).strip() or RESPONSE_MODE_ANSWER
 
     if not query or not conv_id:
         raise HTTPException(status_code=400, detail="missing query or conv_id")
+    if response_mode not in {RESPONSE_MODE_ANSWER, RESPONSE_MODE_COPY_PROMPT}:
+        raise HTTPException(status_code=400, detail="unsupported response_mode")
 
     # 在进入异步流程前，把 user_id 固定为局部不可变变量，避免闭包引用被“污染”
     user_id = user["id"]
@@ -389,213 +697,58 @@ async def api_ask(
         logger.error(f"[{conv_id}] RAG 组件 'compression_retriever' 或 'parent_store' 未能初始化。")
         return JSONResponse({"error": "RAG 服务组件 'compression_retriever' 或 'parent_store' 未就绪"}, status_code=503)
 
-    try:
-        all_models_list = json.loads(config.CHAT_MODELS_JSON)
-        models_dict = {m["id"]: m for m in all_models_list}
-    except json.JSONDecodeError:
-        logger.error("CHAT_MODELS_JSON 环境变量格式错误，无法确定模型参数。")
-        models_dict = {}
+    async with session.begin():
+        custom_summary = await _get_user_custom_openai_summary(session, user_id)
+    models_dict = {
+        m["id"]: m for m in _build_available_models_for_user(user_id, custom_summary)
+    }
+    model_properties = models_dict.get(model_id)
+    if not model_properties:
+        raise HTTPException(status_code=400, detail="模型不存在或当前用户不可用")
 
-    # 获取所选模型的完整属性
-    model_properties = models_dict.get(model_id, {})
-
-    # 如果请求中未指定 (null)，则使用配置中的默认值
     if temperature is None:
         temperature = model_properties.get("temp", 0.7)
     if top_p is None:
         top_p = model_properties.get("top_p", 0.7)
 
-    # --- [关键修复]：读取新的三态 'enable_thinking' 和 'use_reasoning_parser' 键 ---
-
-    # .get("enable_thinking", None) 将返回 True, False, 或 None
     enable_thinking_value = model_properties.get("enable_thinking", None)
+    use_reasoning_parser = bool(model_properties.get("use_reasoning_parser", False))
+    provider = model_properties.get("provider", "siliconflow")
 
-    # .get("use_reasoning_parser", False) 将返回 True 或 False
-    use_reasoning_parser = model_properties.get("use_reasoning_parser", False)
-
-    # --- LCEL 链定义 ---
-
-    # 根据模型属性动态添加 stream_options
-    llm_params: Dict[str, Any] = {
-        "model": model_id, # 使用模型 ID
-        "temperature": temperature,
-        "top_p": top_p,
-    }
-
-    # 1. (控制解析) 如果 'use_reasoning_parser' 为 true，添加 stream_options
-    if use_reasoning_parser:
-        llm_params["stream_options"] = {
-            "include_reasoning": True,
-        }
-
-    # 2. (控制 API) 如果 'enable_thinking' 不是 None (即它是 True 或 False)
-    if enable_thinking_value is not None:
-        llm_params["extra_body"] = {
-            "enable_thinking": enable_thinking_value
-        }
-
-    # 3. 绑定所有参数。
-    #    - Kimi-Instruct (null): 不添加 'stream_options' 或 'extra_body'
-    #    - Qwen-Instruct (false): 不添加 'stream_options'，添加 'extra_body: {false}'
-    #    - Deepseek (true/true): 添加 'stream_options' 和 'extra_body: {true}'
-    #    - Qwen-Thinking (null/true): 添加 'stream_options'，不添加 'extra_body'
-    llm_with_options = llm.bind(**llm_params)
-
-
-    # 为辅助 LLM (分类器) 设置特定参数
-    # 强制使用 BASE_CHAT_MODEL, 非流式, JSON 结构化输出
-    classifier_params: Dict[str, Any] = {
-        "model": config.BASE_CHAT_MODEL,
-        "temperature": 0.0,
-        "top_p": 1.0,
-        "response_format": {"type": "json_object"}
-    }
-    # 辅助任务总是使用标准的、非思考的 llm 实例
-    classifier_llm = llm.bind(**classifier_params)
-
-
-    # 为辅助 LLM (重写器) 设置特定参数
-    # 强制使用 BASE_CHAT_MODEL, 非流式, 默认 (文本) 输出
-    rewriter_params: Dict[str, Any] = {
-        "model": config.BASE_CHAT_MODEL,
-        "temperature": 0.0,
-        "top_p": 1.0,
-    }
-    # 辅助任务总是使用标准的、非思考的 llm 实例
-    rewriter_llm = llm.bind(**rewriter_params)
-
-    # -----------------------------------------------------------
-    # 1. 定义所有 System Prompts
-    # -----------------------------------------------------------
-    system_prompt_query = config.SYSTEM_PROMPT_QUERY
-    system_prompt_creative = config.SYSTEM_PROMPT_CREATIVE
-    system_prompt_roleplay = config.SYSTEM_PROMPT_ROLEPLAY
-    system_prompt_general = config.SYSTEM_PROMPT_GENERAL
-
-    # 2. 查询重写链
-    def _format_history_str(messages: List[AIMessage | HumanMessage]) -> str:
-        return "\n".join([f"{m.type}: {m.content}" for m in messages])
-
-    rewrite_chain = (
-            RunnableParallel({
-                "history": lambda x: _format_history_str(x["chat_history"]),
-                "query": lambda x: x["input"]
-            })
-            | PromptTemplate.from_template(config.REWRITE_PROMPT_TEMPLATE)
-            | rewriter_llm
-            | StrOutputParser()
+    classifier_llm = build_aux_chat_model(
+        model=config.BASE_CHAT_MODEL,
+        temperature=0.0,
+        top_p=1.0,
+        response_format={"type": "json_object"},
+    )
+    rewriter_llm = build_aux_chat_model(
+        model=config.BASE_CHAT_MODEL,
+        temperature=0.0,
+        top_p=1.0,
     )
 
-
-    # 3. 核心 RAG 链 (新架构：分离元数据)
-    get_docs_runnable = RunnableLambda(_get_reranked_parent_docs)
-
-    # 3a. RAG 检索链 (通用部分，在 Prompt 之前)
-    rag_retrieval_chain = (
-            RunnableParallel({
-                "rewritten_query": rewrite_chain,
-                "input": lambda x: x["input"],
-                "chat_history": lambda x: x["chat_history"]
-            })
-            # 1. 检索重排块 -> 获取父文档
-            | RunnablePassthrough.assign(
-        docs=itemgetter("rewritten_query") | get_docs_runnable
-    )
-            # 2. 格式化父文档，返回 {"context": ..., "sources_map": ...}
-            | RunnablePassthrough.assign(
-        formatted_data=lambda x: _format_docs_with_metadata(x["docs"])
-    )
-        # 输出: rewritten_query, input, chat_history, docs, formatted_data
-    )
-
-    # 3b. RAG Prompt 构造器 (辅助函数)
-    def create_rag_prompt_builder(system_prompt: str):
-        """辅助函数：根据传入的 system_prompt 创建 Prompt 构造链"""
-        return (
-            # 3. 准备 Prompt 输入，并暂存 sources_map
-                RunnableParallel({
-                    "chat_history": lambda x: x["chat_history"],
-                    "context": lambda x: x["formatted_data"]["context"], # 仅 Context
-                    "query": lambda x: x["input"], # (重要) 最终 Prompt 仍使用用户原始输入
-                    "sources_map": lambda x: x["formatted_data"]["sources_map"] # 暂存 Map
-                })
-                # 4. 并行传递 Prompt 和 Map
-                | {
-                    "prompt": ChatPromptTemplate.from_messages([
-                        ("system", system_prompt), # <-- 动态注入 System Prompt
-                        MessagesPlaceholder(variable_name="chat_history"),
-                        ("user", config.HISTORY_AWARE_PROMPT_TEMPLATE)
-                    ]),
-                    "sources_map": itemgetter("sources_map") # 绕过 LLM 传递 Map
-                }
-        )
-
-    # 3c. RAG LLM 链 (通用部分)
-    rag_llm_chain = {
-        "llm_output": itemgetter("prompt") | llm_with_options, # type: ignore LLM 只处理 prompt
-        "sources_map": itemgetter("sources_map") # Map 被传递
-    }
-
-    # -----------------------------------------------------------
-    # 3d. 组合三个不同的 RAG 完整链
-    # -----------------------------------------------------------
-    rag_chain_query = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_query) | rag_llm_chain
-    rag_chain_creative = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_creative) | rag_llm_chain
-    rag_chain_roleplay = rag_retrieval_chain | create_rag_prompt_builder(system_prompt_roleplay) | rag_llm_chain
-
-
-    # 4. 智能路由 (使用新的 JSON Prompt)
-    classifier_prompt = PromptTemplate.from_template(config.CLASSIFIER_PROMPT_TEMPLATE)
-    classifier_chain = (
-        # 添加 RunnableParallel 来重命名和格式化变量
-        # 将 {"input": ..., "chat_history": ...} 映射为 {"input": ..., "history": ...}
-            RunnableParallel({
-                "input": itemgetter("input"),
-                "history": lambda x: _format_history_str(x["chat_history"]) # 使用已有的 _format_history_str 函数
-            })
-            | classifier_prompt
-            | classifier_llm # 使用已配置 JSON 输出的 classifier_llm
-            | JsonOutputParser()  # <-- 使用 JsonOutputParser
-    )
-
-    # 5. 通用任务链 (非 RAG)
-    general_chain = (
-            ChatPromptTemplate.from_messages([
-                ("system", system_prompt_general),
-                MessagesPlaceholder(variable_name="chat_history"),
-                ("user", "{input}")
-            ])
-            | llm_with_options
-    )
-    # 封装成与 RAG 链一致的输出格式
-    general_chain_formatted = RunnableParallel({
-        "llm_output": general_chain,
-        "sources_map": lambda x: {} # 通用任务没有 sources
-    })
-
-    # 6. 最终主链 (新路由)
-    chain_with_classification = RunnablePassthrough.assign(
-        # classification_data 将是一个字典: {"decision": "...", ...}
-        classification_data=classifier_chain
-    )
-
-    final_chain_streaming = chain_with_classification | RunnableBranch(
-        # 分支 1: Query (新路由)
-        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Query",
-         rag_chain_query
-         ),
-        # 分支 2: Creative (新路由)
-        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Creative",
-         rag_chain_creative
-         ),
-        # 分支 3: Roleplay (新路由)
-        (lambda x: ((x or {}).get("classification_data") or {}).get("decision") == "Roleplay",
-         rag_chain_roleplay
-         ),
-        # 分支 4: General (回退)
-        general_chain_formatted
-    )
-    # --- RAG 链定义结束 ---
+    final_llm = None
+    if response_mode == RESPONSE_MODE_ANSWER:
+        if provider == "openai" or model_id == config.CUSTOM_OPENAI_MODEL_ID:
+            async with session.begin():
+                custom_secrets = await _get_user_custom_openai_secrets(session, user_id)
+            if not custom_secrets:
+                raise HTTPException(status_code=400, detail="请先配置自定义 OpenAI 模型")
+            final_llm = build_openai_chat_model(
+                api_key=custom_secrets["api_key"],
+                base_url=custom_secrets["endpoint"],
+                model=custom_secrets["model_name"],
+                temperature=temperature,
+                top_p=top_p,
+            )
+        else:
+            final_llm = build_chat_model(
+                model=model_id,
+                temperature=temperature,
+                top_p=top_p,
+                enable_thinking=enable_thinking_value,
+                use_reasoning_parser=use_reasoning_parser,
+            )
 
     chat_history_db = []
     async with session.begin():
@@ -667,7 +820,7 @@ async def api_ask(
         if r["role"] == "user":
             chat_history.append(HumanMessage(content=r["content"]))
         elif r["role"] == "assistant":
-            content = r["content"]
+            content = _strip_hidden_message_metadata(r["content"])
             # 适配前端的 \n\n\n 分隔符
             thinking_match = re.search(r"\n(.*?)\n\n\n(.*)", content, re.DOTALL)
             if thinking_match:
@@ -675,57 +828,39 @@ async def api_ask(
             else:
                 chat_history.append(AIMessage(content=content))
 
+    try:
+        prompt_bundle = await _prepare_prompt_bundle(
+            query=query,
+            chat_history=chat_history,
+            classifier_llm=classifier_llm,
+            rewriter_llm=rewriter_llm,
+        )
+    except Exception as e:
+        logger.error(f"[{conv_id}] 提示词构建失败: {e}", exc_info=True)
+        return JSONResponse({"error": f"提示词构建失败: {e}"}, status_code=500)
+
     # 异步 generate 协程
     async def generate():
         yield ": ping\n\n"
         full_response = ""
-        sources_map = {} # 暂存 SourcesMap
+        sources_map = prompt_bundle["sources_map"]
         model_name = model_id
         thinking_response_for_db = ""
         stream_started = False
-        llm_is_done = False # LLM 完成标志
+        llm_is_done = False
 
         llm_task = None
         ping_task = None
 
         try:
-            # LCEL 链是非流式的，直到 .astream() 被调用。
-            # 我们先 .ainvoke() 分类器部分，以获取非流式（结构化）的输出。
-            # 这样我们就适配了 Change 1 (非流式辅助任务)
+            if response_mode == RESPONSE_MODE_COPY_PROMPT:
+                stream_started = True
+                full_response = "已复制提示词和召回文档，请到外部网页粘贴提问。"
+                yield f"data: {json.dumps({'choices': [{'delta': {'content': full_response, 'thinking': ''}}], 'model': model_name, 'copy_payload': prompt_bundle['clipboard_text'], 'response_mode': RESPONSE_MODE_COPY_PROMPT})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
-            # 1. (非流式) 执行分类
-            chain_input = {"input": query, "chat_history": chat_history}
-            try:
-                # .ainvoke() 将运行 classifier_chain (非流式, JSON)
-                # 并返回包含 "classification_data" 的字典
-                classification_result = await chain_with_classification.ainvoke(chain_input)
-                classification_data_debug = classification_result.get("classification_data", {})
-
-                # 2. (非流式) 根据分类结果选择 RAG 链或 General 链
-                #    (这模拟了 RunnableBranch 的逻辑)
-                decision = (classification_data_debug or {}).get("decision")
-
-                if decision == "Query":
-                    active_chain = rag_chain_query
-                elif decision == "Creative":
-                    active_chain = rag_chain_creative
-                elif decision == "Roleplay":
-                    active_chain = rag_chain_roleplay
-                else: # (General 或 Fallback)
-                    active_chain = general_chain_formatted
-
-            except Exception as e:
-                # 如果分类或路由失败，回退到通用链
-                logger.error(f"[{conv_id}] 路由/分类失败 (ainvoke): {e}. 回退到 General chain。", exc_info=True)
-                active_chain = general_chain_formatted
-                classification_data_debug = {"error": f"Classifier failed: {e}"}
-
-            # 3. (流式) 现在，我们只 .astream() 选定的 *最终* 链
-            #    active_chain (例如 rag_chain_query) 内部包含：
-            #    a) RAG 检索链 (包含 rewriter_llm, 非流式)
-            #    b) RAG LLM 链 (包含 llm_with_options, 流式)
-            llm_stream = active_chain.astream(chain_input)
-
+            llm_stream = final_llm.astream(prompt_bundle["prompt_value"])
             stream_started = True
 
             async def ping_generator():
@@ -752,46 +887,19 @@ async def api_ask(
                 for task in done:
                     if task == llm_task:
                         try:
-                            # 结果现在是一个字典 {"llm_output": ..., "sources_map": ...}
-                            delta_chunk_dict = task.result()
-
-                            logger.debug(f"RAW CHUNK FROM API: {delta_chunk_dict}") # 调试输出
-
-                            # 捕获 sources_map (它通常在第一个块中完整到达)
-                            if "sources_map" in delta_chunk_dict:
-                                map_chunk = delta_chunk_dict.get("sources_map")
-                                if map_chunk: # (map_chunk 可能是 {} 或 dict)
-                                    sources_map = map_chunk
-
-                            # 捕获 LLM 输出
-                            delta_chunk = delta_chunk_dict.get("llm_output")
-                            if not delta_chunk:
-                                # 这个块只包含 map，没有 LLM 内容，跳过
-                                llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
-                                pending.add(llm_task)
-                                continue
+                            delta_chunk = task.result()
 
                             delta_content = delta_chunk.content or ""
-                            delta_thinking = "" # 这是要发送给前端的*增量*
+                            delta_thinking = ""
 
                             if delta_chunk.additional_kwargs:
-                                # 1. (新) 假设 API 发送的是*增量 (delta)*
                                 new_thought_delta = delta_chunk.additional_kwargs.get("reasoning_content")
-
-                                # 2. 检查这是否是一个*新*的块
                                 if new_thought_delta is not None:
-
-                                    # 3. (新) 直接将增量 (delta) 发送给前端
-                                    #    (前端 app.js 期望的就是增量)
                                     delta_thinking = new_thought_delta
-
-                                    # 4. (新) 累积*所有*增量，用于存入 DB
                                     thinking_response_for_db += new_thought_delta
 
-                            # 仅当有实际内容（LLM回答 或 思考增量）时才发送
                             if delta_content or delta_thinking:
                                 full_response += delta_content
-                                # 发送 app.js 期望的 JSON 格式
                                 yield f"data: {json.dumps({'choices': [{'delta': {'content': delta_content, 'thinking': delta_thinking}}], 'model': model_name})}\n\n"
 
                             llm_task = asyncio.create_task(llm_iter.__anext__()) # type: ignore
@@ -802,8 +910,8 @@ async def api_ask(
                             if ping_task:
                                 ping_task.cancel()
                         except Exception as e:
-                            logger.error(f"[{conv_id}] LCEL 链执行失败 (async): {e}", exc_info=True)
-                            yield f"data: {json.dumps({'error': f'RAG 链执行失败 (async): {e}'})}\n\n"
+                            logger.error(f"[{conv_id}] 最终模型流式执行失败: {e}", exc_info=True)
+                            yield f"data: {json.dumps({'error': f'最终模型流式执行失败: {e}'})}\n\n"
                             llm_is_done = True
                             if ping_task:
                                 ping_task.cancel()
@@ -861,7 +969,6 @@ async def api_ask(
                                 # 不写入消息，也不继续操作缓存
                                 return
 
-                            # 组装最终 DB 内容（回答 + SourcesMap + 思考过程）
                             final_content_for_db = full_response
 
                             if sources_map:
@@ -885,19 +992,43 @@ async def api_ask(
                             else:
                                 full_content_with_thinking = final_content_for_db
 
-                            await db_session.execute(
+                            insert_result = await db_session.execute(
                                 text(
                                     "INSERT INTO messages "
-                                    "(conv_id, user_id, role, content, model, temperature, top_p) "
-                                    "VALUES (:cid, :uid, 'assistant', :c, :m, :t, :p)"
+                                    "(conv_id, user_id, role, content, model, mode, temperature, top_p) "
+                                    "VALUES (:cid, :uid, 'assistant', :c, :m, :mode, :t, :p) "
+                                    "RETURNING id"
                                 ),
                                 {
                                     "cid": conv_id,
                                     "uid": user_id,
                                     "c": full_content_with_thinking,
                                     "m": model_name,
+                                    "mode": response_mode,
                                     "t": temperature,
                                     "p": top_p,
+                                },
+                            )
+                            assistant_message_id = insert_result.scalar_one()
+
+                            await db_session.execute(
+                                text(
+                                    "INSERT INTO message_prompt_bundles "
+                                    "(message_id, user_id, response_mode, prompt_text, context_text, clipboard_text) "
+                                    "VALUES (:mid, :uid, :response_mode, :prompt_text, :context_text, :clipboard_text) "
+                                    "ON CONFLICT (message_id) DO UPDATE SET "
+                                    "response_mode=EXCLUDED.response_mode, "
+                                    "prompt_text=EXCLUDED.prompt_text, "
+                                    "context_text=EXCLUDED.context_text, "
+                                    "clipboard_text=EXCLUDED.clipboard_text"
+                                ),
+                                {
+                                    "mid": assistant_message_id,
+                                    "uid": user_id,
+                                    "response_mode": response_mode,
+                                    "prompt_text": prompt_bundle["prompt_text"],
+                                    "context_text": prompt_bundle["context_text"],
+                                    "clipboard_text": prompt_bundle["clipboard_text"],
                                 },
                             )
 

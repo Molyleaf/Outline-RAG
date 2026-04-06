@@ -37,7 +37,7 @@ from sqlalchemy import text
 
 import config
 from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
-from llm_services import embeddings_model, reranker
+from siliconflow_services import embeddings_model, reranker
 from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
 
 logger = logging.getLogger(__name__)
