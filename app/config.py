@@ -1,12 +1,10 @@
 """运行时配置加载器。
 
-配置源统一放在仓库根目录的 `config/config.toml` 中。
-本模块在启动时读取 TOML，并导出历史代码兼容的常量。
+所有配置统一从仓库根目录的 `config/config.toml` 读取，并导出为模块常量。
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -29,6 +27,14 @@ def _resolve_config_path() -> Path:
     if not path.is_absolute():
         path = (_REPO_ROOT / path).resolve()
     return path
+
+
+def _resolve_repo_path(raw_value: str, default: str) -> str:
+    value = (raw_value or default).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        path = (_REPO_ROOT / path).resolve()
+    return str(path)
 
 
 def _resolve_env_placeholders(value: Any) -> Any:
@@ -64,98 +70,137 @@ def _section(name: str) -> dict[str, Any]:
 app_cfg = _section("app")
 database_cfg = _section("database")
 outline_cfg = _section("outline")
-siliconflow_cfg = _section("siliconflow")
-models_cfg = _section("models")
-prompts_cfg = _section("prompts")
-chat_cfg = _section("chat")
-rag_cfg = _section("rag")
 oidc_cfg = _section("oidc")
+lightrag_cfg = _section("lightrag")
+llm_cfg = _section("llm")
+embedding_cfg = _section("embedding")
 features_cfg = _section("features")
-storage_cfg = _section("storage")
 
 
 # --- 基本配置 ---
-APP_NAME = str(app_cfg.get("name", "Pigeon Chat"))
+APP_NAME = str(app_cfg.get("name", "Outline LightRAG"))
 PORT = int(app_cfg.get("port", 8080))
-VECTOR_DIM = int(app_cfg.get("vector_dim", 1024))
-LOG_LEVEL = str(app_cfg.get("log_level", "WARN")).upper()
-SECRET_KEY = str(app_cfg.get("secret_key", ""))
+LOG_LEVEL = str(app_cfg.get("log_level", "INFO")).upper()
+SECRET_KEY = str(app_cfg.get("secret_key", "")).strip()
 
-# --- 数据库 ---
-DATABASE_URL = str(database_cfg.get("url", ""))
-REDIS_URL = str(database_cfg.get("redis_url", ""))
+# --- 数据库 / Redis ---
+DATABASE_URL = str(database_cfg.get("url", "")).strip()
+REDIS_URL = str(database_cfg.get("redis_url", "")).strip()
 
 # --- Outline ---
 OUTLINE_API_URL = str(outline_cfg.get("api_url", "")).rstrip("/")
 OUTLINE_DISPLAY_URL = str(outline_cfg.get("display_url", "")).rstrip("/")
-OUTLINE_API_TOKEN = str(outline_cfg.get("api_token", ""))
-OUTLINE_WEBHOOK_SECRET = str(outline_cfg.get("webhook_secret", "123")).strip()
+OUTLINE_API_TOKEN = str(outline_cfg.get("api_token", "")).strip()
+OUTLINE_WEBHOOK_SECRET = str(outline_cfg.get("webhook_secret", "")).strip()
 OUTLINE_WEBHOOK_SIGN = bool(outline_cfg.get("webhook_sign", True))
-
-# --- SiliconFlow ---
-SILICONFLOW_API_KEY = str(siliconflow_cfg.get("api_key", ""))
-SILICONFLOW_BASE_URL = str(
-    siliconflow_cfg.get("base_url", "https://api.siliconflow.cn/v1")
-).rstrip("/")
-EMBEDDING_MODEL = str(siliconflow_cfg.get("embedding_model", "BAAI/bge-m3"))
-RERANKER_MODEL = str(siliconflow_cfg.get("reranker_model", "BAAI/bge-reranker-v2-m3"))
-BASE_CHAT_MODEL = str(
-    siliconflow_cfg.get("base_chat_model", "Qwen/Qwen3-Next-80B-A3B-Instruct")
+OUTLINE_WEBHOOK_DEBOUNCE_SECONDS = int(
+    outline_cfg.get("webhook_debounce_seconds", 60)
 )
-
-# --- 模型列表配置 ---
-CHAT_MODELS = list(models_cfg.get("chat_presets", []))
-CHAT_MODELS_JSON = json.dumps(CHAT_MODELS, ensure_ascii=False)
-BETA_AUTHORIZED_USER_IDS = list(models_cfg.get("beta_authorized_user_ids", []))
-CUSTOM_OPENAI_MODEL_ID = str(models_cfg.get("custom_openai_model_id", "custom-openai"))
-CUSTOM_OPENAI_DISPLAY_NAME = str(models_cfg.get("custom_openai_display_name", "自定义 OpenAI"))
-CUSTOM_OPENAI_ICON = str(models_cfg.get("custom_openai_icon", "/chat/static/img/openai.svg"))
-CUSTOM_OPENAI_DEFAULT_TEMP = float(models_cfg.get("custom_openai_default_temp", 0.7))
-CUSTOM_OPENAI_DEFAULT_TOP_P = float(models_cfg.get("custom_openai_default_top_p", 1.0))
-
-# --- 提示词配置 ---
-DEFAULT_CORE_WORLDVIEW = str(prompts_cfg.get("default_core_worldview", ""))
-CORE_WORLDVIEW = str(prompts_cfg.get("core_worldview") or DEFAULT_CORE_WORLDVIEW)
-SYSTEM_PROMPT_QUERY = str(prompts_cfg.get("system_prompt_query_template", "")).format(
-    core_worldview=CORE_WORLDVIEW
-)
-SYSTEM_PROMPT_CREATIVE = str(prompts_cfg.get("system_prompt_creative_template", "")).format(
-    core_worldview=CORE_WORLDVIEW
-)
-SYSTEM_PROMPT_ROLEPLAY = str(prompts_cfg.get("system_prompt_roleplay_template", "")).format(
-    core_worldview=CORE_WORLDVIEW
-)
-SYSTEM_PROMPT_GENERAL = str(prompts_cfg.get("system_prompt_general", "回答用户的问题。"))
-CLASSIFIER_PROMPT_TEMPLATE = str(
-    prompts_cfg.get("classifier_prompt_template", "")
-).format(core_worldview=CORE_WORLDVIEW)
-REWRITE_PROMPT_TEMPLATE = str(prompts_cfg.get("rewrite_prompt_template", ""))
-HISTORY_AWARE_PROMPT_TEMPLATE = str(prompts_cfg.get("history_aware_prompt_template", ""))
-
-# --- 多轮对话配置 ---
-MAX_HISTORY_MESSAGES = int(chat_cfg.get("max_history_messages", 20))
-
-# --- RAG/检索参数 ---
-TOP_K = int(rag_cfg.get("top_k", 12))
-K = int(rag_cfg.get("rerank_top_k", 3))
-REFRESH_BATCH_SIZE = int(rag_cfg.get("refresh_batch_size", 100))
 
 # --- OIDC (GitLab) ---
-GITLAB_CLIENT_ID = str(oidc_cfg.get("gitlab_client_id", ""))
-GITLAB_CLIENT_SECRET = str(oidc_cfg.get("gitlab_client_secret", "123"))
+GITLAB_CLIENT_ID = str(oidc_cfg.get("gitlab_client_id", "")).strip()
+GITLAB_CLIENT_SECRET = str(oidc_cfg.get("gitlab_client_secret", "")).strip()
 GITLAB_URL = str(oidc_cfg.get("gitlab_url", "")).rstrip("/")
-OIDC_REDIRECT_URI = str(oidc_cfg.get("redirect_uri", ""))
+OIDC_REDIRECT_URI = str(oidc_cfg.get("redirect_uri", "")).strip()
 
-# --- 功能开关与限制 ---
-USE_JOSE_VERIFY = bool(features_cfg.get("use_jose_verify", True))
+# --- LightRAG ---
+LIGHTRAG_WORKING_DIR = _resolve_repo_path(
+    str(lightrag_cfg.get("working_dir", "./data/lightrag")),
+    "./data/lightrag",
+)
+LIGHTRAG_INPUT_DIR = _resolve_repo_path(
+    str(lightrag_cfg.get("input_dir", "./data/lightrag_inputs")),
+    "./data/lightrag_inputs",
+)
+LIGHTRAG_WORKSPACE = str(lightrag_cfg.get("workspace", "")).strip()
+LIGHTRAG_QUERY_MODE = str(lightrag_cfg.get("query_mode", "mix")).strip() or "mix"
+LIGHTRAG_HISTORY_TURNS = int(lightrag_cfg.get("history_turns", 3))
+LIGHTRAG_TOP_K = int(lightrag_cfg.get("top_k", 10))
+LIGHTRAG_CHUNK_TOP_K = int(lightrag_cfg.get("chunk_top_k", 20))
+LIGHTRAG_MAX_ASYNC = int(lightrag_cfg.get("max_async", 4))
+LIGHTRAG_MAX_PARALLEL_INSERT = int(lightrag_cfg.get("max_parallel_insert", 2))
+LIGHTRAG_MAX_GRAPH_NODES = int(lightrag_cfg.get("max_graph_nodes", 1000))
+LIGHTRAG_CHUNK_SIZE = int(lightrag_cfg.get("chunk_size", 1200))
+LIGHTRAG_CHUNK_OVERLAP_SIZE = int(lightrag_cfg.get("chunk_overlap_size", 100))
+LIGHTRAG_SUMMARY_LANGUAGE = str(
+    lightrag_cfg.get("summary_language", "Chinese")
+).strip()
+LIGHTRAG_ENTITY_TYPES = [
+    str(item).strip()
+    for item in lightrag_cfg.get(
+        "entity_types",
+        ["organization", "person", "geo", "event"],
+    )
+    if str(item).strip()
+]
+LIGHTRAG_SUMMARY_MAX_TOKENS = int(lightrag_cfg.get("summary_max_tokens", 1200))
+LIGHTRAG_SUMMARY_CONTEXT_SIZE = int(
+    lightrag_cfg.get("summary_context_size", 10000)
+)
+LIGHTRAG_SUMMARY_LENGTH_RECOMMENDED = int(
+    lightrag_cfg.get("summary_length_recommended", 600)
+)
+LIGHTRAG_MAX_TOTAL_TOKENS = int(lightrag_cfg.get("max_total_tokens", 30000))
+LIGHTRAG_MAX_ENTITY_TOKENS = int(lightrag_cfg.get("max_entity_tokens", 12000))
+LIGHTRAG_MAX_RELATION_TOKENS = int(
+    lightrag_cfg.get("max_relation_tokens", 12000)
+)
+LIGHTRAG_RELATED_CHUNK_NUMBER = int(
+    lightrag_cfg.get("related_chunk_number", 10)
+)
+LIGHTRAG_COSINE_THRESHOLD = float(lightrag_cfg.get("cosine_threshold", 0.2))
+LIGHTRAG_KV_STORAGE = str(lightrag_cfg.get("kv_storage", "JsonKVStorage")).strip()
+LIGHTRAG_DOC_STATUS_STORAGE = str(
+    lightrag_cfg.get("doc_status_storage", "JsonDocStatusStorage")
+).strip()
+LIGHTRAG_GRAPH_STORAGE = str(
+    lightrag_cfg.get("graph_storage", "NetworkXStorage")
+).strip()
+LIGHTRAG_VECTOR_STORAGE = str(
+    lightrag_cfg.get("vector_storage", "NanoVectorDBStorage")
+).strip()
+LIGHTRAG_TOKEN_SECRET = (
+    str(lightrag_cfg.get("token_secret", "")).strip() or SECRET_KEY
+)
+LIGHTRAG_TOKEN_EXPIRE_HOURS = float(
+    lightrag_cfg.get("token_expire_hours", 48)
+)
+LIGHTRAG_GUEST_TOKEN_EXPIRE_HOURS = float(
+    lightrag_cfg.get("guest_token_expire_hours", 24)
+)
+LIGHTRAG_JWT_ALGORITHM = str(lightrag_cfg.get("jwt_algorithm", "HS256")).strip()
+LIGHTRAG_WEBUI_TITLE = str(
+    lightrag_cfg.get("webui_title", APP_NAME)
+).strip() or APP_NAME
+LIGHTRAG_WEBUI_DESCRIPTION = str(
+    lightrag_cfg.get("webui_description", "Outline knowledge base powered by LightRAG")
+).strip()
+
+# --- LLM ---
+LLM_PROVIDER = str(llm_cfg.get("provider", "siliconflow")).strip().lower()
+LLM_BASE_URL = str(llm_cfg.get("base_url", "https://api.siliconflow.cn/v1")).strip()
+LLM_API_KEY = str(llm_cfg.get("api_key", "")).strip()
+LLM_MODEL = str(llm_cfg.get("model", "")).strip()
+LLM_TEMPERATURE = float(llm_cfg.get("temperature", 0.2))
+LLM_TOP_P = float(llm_cfg.get("top_p", 1.0))
+LLM_MAX_COMPLETION_TOKENS = llm_cfg.get("max_completion_tokens", 4096)
+if LLM_MAX_COMPLETION_TOKENS is not None:
+    LLM_MAX_COMPLETION_TOKENS = int(LLM_MAX_COMPLETION_TOKENS)
+LLM_REASONING_EFFORT = str(llm_cfg.get("reasoning_effort", "medium")).strip()
+LLM_EXTRA_BODY = llm_cfg.get("extra_body")
+
+# --- Embedding ---
+EMBEDDING_PROVIDER = str(
+    embedding_cfg.get("provider", LLM_PROVIDER or "siliconflow")
+).strip().lower()
+EMBEDDING_BASE_URL = str(
+    embedding_cfg.get("base_url", LLM_BASE_URL or "https://api.siliconflow.cn/v1")
+).strip()
+EMBEDDING_API_KEY = str(embedding_cfg.get("api_key", LLM_API_KEY)).strip()
+EMBEDDING_MODEL = str(embedding_cfg.get("model", "")).strip()
+EMBEDDING_DIM = int(embedding_cfg.get("dimension", 1024))
+EMBEDDING_SEND_DIM = bool(embedding_cfg.get("send_dimension", False))
+
+# --- 功能开关 ---
 SAFE_LOG_CHAT_INPUT = bool(features_cfg.get("safe_log_chat_input", True))
 MAX_LOG_INPUT_CHARS = int(features_cfg.get("max_log_input_chars", 4000))
-MAX_CONTENT_LENGTH = int(features_cfg.get("max_content_length", 10485760))
-ALLOWED_FILE_EXTENSIONS = {
-    str(ext).strip().lower()
-    for ext in features_cfg.get("allowed_file_extensions", ["txt", "md", "pdf"])
-    if str(ext).strip()
-}
-
-# --- 持久化目录 ---
-ATTACHMENTS_DIR = str(storage_cfg.get("attachments_dir", "/app/data/attachments"))

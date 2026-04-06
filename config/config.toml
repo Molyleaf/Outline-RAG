@@ -1,277 +1,80 @@
 [app]
-name = "Pigeon Chat"
+name = "Outline LightRAG"
 port = 8080
-vector_dim = 1024
-log_level = "WARN"
+log_level = "INFO"
 secret_key = "${SECRET_KEY}"
 
 [database]
-url = "${DATABASE_URL}"
-redis_url = "${REDIS_URL}"
+url = "${DATABASE_URL:}"
+redis_url = "${REDIS_URL:}"
 
 [outline]
-api_url = ""
-display_url = ""
-api_token = ""
-webhook_secret = "123"
+api_url = "${OUTLINE_API_URL:}"
+display_url = "${OUTLINE_DISPLAY_URL:}"
+api_token = "${OUTLINE_API_TOKEN:}"
+webhook_secret = "${OUTLINE_WEBHOOK_SECRET:}"
 webhook_sign = true
-
-[siliconflow]
-api_key = "${SILICONFLOW_API_KEY}"
-base_url = "https://api.siliconflow.cn/v1"
-embedding_model = "BAAI/bge-m3"
-reranker_model = "BAAI/bge-reranker-v2-m3"
-base_chat_model = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-
-[models]
-beta_authorized_user_ids = []
-custom_openai_model_id = "custom-openai"
-custom_openai_display_name = "自定义 OpenAI"
-custom_openai_icon = "/chat/static/img/openai.svg"
-custom_openai_default_temp = 0.7
-custom_openai_default_top_p = 1.0
-
-[[models.chat_presets]]
-id = "deepseek-ai/DeepSeek-V3.2"
-provider = "siliconflow"
-name = "DeepSeek V3.2"
-icon = "/chat/static/img/DeepSeek.svg"
-temp = 0.7
-top_p = 0.7
-enable_thinking = true
-use_reasoning_parser = true
-
-[[models.chat_presets]]
-id = "moonshotai/Kimi-K2-Instruct-0905"
-provider = "siliconflow"
-name = "Kimi K2"
-icon = "/chat/static/img/moonshotai_new.png"
-temp = 0.6
-top_p = 0.7
-
-[[models.chat_presets]]
-id = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-provider = "siliconflow"
-name = "Qwen3-Next"
-icon = "/chat/static/img/Tongyi.svg"
-temp = 0.6
-top_p = 0.95
-
-[[models.chat_presets]]
-id = "zai-org/GLM-4.7"
-provider = "siliconflow"
-name = "ChatGLM-4.7"
-icon = "/chat/static/img/thudm.svg"
-temp = 0.6
-top_p = 0.95
-beta = true
-enable_thinking = true
-use_reasoning_parser = true
-
-[[models.chat_presets]]
-id = "Qwen/Qwen3-Next-80B-A3B-Thinking"
-provider = "siliconflow"
-name = "Qwen3-Next-Thinking"
-icon = "/chat/static/img/Tongyi.svg"
-temp = 0.6
-top_p = 0.95
-use_reasoning_parser = true
-
-[[models.chat_presets]]
-id = "moonshotai/Kimi-K2-Thinking"
-provider = "siliconflow"
-name = "Kimi K2-Thinking"
-icon = "/chat/static/img/moonshotai_new.png"
-temp = 0.6
-top_p = 0.7
-use_reasoning_parser = true
-
-[prompts]
-default_core_worldview = '''
-[游戏设定背景信息]
-游戏名称：《余烬》，背景设定在虚构的"余烬"类地行星。
-开发组名称：No Pigeon's Sky 工作室
-货币：联合币，由游戏中的北方企业联合体发行。
-重要物理规则：存在"屏障粒子"，阻止短波和微波在大气中传播。
-核心玩法：舰船设计、海战和社交。
-常见名词和世界观简介：有拉汶帝国、北方企业联合体、星环防卫联盟、破空集团、阿特拉斯联合管制局、维斯瓦自由市等多个势力。有"时空裂隙"、"时间隧洞"等特殊概念。有"余烬文明"与"阿尔法提丰"（掠夺者）的冲突。有"主世界"设定，战损永久。有"屏障粒子"影响通信。有"星旅者"、"裂隙行者"等特殊角色。有"红月会"、"月寂会"等宗教/政治组织。有"阿特拉斯火种库"、"管制一号"等系统。有"格兰夏特王国"、"奥塔斯联邦"等国家。有"星落群岛"、"星落战争"等历史事件。有"时空裂隙"、"时间隧洞"等特殊物理现象。有"余烬文明"与"sol文明"的关系（来自拉斐特的录音）。有"宇宙网计划"、"存续计划"等历史计划。核心游戏机制：舰船设计系统。海战系统（包括作战半径、联合作战等）。社交系统（包括声望关系、势力关系等）。交易系统（高安期货交易所、高安现货市场等）。舰船探测系统（火控范围、雷达等）。时间裂隙探索系统（空间航行稳定器等）。剧情关键元素：有"口袋阵地"、"夹击"、"迷雾环岛"等剧情章节。有"星寂计划"、"星愿守望者"等任务线。有"重逢"、"维斯瓦自由市"等剧情内容。有"拉斐特"、"星崎时音"、"赫拉"等角色。有"卡斯特"、"月寂会"等角色/势力。游戏内术语："联合币"、"屏障粒子"、"时空裂隙"、"时间隧洞"、"空间航行稳定器"、"管制一号"、"星寂计划"、"裂隙行者"、"破空集团"、"阿特拉斯联合管制局"、"星环防卫联盟"、"掠夺者"、"红月会"、"月寂会"、"主世界"、"作战半径"、"联合作战"、"火控范围"、"高安期货交易所"、"零安黑市"、"维斯瓦自由市"、"星旅者"、"阿尔法提丰"、"sol文明"、"存续计划"、"宇宙网计划"、"星落战争"、"奥塔斯联邦"、"格兰夏特王国"、"阿扎特帝国"、"赤霜武装"、"复辟军"、"抵抗联盟"、"防卫共同体"、"互助条约联合"、"人类联合阵线"、"文明统一战线"、种族/阵营设定：余烬文明、阿尔法提丰（掠夺者）、地球文明、拉汶帝国、北方企业联合体、星环防卫联盟、破空集团、阿特拉斯联合管制局、维斯瓦自由市、红月会/月寂会、赤霜武装、复辟军、九州共和国、维内齐亚、掠夺者。装备：空间航行稳定器、火控系统、雷达系统、舰船设计系统、各种武器装备（通过交易系统获取）。地图区域划分：星落群岛、维斯瓦自由市、什切青、格但斯瓦夫市、卡延河谷、大波什卡平原、莫科什大陆、什切青群岛、星环防卫联盟区域、拉汶帝国区域、北方企业联合体区域、阿特拉斯联合管制局区域。时间线及历史事件：拉汶崩溃前时代、拉汶帝国解体、维斯瓦清算委员会、维斯瓦第三联合王国、莫科什紧急离迁总指挥、维斯瓦自由市、星落战争、奥塔斯联邦与阿扎特帝国的冲突、时空裂隙研究、星寂计划、拉斐特的录音中提到的"存续计划"和"宇宙网计划"。扩展内容：星寂计划、星愿守望者、世界交织之处、踏破界限之日、异界门、红月会/月寂会、掠夺者。
-'''
-core_worldview = ""
-system_prompt_query_template = '''
-[你的任务：开发者的百科全书]
-你的任务是基于“参考资料”客观、全面地回答用户的问题。
-
-[工作指引]
-1.  **整合信息**：仔细阅读所有“参考资料”，将相关信息整合成一个全面、连贯的答案。不要遗漏关键细节。
-2.  **适当扩展**：如果参考资料中的概念很简洁（例如一个专有名词），请结合你自己的知识库进行适当扩展，使其更易于理解。
-3. 把[游戏设定背景信息]中的知识当作你自己的知识，不需要使用引用标记。
-4.  **引用规范 (非常重要)**：
-    * **格式**：必须严格使用 `[来源 n]` 格式。
-    * **禁止合并**：严禁使用 `[来源 1, 2]` 或 `[来源 1、2]`。遇到多个来源时，**必须分开写**，例如 `[来源 1][来源 2]`。
-    * **位置**：引用应放在句尾或从句末尾，**不要**作为句子的主语（如“来源[1]说...”是错误的）。
-5.  **自然口吻**：直接使用参考资料中的信息，不要说“根据参考资料...”。
-
-{core_worldview}
-'''
-system_prompt_creative_template = '''
-[你的任务：创意助手]
-你的任务是作为一名富有创意的写作助手和世界观构筑师，协助开发团队进行内容创作。
-
-[工作指引]
-1.  **创意启发**：基于“参考资料”，围绕用户的写作要求（例如“取个名字”、“写个简介”、“设计个任务”）进行创意构思。
-2.  **忠于设定**：你的所有创意都必须严格遵守世界观设定。
-3. 把[游戏设定背景信息]中的知识当作你自己的知识，不需要使用引用标记。
-4.  **引用规范 (非常重要)**：
-    * **格式**：必须严格使用 `[来源 n]` 格式。
-    * **禁止合并**：严禁使用 `[来源 1, 2]` 或 `[来源 1、2]`。遇到多个来源时，**必须分开写**，例如 `[来源 1][来源 2]`。
-    * **位置**：引用应放在句尾或从句末尾，**不要**作为句子的主语（如“来源[1]说...”是错误的）。
-4.  **自然口吻**：直接使用参考资料中的信息，不要说“根据参考资料...”。
-5.  **直接交付**：请直接输出你创作的内容，不要有多余的寒暄。
-
-{core_worldview}
-'''
-system_prompt_roleplay_template = '''
-[你的任务：角色扮演]
-你的任务是扮演游戏时间中的一名 NPC，与玩家（用户）进行沉浸式对话。
-
-[工作指引]
-1.  **完全代入**：你必须完全代入你所扮演的角色，使用该角色的口吻、立场和已知信息进行回答。
-2.  **扮演记忆**：将提供的“参考资料”作为你的“记忆”和“知识背景”。
-3.  **隐藏引用**：在对话中自然地使用参考资料中的信息，但**绝对不要**使用 `[来源 n]` 这样的引用标记，以保持沉浸感。
-4.  **角色选择**：如果用户没有指定角色，请根据对话内容和参考资料，自动选择一个最合适的角色并开始扮演。
-
-{core_worldview}
-'''
-system_prompt_general = "回答用户的问题。"
-classifier_prompt_template = '''
-你的任务是充当一个智能路由。你需要分析用户的“新问题”，并结合“对话历史”和“知识库摘要”，来决定应将请求路由到哪个下游任务。
-你必须严格按照以下 JSON 格式输出你的分析和决策（不要包含分析过程）：
-
-(json)
-{{
-  "knowledge_base_relevance": "...", // [ "High", "Medium", "Low", "None" ]。评估问题是否**需要**知识库摘要中的信息来回答。
-  "ambiguity_analysis": "...", // [ "Clear", "Ambiguous" ]。评估问题是否包含模糊指代（如 '这个'、'那个'、'他'、'这个游戏'、未知国家的名字、未知人名、未知实体、未知事件），而“对话历史”中又没有明确上下文。
-  "task_type": "...", // [ "Query", "Creative", "Roleplay", "General" ]。识别用户的意图：是查询事实(Query)、要求创作(Creative)、要求扮演(Roleplay)，还是其它不需要额外知识库的任务(General)。
-  "decision": "..." // [ "Query", "Creative", "Roleplay", "General" ]。根据你的分析得出的最终路由决策。
-}}
-(json)
-
-[知识库摘要]
-
-{core_worldview}
-
-[路由规则]
-
-1.  **Query**: (游戏知识)
-    * `knowledge_base_relevance` 是 "High" 或 "Medium" 或 "Low"。
-    * `task_type` 是 "Query"。
-    * `ambiguity_analysis` 是 'Ambiguous'。
-    * 例如: "屏障粒子是什么？", "联合币是谁发行的？","总结一下这个游戏"
-
-2.  **Creative**: (写作助手)
-    * `knowledge_base_relevance` 是 "High" 或 "Medium" 或 "Low"。
-    * `task_type` 是 "Creative" (例如: "帮我取个名字", "写个简介", "设计个任务")。
-    * 例如: "帮我给一艘北联体的新战舰取个名字", "设计一个关于管制一号叛变的剧情"
-
-3.  **Roleplay**: (NPC 模拟)
-    * `task_type` 是 "Roleplay" (例如: "你扮演...", "模拟一下...")。
-    * 或者，用户正在用**第一人称**（例如“我”、“我们”）与游戏世界互动。
-    * 例如: "你是一名拉汶帝国的军官，告诉我你们的计划", "我刚抵达格兰夏特，这里发生了什么？"
-
-4.  **General**: (通用任务)
-    * `knowledge_base_relevance` 是 "None"。
-    * `task_type` 是 "General"。
-    * 例如: "你好", "地球的周长是多少？", "用 Python 写一个 Hello World"
-
-[思考过程示例]
-
-* **示例 1 (歧义分析):**
-    * **历史:** (空)
-    * **问题:** "总结这个游戏的内容。"
-    * **问题:** "这是个什么网站？"
-    * **输出 (json):**
-      {{
-        "knowledge_base_relevance": "High",
-        "ambiguity_analysis": "Ambiguous",
-        "task_type": "Query",
-        "decision": "Query"
-      }}
-
-* **示例 2 (写作任务):**
-    * **历史:** "北联体和拉汶帝国是什么关系？" -> "..."
-    * **问题:** "基于这个背景，写一个北联体军官和帝国贵族偶遇的短故事。"
-    * **输出 (json):**
-      {{
-        "knowledge_base_relevance": "High",
-        "ambiguity_analysis": "Clear",
-        "task_type": "Creative",
-        "decision": "Creative"
-      }}
-
-* **示例 3 (通用任务):**
-    * **历史:** (空)
-    * **问题:** "你好，你是谁？"
-    * **输出 (json):**
-      {{
-        "knowledge_base_relevance": "None",
-        "ambiguity_analysis": "Clear",
-        "task_type": "General",
-        "decision": "General"
-      }}
-
-[开始分析]
-对话历史:
-
-{{history}}
-新问题:
-
-{{input}}
-'''
-rewrite_prompt_template = '''
-根据下方提供的“对话历史”和“后续问题”，将“后续问题”改写为一个**完全独立、不依赖任何上下文**的完整问题。
-如果“后续问题”本身已经很完整，则直接返回它。
-
-对话历史:
-{history}
-
-后续问题:
-{query}
-
-重写后的独立问题:
-'''
-history_aware_prompt_template = '''
-参考资料：
-
-{context}
-
----
-
-请根据以上参考资料，并结合你的知识，回答以下问题。
-我的问题：
-
-{query}
-'''
-
-[chat]
-max_history_messages = 20
-
-[rag]
-top_k = 12
-rerank_top_k = 3
-refresh_batch_size = 100
+webhook_debounce_seconds = 60
 
 [oidc]
-gitlab_client_id = ""
-gitlab_client_secret = "123"
-gitlab_url = ""
-redirect_uri = ""
+gitlab_client_id = "${GITLAB_CLIENT_ID:}"
+gitlab_client_secret = "${GITLAB_CLIENT_SECRET:}"
+gitlab_url = "${GITLAB_URL:}"
+redirect_uri = "${OIDC_REDIRECT_URI:}"
+
+[lightrag]
+working_dir = "./data/lightrag"
+input_dir = "./data/lightrag_inputs"
+workspace = ""
+query_mode = "mix"
+history_turns = 3
+top_k = 10
+chunk_top_k = 20
+max_async = 4
+max_parallel_insert = 2
+max_graph_nodes = 1000
+chunk_size = 1200
+chunk_overlap_size = 100
+summary_language = "Chinese"
+entity_types = ["organization", "person", "geo", "event"]
+summary_max_tokens = 1200
+summary_context_size = 10000
+summary_length_recommended = 600
+max_total_tokens = 30000
+max_entity_tokens = 12000
+max_relation_tokens = 12000
+related_chunk_number = 10
+cosine_threshold = 0.2
+kv_storage = "JsonKVStorage"
+doc_status_storage = "JsonDocStatusStorage"
+graph_storage = "NetworkXStorage"
+vector_storage = "NanoVectorDBStorage"
+token_secret = "${LIGHTRAG_TOKEN_SECRET:}"
+token_expire_hours = 48
+guest_token_expire_hours = 24
+jwt_algorithm = "HS256"
+webui_title = "Outline LightRAG"
+webui_description = "Outline knowledge base powered by LightRAG"
+
+[llm]
+provider = "siliconflow"
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "${SILICONFLOW_API_KEY:}"
+model = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+temperature = 0.2
+top_p = 1.0
+max_completion_tokens = 4096
+reasoning_effort = "medium"
+extra_body = {}
+
+[embedding]
+provider = "siliconflow"
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "${SILICONFLOW_API_KEY:}"
+model = "BAAI/bge-m3"
+dimension = 1024
+send_dimension = false
 
 [features]
-use_jose_verify = true
 safe_log_chat_input = true
 max_log_input_chars = 4000
-max_content_length = 10485760
-allowed_file_extensions = ["txt", "md", "pdf"]
-
-[storage]
-attachments_dir = "/app/data/attachments"

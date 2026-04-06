@@ -11,8 +11,8 @@ PY
   export SECRET_KEY
 fi
 
-# 可选：允许通过环境变量覆盖端口和 worker 数
+# LightRAG 默认使用本地文件存储，运行期建议单 worker。
 UVICORN_PORT="${PORT:-8080}"
-UVICORN_WORKERS="${UVICORN_WORKERS:-2}"
+UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
 exec uvicorn --host "0.0.0.0" --port "${UVICORN_PORT}" --workers "${UVICORN_WORKERS}" "main:app"

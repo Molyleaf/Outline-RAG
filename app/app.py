@@ -1,12 +1,11 @@
 # app/app.py
 import logging
-import sys
 
 from flask import Flask
 from flask_assets import Environment, Bundle
 
-# --- 1. 应用初始化 (Flask) ---
-# (重要) 这个 'app' 变量现在只被 'flask assets build' 命令使用
+# 该 Flask app 仅用于保留 `flask assets build` 工作流。
+# 运行时界面由 LightRAG WebUI 直接提供，不再消费这些静态资源。
 app = Flask(__name__, static_folder="static", static_url_path="/chat/static")
 
 # --- 2. Flask-Assets 配置 ---
@@ -33,6 +32,7 @@ css_bundle = Bundle(
 )
 assets.register('js_all', js_bundle)
 assets.register('css_all', css_bundle)
+assets.init_app(app)
 # --- Assets 配置结束 ---
 
 # --- 4. 命令行执行逻辑 ---
@@ -48,27 +48,10 @@ if __name__ == "__main__":
     app.config['ASSETS_DEBUG'] = True
     app.config['ASSETS_AUTO_BUILD'] = True
 
-    # 只初始化 assets
-    assets.init_app(app)
-
     logging.getLogger("app").info(f"Starting local *assets* server...")
     # 仅用于测试 assets，不启动完整应用
     app.run(host="0.0.0.0", port=8081, use_reloader=True)
 
 else:
-    # Gunicorn 或 'flask' 命令导入时
-
-    # 检查我们是否在 'flask assets' 命令上下文中
-    is_assets_command = False
-    if 'flask' in sys.argv[0] and len(sys.argv) > 1 and sys.argv[1] == 'assets':
-        is_assets_command = True
-
-    # 仅当 *是* 'assets' 命令时
-    if is_assets_command:
-        # 'flask assets build' 命令也需要一个初始化的 assets 环境
-        app.config['DEBUG'] = False # 确保 build 在 prod 模式下运行
-        assets.init_app(app)
-    else:
-        # 如果被 Gunicorn (或其他) 导入，则什么也不做
-        # Gunicorn 应该启动 main:app
-        pass
+    # 导入时仅保留一个最小可用的 Flask-Assets 环境。
+    app.config['DEBUG'] = False

@@ -1,21 +1,8 @@
-# app/requirements-runtime.txt
 flask
 sqlalchemy
 python-jose[cryptography]
 psycopg
 itsdangerous
-langchain
-langchain-community
-langchain-core
-langchain-openai
-langchain-postgres
-langchain-siliconflow
-langchain-text-splitters
-langchain-classic
-langgraph-checkpoint
-langgraph-sdk
-langsmith
-openai
 fastapi
 uvicorn[standard]
 httpx[http2]
@@ -25,4 +12,4 @@ python-multipart
 pydantic
 werkzeug
 starlette
-tiktoken
+lightrag-hku[api]

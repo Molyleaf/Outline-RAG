@@ -122,7 +122,7 @@ USER root
 COPY --from=builder --chown=1001:1001 /app /app/
 
 # 创建可持久化目录并授权
-RUN mkdir -p /app/data/attachments /app/data/archive \
+RUN mkdir -p /app/data/lightrag /app/data/lightrag_inputs \
     && chown -R 1001:1001 /app
 
 # 切换到非 root 用户来运行应用

@@ -1,399 +1,248 @@
-"""RAG pipeline.
+"""Outline -> LightRAG 同步逻辑。"""
 
-Updated for the LangChain v1 split where a number of legacy components moved
-into `langchain_classic`.
-"""
+from __future__ import annotations
 
-# app/rag.py
 import asyncio
 import json
 import logging
-import pickle
-from datetime import datetime, timezone
-from typing import Optional
-
-try:
-    # LangChain v1+ (preferred)
-    from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
-    from langchain_classic.retrievers.document_compressors.base import DocumentCompressorPipeline
-    from langchain_classic.storage import EncoderBackedStore
-except Exception:  # pragma: no cover
-    # Backward compat (older projects)
-    from langchain.retrievers.contextual_compression import ContextualCompressionRetriever  # type: ignore
-    from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline  # type: ignore
-    from langchain.storage import EncoderBackedStore  # type: ignore
-from langchain_community.storage.sql import SQLStore
-from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.stores import BaseStore
-from langchain_postgres.v2.async_vectorstore import AsyncPGVectorStore
-try:
-    # langchain-postgres 0.0.16+ exports PGEngine at top-level
-    from langchain_postgres import PGEngine
-except Exception:  # pragma: no cover
-    from langchain_postgres.v2.engine import PGEngine  # type: ignore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sqlalchemy import text
+import time
+from pathlib import Path
+from typing import Any
 
 import config
-from database import async_engine, AsyncSessionLocal, redis_client as async_redis_client
-from siliconflow_services import embeddings_model, reranker
-from outline_client import outline_list_docs, outline_get_doc, outline_export_doc
+from lightrag_runtime import get_runtime
+from outline_client import outline_export_doc, outline_list_docs
 
 logger = logging.getLogger(__name__)
 
-vector_store: Optional[AsyncPGVectorStore] = None
-parent_store: Optional[BaseStore[str, Document]] = None
-base_retriever: Optional[BaseRetriever] = None
-compression_retriever: Optional[ContextualCompressionRetriever] = None
-
-_rag_lock = asyncio.Lock()
-
-
-async def initialize_rag_components():
-    global vector_store, base_retriever, compression_retriever, parent_store
-
-    if vector_store:
-        return
-
-    async with _rag_lock:
-        if vector_store:
-            return
-
-        logger.info("Initializing RAG components (AsyncEngine, PGVectorStore v2, SQLStore)...")
-
-        if not async_engine:
-            raise ValueError("AsyncEngine from database.py is not available")
-        if not config.DATABASE_URL:
-            raise ValueError("DATABASE_URL is not set, but is required for SQLStore")
-
-        base_sql_store = SQLStore(
-            engine=async_engine,
-            namespace="rag_parent_documents"
-        )
-        logger.info(f"Async SQLStore for ParentStore configured (engine=async_engine, namespace='rag_parent_documents').")
-
-        parent_store = EncoderBackedStore[str, Document](
-            store=base_sql_store,
-            key_encoder=lambda k: k,
-            value_serializer=pickle.dumps,
-            value_deserializer=pickle.loads
-        )
-        logger.info("ParentStore configured (EncoderBackedStore over SQLStore).")
-
-        pg_engine_wrapper = PGEngine.from_engine(async_engine)
-        try:
-            vector_store = await AsyncPGVectorStore.create(
-                engine=pg_engine_wrapper,
-                embedding_service=embeddings_model,
-                table_name="langchain_pg_embedding",
-                metadata_columns=[
-                    "source_id",
-                    "title",
-                    "outline_updated_at_str",
-                    "url",
-                ],
-            )
-            logger.info("AsyncPGVectorStore (v2) initialized (using explicit metadata columns).")
-        except Exception as e:
-            logger.critical(f"Failed to initialize PGVectorStore: {e}", exc_info=True)
-            raise
-
-        base_retriever = vector_store.as_retriever(
-            search_kwargs={"k": config.TOP_K}
-        )
-        logger.info(f"Base chunk retriever configured (PGVectorStore.as_retriever, k={config.TOP_K}).")
-
-        pipeline_compressor = DocumentCompressorPipeline(
-            transformers=[
-                reranker
-            ]
-        )
-
-        compression_retriever = ContextualCompressionRetriever(
-            base_compressor=pipeline_compressor,
-            base_retriever=base_retriever
-        )
-        logger.info("RAG components initialization complete (Reranking Chunks).")
+_refresh_lock = asyncio.Lock()
+_refresh_task: asyncio.Task | None = None
+_webhook_task: asyncio.Task | None = None
+_refresh_state: dict[str, Any] = {
+    "status": "idle",
+    "message": "空闲",
+    "started_at": None,
+    "finished_at": None,
+    "processed": 0,
+    "skipped": 0,
+    "deleted": 0,
+    "total": 0,
+    "track_id": None,
+}
 
 
-headers_to_split_on = [
-    ("#", "Header 1"),
-    ("##", "Header 2"),
-    ("###", "Header 3"),
-]
-
-# --- 第二层拆分器 (细分) ---
-# 用于拆分过长的 Markdown 块
-# 我们使用 Python 默认的换行符作为主要分隔符
-child_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1024, # 示例值：1024 个字符
-    chunk_overlap=100, # 示例值：100 个字符
-    separators=["\n\n", "\n", " ", ""] # 适用于通用文本
-)
+def _manifest_path() -> Path:
+    return Path(config.LIGHTRAG_WORKING_DIR) / "outline_sync_manifest.json"
 
 
-async def process_doc_batch_task(doc_ids: list):
-    await initialize_rag_components()
-
-    if not vector_store or not parent_store:
-        logger.critical("Vector store or Parent store not initialized in process_doc_batch_task!")
-        raise RuntimeError("RAG components (vector_store/parent_store) not initialized")
-
-    if not doc_ids:
-        return
-
-    successful_ids_final = set()
-    skipped_ids_final = set()
-    docs_to_process_lc = []
-
+def _load_manifest() -> dict[str, dict[str, Any]]:
+    path = _manifest_path()
+    if not path.exists():
+        return {}
     try:
-        for doc_id in doc_ids:
-            info = await outline_get_doc(doc_id)
-            if not info:
-                logger.warning(f"无法获取文档 {doc_id} 的 *信息* (metadata)，跳过。")
-                skipped_ids_final.add(doc_id)
-                continue
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Outline 同步清单损坏，已忽略并重建。")
+        return {}
 
-            export_data = await outline_export_doc(doc_id)
-            if not export_data:
-                logger.warning(f"无法获取文档 {doc_id} 的 *内容* (export)，跳过。")
-                skipped_ids_final.add(doc_id)
-                continue
 
-            content = export_data or ""
-            if not content.strip():
-                logger.info(f"Document {doc_id} (title: {info.get('title')}) is empty, skipping.")
-                skipped_ids_final.add(doc_id)
-                continue
+def _save_manifest(manifest: dict[str, dict[str, Any]]) -> None:
+    path = _manifest_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
-            updated_at_str = info.get("updatedAt")
-            if not updated_at_str:
-                now_dt = datetime.now(timezone.utc)
-                updated_at_str = now_dt.isoformat().replace('+00:00', 'Z')
 
-            doc = Document(
-                page_content=content,
-                metadata={
-                    "source_id": doc_id,
-                    "title": info.get("title") or "",
-                    "outline_updated_at_str": updated_at_str,
-                    "url": info.get("url")
-                }
-            )
-            docs_to_process_lc.append(doc)
+def _stable_doc_id(outline_id: str) -> str:
+    return f"outline-{outline_id}"
 
-        if docs_to_process_lc:
-            chunks_to_add = []
-            parents_to_add = []
-            source_ids_to_process = []
 
-            for parent_doc in docs_to_process_lc:
-                source_id = parent_doc.metadata.get("source_id")
-                if not source_id:
-                    logger.warning(f"Skipping document with no source_id: {parent_doc.metadata.get('title')}")
+def _resolve_outline_file_source(doc: dict[str, Any]) -> str:
+    raw_url = str(doc.get("url") or "").strip()
+    if not raw_url:
+        return f"outline://{doc.get('id', 'unknown')}"
+
+    display_base = config.OUTLINE_DISPLAY_URL or config.OUTLINE_API_URL
+    api_base = config.OUTLINE_API_URL
+
+    if display_base and api_base and raw_url.startswith(api_base):
+        return raw_url.replace(api_base, display_base, 1)
+    if display_base and raw_url.startswith("/"):
+        return f"{display_base}{raw_url}"
+    return raw_url
+
+
+def get_refresh_state() -> dict[str, Any]:
+    return dict(_refresh_state)
+
+
+async def refresh_all_task() -> None:
+    async with _refresh_lock:
+        runtime = get_runtime()
+        rag = runtime.rag
+        manifest = _load_manifest()
+        next_manifest: dict[str, dict[str, Any]] = {}
+        started_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        _refresh_state.update(
+            {
+                "status": "running",
+                "message": "正在从 Outline 同步文档",
+                "started_at": started_at,
+                "finished_at": None,
+                "processed": 0,
+                "skipped": 0,
+                "deleted": 0,
+                "total": 0,
+                "track_id": None,
+            }
+        )
+
+        try:
+            remote_docs = await outline_list_docs()
+            if remote_docs is None:
+                raise RuntimeError("无法从 Outline 拉取文档列表")
+
+            remote_docs_by_id = {
+                str(doc["id"]): doc
+                for doc in remote_docs
+                if doc.get("id")
+            }
+            _refresh_state["total"] = len(remote_docs_by_id)
+
+            deleted = 0
+            for outline_id, old_entry in manifest.items():
+                if outline_id in remote_docs_by_id:
+                    continue
+                doc_id = str(old_entry.get("doc_id") or _stable_doc_id(outline_id))
+                try:
+                    await rag.adelete_by_doc_id(doc_id)
+                    deleted += 1
+                except Exception as exc:
+                    logger.warning("删除已移除 Outline 文档失败 %s: %s", outline_id, exc)
+
+            texts_to_insert: list[str] = []
+            ids_to_insert: list[str] = []
+            file_paths_to_insert: list[str] = []
+            processed = 0
+            skipped = 0
+
+            for outline_id, doc in remote_docs_by_id.items():
+                stable_doc_id = _stable_doc_id(outline_id)
+                remote_updated_at = str(doc.get("updatedAt") or "")
+                file_source = _resolve_outline_file_source(doc)
+                previous = manifest.get(outline_id)
+                existing_doc = await rag.full_docs.get_by_id(stable_doc_id)
+
+                if (
+                    previous
+                    and previous.get("updated_at") == remote_updated_at
+                    and existing_doc
+                ):
+                    next_manifest[outline_id] = previous
+                    skipped += 1
                     continue
 
-                source_ids_to_process.append(source_id)
-                parents_to_add.append((source_id, parent_doc))
+                content = await outline_export_doc(outline_id)
+                if not content or not content.strip():
+                    if existing_doc:
+                        await rag.adelete_by_doc_id(stable_doc_id)
+                        deleted += 1
+                    skipped += 1
+                    continue
 
-                # 获取父文档标题
-                parent_title = parent_doc.metadata.get("title") or ""
+                if existing_doc:
+                    await rag.adelete_by_doc_id(stable_doc_id)
 
-                # 我们*只*使用 child_splitter (RecursiveCharacterTextSplitter)
-                # 来对*整个*父文档 (parent_doc) 进行分割。
-                # child_splitter (separators=["\n\n", "\n", ...])
-                # 会创建大小合适 (1024) 且语义连贯的块。
-                # 这会保留 Markdown 标题 (如 "#简介") 在块内容中，
-                # 这对于语义搜索是友好的。
+                texts_to_insert.append(content)
+                ids_to_insert.append(stable_doc_id)
+                file_paths_to_insert.append(file_source)
+                next_manifest[outline_id] = {
+                    "doc_id": stable_doc_id,
+                    "file_source": file_source,
+                    "title": doc.get("title") or "",
+                    "updated_at": remote_updated_at,
+                }
+                processed += 1
 
-                # [分割]：使用 child_splitter (Recursive) 对 *整个文档* 进行分割
-                #    split_document 会自动将 parent_doc.metadata 复制到所有子块中。
-                sub_chunks = child_splitter.split_documents([parent_doc])
+            track_id = None
+            if texts_to_insert:
+                track_id = f"outline-sync-{int(time.time())}"
+                await rag.ainsert(
+                    texts_to_insert,
+                    ids=ids_to_insert,
+                    file_paths=file_paths_to_insert,
+                    track_id=track_id,
+                )
 
-                # [处理子块]：
-                for chunk in sub_chunks:
-                    # 'chunk' 已经从 parent_doc 继承了元数据 (source_id, title, url...)
+            _save_manifest(next_manifest)
 
-                    # [注入父标题]：将父标题强行注入 page_content (保持不变)
-                    # 这为块提供了额外的上下文，告诉模型它来自哪个文档。
-                    if parent_title:
-                        chunk.page_content = f"文档标题: {parent_title}\n\n{chunk.page_content}"
-
-                    if not chunk.page_content.strip():
-                        continue
-
-                    chunks_to_add.append(chunk)
-
-            if chunks_to_add:
-                logger.info(f"Processing {len(chunks_to_add)} chunks for {len(docs_to_process_lc)} documents...")
-
-                ids_to_delete = []
-                try:
-                    async with AsyncSessionLocal.begin() as session:
-                        ids_to_delete_rows = (await session.execute(
-                            text("""
-                                 SELECT langchain_id FROM langchain_pg_embedding
-                                 WHERE source_id = ANY(:source_ids)
-                                 """),
-                            {"source_ids": source_ids_to_process}
-                        )).fetchall()
-                        ids_to_delete = [row[0] for row in ids_to_delete_rows]
-                except Exception as e:
-                    logger.error(f"Failed to query old chunk UUIDs (async): {e}. Skipping delete.", exc_info=True)
-                    ids_to_delete = []
-
-                if ids_to_delete:
-                    logger.info(f"Deleting {len(ids_to_delete)} old chunks from PGVectorStore for {len(source_ids_to_process)} docs...")
-                    await vector_store.adelete(ids=ids_to_delete)
-
-                try:
-                    await parent_store.amset(parents_to_add)
-                    await vector_store.aadd_documents(chunks_to_add)
-
-                except Exception as e:
-                    logger.error(f"Failed (async) to add {len(chunks_to_add)} chunks or {len(parents_to_add)} parent docs: {e}.", exc_info=True)
-                    raise e
-
-            for doc in docs_to_process_lc:
-                successful_ids_final.add(doc.metadata["source_id"])
-
-    except Exception as e:
-        logger.error(f"Batch task for doc_ids {doc_ids} failed during processing: {e}", exc_info=True)
-        successful_ids_final = set()
-        skipped_ids_final = set(doc_ids)
-
-    finally:
-        if async_redis_client:
-            try:
-                p = async_redis_client.pipeline()
-                if successful_ids_final:
-                    p.incrby("refresh:success_count", len(successful_ids_final))
-                if skipped_ids_final:
-                    p.incrby("refresh:skipped_count", len(skipped_ids_final))
-                await p.execute()
-                logger.info(f"Redis counters updated: success={len(successful_ids_final)}, skipped={len(skipped_ids_final)}")
-            except Exception as e:
-                logger.error("Failed to update Redis refresh counters (async) in finally block: %s", e)
-
-    logger.info(f"Batch task complete (async): {len(successful_ids_final)} processed, {len(skipped_ids_final)} skipped.")
-
-
-async def refresh_all_task():
-    await initialize_rag_components()
-
-    try:
-        remote_docs_raw = await outline_list_docs()
-        if remote_docs_raw is None:
-            raise ConnectionError("Failed to retrieve document list from Outline API.")
-
-        remote_docs_map = {doc['id']: doc['updatedAt'] for doc in remote_docs_raw if doc.get('id') and doc.get('updatedAt')}
-
-        local_docs_map = {}
-        try:
-            async with AsyncSessionLocal.begin() as session:
-                local_docs_raw = (await session.execute(
-                    text("""
-                         SELECT DISTINCT ON (source_id)
-                             source_id as id,
-                             outline_updated_at_str
-                         FROM langchain_pg_embedding
-                         WHERE source_id IS NOT NULL
-                         """)
-                )).mappings().all()
-                local_docs_map = {doc['id']: doc['outline_updated_at_str'] for doc in local_docs_raw if doc.get('id') and doc.get('outline_updated_at_str')}
-        except Exception as e:
-            logger.error(f"Failed to read metadata from PGVectorStore (async): {e}", exc_info=True)
-
-        remote_ids = set(remote_docs_map.keys())
-        local_ids = set(local_docs_map.keys())
-
-        to_add_ids = list(remote_ids - local_ids)
-        to_delete_ids = list(local_ids - remote_ids)
-        to_check_ids = remote_ids.intersection(local_ids)
-
-        to_update_ids = [doc_id for doc_id in to_check_ids if remote_docs_map[doc_id] != local_docs_map.get(doc_id)]
-
-        if to_delete_ids:
-            logger.warning(f"Found {len(to_delete_ids)} docs locally that are not remote. Deleting...")
-            for doc_id in to_delete_ids:
-                await delete_doc(doc_id)
-
-        docs_to_process_ids = to_add_ids + to_update_ids
-        if not docs_to_process_ids:
-            final_message = f"Refresh complete. Removed {len(to_delete_ids)} old docs." if to_delete_ids else "Refresh complete. Data is up to date."
-            logger.info(final_message)
-            if async_redis_client:
-                status = {"status": "success", "message": final_message}
-                await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
+            _refresh_state.update(
+                {
+                    "status": "success",
+                    "message": "Outline 同步完成",
+                    "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "processed": processed,
+                    "skipped": skipped,
+                    "deleted": deleted,
+                    "track_id": track_id,
+                }
+            )
+        except Exception as exc:
+            logger.exception("Outline 同步失败: %s", exc)
+            _refresh_state.update(
+                {
+                    "status": "error",
+                    "message": f"Outline 同步失败: {exc}",
+                    "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
+            )
             return
 
-        if async_redis_client:
-            try:
-                p = async_redis_client.pipeline()
-                p.set("refresh:total_queued", len(docs_to_process_ids))
-                p.set("refresh:success_count", 0)
-                p.set("refresh:skipped_count", 0)
-                p.set("refresh:delete_count", len(to_delete_ids))
-                p.delete("refresh:status")
-                await p.execute()
-            except Exception as e:
-                logger.error("Failed to initialize Redis refresh counters (async): %s", e)
 
-        batch_size = config.REFRESH_BATCH_SIZE
-        num_batches = (len(docs_to_process_ids) + batch_size - 1) // batch_size
-        logger.info(f"{len(docs_to_process_ids)} docs need update/add, splitting into {num_batches} batches.")
+async def request_refresh_all() -> bool:
+    global _refresh_task
 
-        for i in range(0, len(docs_to_process_ids), batch_size):
-            batch = docs_to_process_ids[i:i+batch_size]
-            task = {"task": "process_doc_batch", "doc_ids": batch}
-            await async_redis_client.lpush("task_queue", json.dumps(task))
+    if _refresh_task and not _refresh_task.done():
+        return False
 
-        logger.info(f"Queued {len(docs_to_process_ids)} doc processing tasks.")
-
-    except Exception as e:
-        logger.exception("refresh_all_task (async) failed: %s", e)
-        if async_redis_client:
-            status = {"status": "error", "message": f"Refresh failed: {e}"}
-            await async_redis_client.set("refresh:status", json.dumps(status), ex=300)
-    finally:
-        if async_redis_client and not (await async_redis_client.exists("refresh:total_queued")):
-            await async_redis_client.delete("refresh:lock")
+    _refresh_task = asyncio.create_task(refresh_all_task())
+    return True
 
 
-async def delete_doc(doc_id):
-    await initialize_rag_components()
+async def schedule_webhook_refresh() -> None:
+    global _webhook_task
 
-    if not vector_store or not parent_store:
-        logger.critical("Vector store or Parent store not initialized in delete_doc!")
-        raise RuntimeError("RAG components (vector_store/parent_store) not initialized")
+    if _webhook_task and not _webhook_task.done():
+        _webhook_task.cancel()
 
-    ids_to_delete = []
-    try:
-        async with AsyncSessionLocal.begin() as session:
-            ids_to_delete_rows = (await session.execute(
-                text("""
-                     SELECT langchain_id FROM langchain_pg_embedding
-                     WHERE source_id = :source_id
-                     """),
-                {"source_id": doc_id}
-            )).fetchall()
-            ids_to_delete = [row[0] for row in ids_to_delete_rows]
-    except Exception as e:
-        logger.error(f"Failed to query old chunk UUIDs for {doc_id} (async): {e}", exc_info=True)
-        return
-
-    if ids_to_delete:
+    async def delayed_refresh():
         try:
-            await vector_store.adelete(ids=ids_to_delete)
-            logger.info(f"Deleted from PGVectorStore: {doc_id} ({len(ids_to_delete)} chunks)")
-        except Exception as e:
-            logger.error(f"vector_store.adelete (async) failed for {doc_id} (chunks: {ids_to_delete}): {e}", exc_info=True)
-    else:
-        logger.info(f"No chunks found in PGVectorStore to delete for: {doc_id}")
+            await asyncio.sleep(config.OUTLINE_WEBHOOK_DEBOUNCE_SECONDS)
+            started = await request_refresh_all()
+            if not started:
+                logger.info("Webhook 延迟刷新触发时，已有同步任务在运行。")
+        except asyncio.CancelledError:
+            return
 
-    try:
-        await parent_store.amdelete([doc_id])
-        logger.info(f"Deleted from ParentStore (SQLStore): {doc_id}")
-    except Exception as e:
-        logger.error(f"parent_store.amdelete (async) failed for {doc_id}: {e}", exc_info=True)
+    _webhook_task = asyncio.create_task(delayed_refresh())
+
+
+async def shutdown_background_tasks() -> None:
+    global _refresh_task, _webhook_task
+
+    for task in (_webhook_task, _refresh_task):
+        if task and not task.done():
+            task.cancel()
+
+    for task in (_webhook_task, _refresh_task):
+        if task:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    _refresh_task = None
+    _webhook_task = None

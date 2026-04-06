@@ -1,48 +1,54 @@
-# app/database.py
+"""数据库与 Redis 初始化。
+
+LightRAG 主数据改为文件存储；数据库仅用于可选的用户信息落库。
+"""
+
+from __future__ import annotations
+
 import logging
 import urllib.parse
 
 import redis.asyncio as redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncEngine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 import config
 
 logger = logging.getLogger(__name__)
 
 
-# 从环境变量读取向量维度
-VECTOR_DIM = config.VECTOR_DIM
-logger.info(f"Using vector dimension: {VECTOR_DIM}")
+async_engine: AsyncEngine | None = None
+AsyncSessionLocal: async_sessionmaker[AsyncSession] | None = None
 
-if not config.DATABASE_URL:
-    raise SystemExit("缺少 DATABASE_URL 环境变量")
+if config.DATABASE_URL:
+    async_engine = create_async_engine(
+        config.DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+    AsyncSessionLocal = async_sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    logger.info("AsyncEngine 已配置。")
+else:
+    logger.warning("DATABASE_URL 未配置，用户信息将仅保存在会话 Cookie 中。")
 
-from urllib.parse import urlparse
 
-parsed = urlparse(config.DATABASE_URL)
-db_url = config.DATABASE_URL
-
-# 异步引擎
-async_engine: AsyncEngine = create_async_engine(db_url, pool_recycle=3600)
-logger.info("AsyncEngine (psycopg3) created.")
-
-# Session 工厂 (必须在 async_engine 定义之后)
-AsyncSessionLocal = async_sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
-
-# 异步 Redis 连接
 redis_client = None
 if config.REDIS_URL:
     try:
         parsed_url = urllib.parse.urlparse(config.REDIS_URL)
         db_num = 0
-        if parsed_url.path and parsed_url.path.startswith('/'):
+        if parsed_url.path and parsed_url.path.startswith("/"):
             try:
                 db_num = int(parsed_url.path[1:])
             except (ValueError, IndexError):
@@ -53,173 +59,42 @@ if config.REDIS_URL:
             port=parsed_url.port,
             password=parsed_url.password,
             db=db_num,
-            decode_responses=True
+            decode_responses=True,
         )
-        logger.info("Redis (asyncio) 客户端已配置。")
-    except Exception as e:
-        logger.critical("Failed to configure async Redis: %s", e)
+        logger.info("Redis 客户端已配置。")
+    except Exception as exc:  # pragma: no cover
+        logger.critical("Redis 配置失败: %s", exc)
         redis_client = None
 else:
-    logger.warning("REDIS_URL not set, refresh task status will not be available.")
+    logger.info("REDIS_URL 未配置，OIDC 元数据缓存将退化为进程内请求。")
 
-# 基础表结构 SQL
-#
-# * `vector`  : pgvector extension
-# * `pgcrypto`: provides gen_random_uuid() (used by our vector table default)
-PRE_TX_SQL = "\n".join([
-    "CREATE EXTENSION IF NOT EXISTS vector;",
-    "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
-])
 
-TX_INIT_SQL = f"""
+TX_INIT_SQL = """
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT,
-  avatar_url TEXT
-);
-
-CREATE TABLE IF NOT EXISTS conversations (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  title TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_conversations_user_created_at_desc ON conversations(user_id, created_at DESC) INCLUDE (title);
-
-CREATE TABLE IF NOT EXISTS messages (
-  id BIGSERIAL PRIMARY KEY,
-  conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  model TEXT,
-  mode TEXT,
-  temperature REAL,
-  top_p REAL
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_messages_conv_id_id_asc ON messages(conv_id, id ASC);
-CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id);
-
-CREATE TABLE IF NOT EXISTS attachments (
-  id BIGSERIAL PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  filename TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS user_private_openai_configs (
-  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  endpoint_encrypted TEXT NOT NULL,
-  api_key_encrypted TEXT NOT NULL,
-  model_name TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  avatar_url TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE TABLE IF NOT EXISTS message_prompt_bundles (
-  message_id BIGINT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  response_mode TEXT NOT NULL DEFAULT 'answer',
-  prompt_text TEXT NOT NULL,
-  context_text TEXT NOT NULL,
-  clipboard_text TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_message_prompt_bundles_user_id ON message_prompt_bundles(user_id);
-
-CREATE TABLE IF NOT EXISTS langchain_key_value_stores (
-    key TEXT NOT NULL,
-    value BYTEA,
-    namespace TEXT NOT NULL,
-    PRIMARY KEY (key, namespace)
-);
-"""
-# 索引 'idx_langchain_kv_namespace' 已被主键覆盖，无需单独创建
-# PGVector 表结构 (v2 显式列)
-# 1. 仅包含 CREATE TABLE 语句
-PGVECTOR_TABLE_SQL = f"""
-CREATE TABLE IF NOT EXISTS langchain_pg_embedding (
-    langchain_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    content TEXT,
-    embedding vector({VECTOR_DIM}),
-
-    -- JSON metadata column used by langchain-postgres v2 vectorstores
-    -- (kept even if you primarily rely on the explicit metadata columns below).
-    langchain_metadata JSONB,
-    
-    source_id TEXT,
-    title TEXT,
-    outline_updated_at_str TEXT,
-    url TEXT,
-    
-    created_at TIMESTAMPTZ DEFAULT now()
-);
 """
 
-# 对于“已有旧表”的场景，CREATE TABLE IF NOT EXISTS 不会补齐缺失字段。
-# 因此我们额外执行一次 ALTER TABLE 来确保必要列存在。
-PGVECTOR_ALTER_SQL = """
-                     ALTER TABLE messages
-                         ADD COLUMN IF NOT EXISTS mode TEXT;
-                     ALTER TABLE langchain_pg_embedding
-                         ADD COLUMN IF NOT EXISTS langchain_metadata JSONB; \
-                     """
 
-# 2. 将 CREATE INDEX 移到单独的变量
-PGVECTOR_INDEX_SQL = f"""
-CREATE INDEX IF NOT EXISTS idx_langchain_embedding_source_id ON langchain_pg_embedding(source_id);
+async def db_init() -> None:
+    """初始化最小数据库结构。"""
+    if not async_engine:
+        return
 
-CREATE INDEX IF NOT EXISTS hnsw_embedding_idx ON langchain_pg_embedding
-    USING hnsw (embedding vector_cosine_ops);
-"""
-
-# 异步数据库初始化
-async def db_init():
-    """异步初始化数据库"""
     async with async_engine.connect() as conn_lock:
         conn_ac = await conn_lock.execution_options(isolation_level="AUTOCOMMIT")
         await conn_ac.execute(text("SELECT pg_advisory_lock(9876543210)"))
         logger.info("数据库咨询锁已获取。")
 
         try:
-            # 启用 pgvector 扩展
-            await conn_ac.execute(text(PRE_TX_SQL))
-
-            async with async_engine.connect() as conn_tx:
-                async with conn_tx.begin():
-                    logger.info("数据库事务已开始，正在执行 INIT_SQL...")
-                    commands = [cmd.strip() for cmd in TX_INIT_SQL.split(';') if cmd.strip()]
-                    for sql_command in commands:
-                        await conn_tx.execute(text(sql_command))
-                    # 新增: 确保 PGVector 表存在
-                    await conn_tx.execute(text(PGVECTOR_TABLE_SQL))
-                    # 对于旧表，补齐缺失列（例如 langchain_metadata）
-                    await conn_tx.execute(text(PGVECTOR_ALTER_SQL))
-                    await conn_tx.execute(text("ANALYZE"))
-
-            logger.info("数据库表结构初始化/检查完成 (异步)。")
-
-            # (使用 conn_ac, 它是 AUTOCOMMIT 模式)
-            logger.info("正在 (异步) 检查并创建索引 (这可能需要一些时间)...")
-
-            # PGVECTOR_INDEX_SQL 现在包含 source_id 索引和 HNSW 向量索引
-            index_commands = [cmd.strip() for cmd in PGVECTOR_INDEX_SQL.split(';') if cmd.strip()]
-            for sql_command in index_commands:
-                logger.info(f"Executing index command: {sql_command[:60]}...")
-                await conn_ac.execute(text(sql_command))
-
-            logger.info("索引创建/检查完成。")
-
-        except Exception as e:
-            logger.error(f"数据库初始化 (db_init) 失败: {e}", exc_info=True)
-            raise
-
+            async with async_engine.begin() as conn_tx:
+                commands = [cmd.strip() for cmd in TX_INIT_SQL.split(";") if cmd.strip()]
+                for sql_command in commands:
+                    await conn_tx.execute(text(sql_command))
+            logger.info("数据库表结构初始化完成。")
         finally:
-            logger.info("释放数据库咨询锁...")
             await conn_ac.execute(text("SELECT pg_advisory_unlock(9876543210)"))
+            logger.info("数据库咨询锁已释放。")

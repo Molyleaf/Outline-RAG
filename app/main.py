@@ -1,188 +1,109 @@
-# app/main.py
-import asyncio
-import json
 import logging
 import os
 import sys
-import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
-import redis.asyncio as redis
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-# 导入配置
 import config
-# 导入异步任务
 import rag
-# 导入新的异步蓝图 (APIRouter)
 from blueprints.api import api_router
 from blueprints.auth import auth_router
-from blueprints.views import views_router
-# 导入异步数据库
-from database import db_init, redis_client, async_engine
+from database import async_engine, db_init, redis_client
+from lightrag_runtime import get_runtime
 
-# --- 2. 配置日志 (在 Gunicorn/Uvicorn 启动时) ---
 logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL, logging.ERROR),
-    format="%(asctime)s %(levelname)s %(name)s - %(message)s"
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
 )
-logging.getLogger("werkzeug").setLevel(logging.ERROR)
-logging.getLogger("uvicorn.access").setLevel(logging.ERROR) # 移除访问日志
+logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logger = logging.getLogger("main")
 
-# --- 6. 后台任务 (异步) ---
+runtime = get_runtime()
 
-async def task_worker():
-    """后台任务处理器，从 Redis 队列中消费任务。"""
-    logger.info("后台任务处理器已启动 (异步)。")
-    while True:
-        try:
-            _queue, task_json = await redis_client.brpop("task_queue", timeout=0)
-            task_data = json.loads(task_json)
-            task_name = task_data.get("task")
-            logger.info("接收到新任务: %s", task_name)
-
-            if task_name == "refresh_all":
-                await rag.refresh_all_task()
-            elif task_name == "process_doc_batch":
-                await rag.process_doc_batch_task(task_data.get("doc_ids", []))
-            else:
-                logger.warning("未知任务类型: %s", task_name)
-
-        except (redis.ConnectionError, asyncio.CancelledError) as e:
-            logger.error("Redis 连接错误或任务取消，任务处理器暂停5秒: %s", e)
-            await asyncio.sleep(5)
-        except json.JSONDecodeError as e:
-            logger.error(f"任务队列 JSON 解析失败'): {e}")
-        except Exception as e:
-            logger.exception("任务处理器发生未知错误: %s", e)
-            await asyncio.sleep(1)
-
-
-async def webhook_watcher():
-    """后台 Webhook 计时器监视器 (异步)。"""
-    logger.info("Webhook 监视器已启动 (异步)。")
-    while True:
-        try:
-            due_time_str = await redis_client.get("webhook:refresh_timer_due")
-            if due_time_str:
-                due_time = int(due_time_str)
-                if time.time() > due_time:
-                    logger.info("Webhook 计时器到期，触发优雅刷新。")
-                    if await redis_client.set("webhook:trigger_lock", "1", ex=60, nx=True):
-                        await redis_client.delete("webhook:refresh_timer_due")
-                        await redis_client.lpush("task_queue", json.dumps({"task": "refresh_all"}))
-
-        except (redis.ConnectionError, asyncio.CancelledError) as e:
-            logger.error("Redis 连接错误或任务取消，Webhook 监视器暂停5秒: %s", e)
-            await asyncio.sleep(5)
-        except Exception as e:
-            logger.exception("Webhook 监视器发生未知错误: %s", e)
-
-        await asyncio.sleep(5)
-
-
-# --- 7. 启动和关闭事件 (使用 Lifespan) ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用启动和关闭事件"""
     logger.info("FastAPI 应用启动...")
 
-    # --- Startup ---
-    # 1. 配置检查
     if not config.SECRET_KEY:
         logger.critical("SECRET_KEY 未设置，拒绝启动。")
         sys.exit(1)
+
     if config.OUTLINE_WEBHOOK_SIGN and not config.OUTLINE_WEBHOOK_SECRET:
         logger.critical("OUTLINE_WEBHOOK_SIGN=true 但 OUTLINE_WEBHOOK_SECRET 为空，拒绝启动。")
         sys.exit(1)
 
-    # 2. 创建目录
-    os.makedirs(config.ATTACHMENTS_DIR, exist_ok=True)
+    os.makedirs(config.LIGHTRAG_WORKING_DIR, exist_ok=True)
+    os.makedirs(config.LIGHTRAG_INPUT_DIR, exist_ok=True)
 
-    # 3. 初始化数据库
     try:
-        # 移除了 Redis 启动锁。
-        # db_init() 内部的 pg_advisory_lock 已足够保证 DDL 安全。
-        # 所有 worker 都将尝试初始化，但只有一个会真正执行 DDL。
-        logger.info(f"Worker (pid: {os.getpid()}) 正在执行 db_init() (使用 pg_advisory_lock)...")
         await db_init()
-        logger.info(f"Worker (pid: {os.getpid()}) db_init() 完成。")
-
-        # 4. 启动后台任务
+        async with runtime.lifespan():
+            yield
+    except Exception as exc:
+        logger.exception("应用启动失败: %s", exc)
+        raise
+    finally:
+        logger.info("FastAPI 应用关闭...")
+        await rag.shutdown_background_tasks()
+        if async_engine:
+            await async_engine.dispose()
         if redis_client:
-            asyncio.create_task(task_worker())
-            asyncio.create_task(webhook_watcher())
-        else:
-            logger.warning("Redis 未配置，后台任务和 Webhook 计时器将不会启动。")
-
-    except Exception as e:
-        logger.exception("应用启动时初始化失败: %s", e)
-        sys.exit(1)
-
-    yield
-
-    # --- Shutdown ---
-    logger.info("FastAPI 应用关闭...")
-    if async_engine:
-        await async_engine.dispose()
-    if redis_client:
-        await redis_client.close()
-    logger.info("资源已释放。")
+            await redis_client.close()
+        logger.info("资源已释放。")
 
 
-# --- 1. FastAPI 应用初始化 ---
 app = FastAPI(
-    title="Outline RAG API",
-    version="1.0",
-    docs_url=None, # 禁用 /docs
-    redoc_url=None, # 禁用 /redoc
-    lifespan=lifespan
+    title=config.APP_NAME,
+    version="2.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
 )
 
-# --- 3. 注册中间件 ---
-
-# 3a. 修复代理后的 HTTPS (mixed content)
-# 使用 Starlette/FastAPI 兼容的 ProxyHeadersMiddleware
-# trusted_hosts="*" 表示信任来自任何上游代理的 X-Forwarded-* 头
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*") # type: ignore
-
-# 3b. Session 中间件
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # type: ignore[arg-type]
 app.add_middleware(
     SessionMiddleware,
     secret_key=config.SECRET_KEY,
     session_cookie="session",
-    max_age=int(timedelta(days=7).total_seconds()), # 7 天
-    https_only=False, # 设为 False, ProxyHeadersMiddleware 会处理 proto
+    max_age=int(timedelta(days=7).total_seconds()),
+    https_only=False,
     same_site="lax",
 )
 
-# --- 4. 注册路由 (APIRouter) ---
 app.include_router(auth_router, prefix="/chat", tags=["Auth"])
-app.include_router(views_router, prefix="/chat", tags=["Views"])
-app.include_router(api_router, prefix="/chat", tags=["API"])
+app.include_router(api_router, prefix="/chat", tags=["Compatibility"])
 
 
-# --- 5. 挂载静态文件 ---
-app.mount("/chat/static", StaticFiles(directory="static"), name="static")
+@app.get("/chat", include_in_schema=False)
+async def chat_entry(request: Request):
+    if "user" not in (request.session or {}):
+        return RedirectResponse("/chat/login", status_code=303)
+    return RedirectResponse("/chat/", status_code=303)
 
 
-# --- 8. 健康检查 ---
+app.mount("/chat", runtime.protected_app, name="lightrag")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse("/chat", status_code=303)
+
+
 @app.get("/healthz", tags=["Health"])
 async def healthz():
-    """健康检查。"""
-    return "ok"
+    return {"status": "ok"}
 
-# --- 9. 全局异常处理 ---
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error(f"未捕获的异常在 {request.url}: {exc}", exc_info=True)
+    logger.error("未捕获异常 %s: %s", request.url, exc, exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"error": "服务器内部错误", "detail": str(exc)},

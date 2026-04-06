@@ -1,29 +1,23 @@
-"""OpenAI 兼容聊天服务。
-
-此模块仅负责通过 `langchain_openai` 对接 OpenAI 兼容接口，
-避免其他模块直接依赖具体 SDK。
-"""
+"""OpenAI 兼容服务配置辅助函数。"""
 
 from __future__ import annotations
 
-from langchain_openai import ChatOpenAI
+from typing import Any
 
 
-def build_openai_chat_model(
+def normalize_openai_base_url(base_url: str) -> str:
+    return (base_url or "").rstrip("/")
+
+
+def build_openai_binding(
     *,
     api_key: str,
     base_url: str,
     model: str,
-    temperature: float,
-    top_p: float,
-) -> ChatOpenAI:
-    kwargs = {
+) -> dict[str, Any]:
+    return {
+        "binding": "openai",
         "api_key": api_key,
+        "host": normalize_openai_base_url(base_url),
         "model": model,
-        "temperature": temperature,
-        "top_p": top_p,
     }
-    clean_base_url = (base_url or "").rstrip("/")
-    if clean_base_url:
-        kwargs["base_url"] = clean_base_url
-    return ChatOpenAI(**kwargs)
