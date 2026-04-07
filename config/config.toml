@@ -71,8 +71,6 @@ input_dir = "./data/lightrag_inputs"
 workspace = ""
 # 默认查询模式，可选 local / global / hybrid / naive / mix / bypass。
 query_mode = "mix"
-# 多轮对话时发送给模型的历史轮数上限。
-history_turns = 3
 # 图检索 Top K。
 top_k = 10
 # 文本块检索 Top K。

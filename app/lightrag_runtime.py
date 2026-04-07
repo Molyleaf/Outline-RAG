@@ -19,6 +19,15 @@ from database import parse_database_url
 from openai_services import build_openai_binding
 from siliconflow_services import build_siliconflow_binding
 
+if config.LIGHTRAG_TOKEN_SECRET:
+    os.environ.setdefault("TOKEN_SECRET", config.LIGHTRAG_TOKEN_SECRET)
+os.environ.setdefault("JWT_ALGORITHM", config.LIGHTRAG_JWT_ALGORITHM)
+os.environ.setdefault("TOKEN_EXPIRE_HOURS", str(config.LIGHTRAG_TOKEN_EXPIRE_HOURS))
+os.environ.setdefault(
+    "GUEST_TOKEN_EXPIRE_HOURS",
+    str(config.LIGHTRAG_GUEST_TOKEN_EXPIRE_HOURS),
+)
+
 from lightrag import LightRAG, __version__ as core_version
 from lightrag.api import __api_version__ as api_version
 from lightrag.api.auth import auth_handler

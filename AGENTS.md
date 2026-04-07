@@ -32,17 +32,16 @@
 - 不要通过闭包变量名、反射或 monkey patch 提取 `rag` / `doc_manager`。
 - 不要重写上游 HTML/CSS/JS 响应。
 - `/chat/*` 路径适配、WebUI 本地补丁、官方 router 组装都集中在 [`app/lightrag_runtime.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/lightrag_runtime.py)。
-- `/chat/api/ask` 已下线，不要重新引入。
 
 ### 2.3 Outline 同步边界
 
 - Outline 同步统一通过 [`app/rag.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/rag.py) 调用 LightRAG。
 - 文档同步状态只允许写入 LightRAG 文档状态/元数据。
-- 不要重新引入 `outline_sync_manifest` 或其他平行状态表。
+- 不要重新引入其他平行状态表。
 
 ### 2.4 前端边界
 
-- 仓库中不再维护旧 Flask 占位前端，也不再存在静态占位构建链路。
+- 仓库中不再维护额外的占位前端，也不再存在静态占位构建链路。
 - WebUI 运行时静态产物由 [`app/lightrag_runtime.py`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/app/lightrag_runtime.py) 从已安装的 LightRAG 包复制并补丁到 `data/lightrag_webui/`。
 - 不要手改 LightRAG 安装目录下的包文件。
 
@@ -77,9 +76,9 @@
 
 ## 5. 非目标
 
-- 不要重新引入 `/chat/api/ask`
-- 不要重新引入旧 Flask 占位前端
-- 不要重新引入 `outline_sync_manifest`
+- 不要重新引入旧兼容聊天入口
+- 不要重新引入额外占位前端
+- 不要重新引入平行文档状态表
 - 不要为兼容旧客户端继续接受无效聊天参数
 
 ## 6. 验证命令
@@ -102,6 +101,6 @@ python -m py_compile app/main.py app/database.py app/rag.py app/blueprints/api.p
 
 - 是否只改了与任务直接相关的文件
 - 是否保持了 `/chat` 前缀和 OIDC 登录流程
-- 是否没有重新引入旧占位前端或 `/chat/api/ask`
-- 是否没有重新引入 `outline_sync_manifest`
+- 是否没有重新引入额外占位前端或旧兼容聊天入口
+- 是否没有重新引入平行文档状态表
 - 是否没有把敏感配置暴露给前端或日志

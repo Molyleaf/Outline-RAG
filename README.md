@@ -8,8 +8,7 @@
 - `/chat/webui/*` 提供 LightRAG 官方 WebUI
 - `/chat/login` / `/chat/logout` / `/chat/oidc/callback` 保留 GitLab OIDC 登录流程
 - `/chat/update/all` / `/chat/update/webhook` 负责 Outline 刷新
-- 已移除 `/chat/api/ask`
-- 已移除 `outline_sync_manifest`，Outline 同步状态直接写入 LightRAG 文档元数据
+- Outline 同步状态直接写入 LightRAG 文档元数据
 
 ## 当前架构
 

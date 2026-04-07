@@ -24,6 +24,7 @@ ENV PATH="/home/outline/.local/bin:${PATH}"
 RUN pip config set global.index-url https://mirrors.zju.edu.cn/pypi/web/simple/ \
     && pip install --no-cache-dir --user -r requirements.txt
 
+COPY --chown=1001:1001 config /app/config
 COPY --chown=1001:1001 app/. /app/
 
 
@@ -41,6 +42,7 @@ COPY --from=builder /home/outline/.local /home/outline/.local
 COPY --from=builder --chown=1001:1001 /app /app/
 
 RUN mkdir -p /app/data/lightrag /app/data/lightrag_inputs \
+    && chmod +x /app/entrypoint.sh \
     && chown -R 1001:1001 /app
 
 USER 1001:1001

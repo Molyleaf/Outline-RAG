@@ -124,7 +124,6 @@ LIGHTRAG_INPUT_DIR = _resolve_repo_path(
 )
 LIGHTRAG_WORKSPACE = str(lightrag_cfg.get("workspace", "")).strip()
 LIGHTRAG_QUERY_MODE = str(lightrag_cfg.get("query_mode", "mix")).strip() or "mix"
-LIGHTRAG_HISTORY_TURNS = int(lightrag_cfg.get("history_turns", 3))
 LIGHTRAG_TOP_K = int(lightrag_cfg.get("top_k", 10))
 LIGHTRAG_CHUNK_TOP_K = int(lightrag_cfg.get("chunk_top_k", 20))
 LIGHTRAG_MAX_ASYNC = int(lightrag_cfg.get("max_async", 4))
