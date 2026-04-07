@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
 import config
-import rag
-from blueprints.auth import require_authenticated_user
-from outline_client import verify_outline_signature
+from .. import rag
+from .auth import require_authenticated_user
+from ..outline_client import verify_outline_signature
 
 api_router = APIRouter()
 
