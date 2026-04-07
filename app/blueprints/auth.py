@@ -19,7 +19,7 @@ from jose import jwt
 from jose.exceptions import JOSEError
 
 import config
-from database import execute, redis_client
+from ..database import execute, redis_client
 
 auth_router = APIRouter()
 logger = logging.getLogger(__name__)

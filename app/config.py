@@ -14,7 +14,7 @@ from typing import Any
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore
+    import tomli as tomllib
 
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{([A-Z0-9_]+)(?::([^}]*))?\}$")
