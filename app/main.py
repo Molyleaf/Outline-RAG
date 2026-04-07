@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -26,6 +27,22 @@ _PUBLIC_CHAT_PATHS = {
     "/chat/oidc/callback",
     "/chat/update/webhook",
 }
+
+
+class RequireChatSessionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith("/chat") or path in _PUBLIC_CHAT_PATHS:
+            return await call_next(request)
+
+        if request.session.get("user"):
+            return await call_next(request)
+
+        accept = request.headers.get("accept", "").lower()
+        if request.method == "GET" and "text/html" in accept:
+            return RedirectResponse("/chat/login", status_code=303)
+
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
 
 def _validate_required_settings() -> None:
@@ -89,7 +106,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # type: ignore[arg-type]
+    app.add_middleware(RequireChatSessionMiddleware)
     app.add_middleware(
         SessionMiddleware,
         secret_key=config.SECRET_KEY,
@@ -98,24 +115,10 @@ def create_app() -> FastAPI:
         https_only=False,
         same_site="lax",
     )
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")  # type: ignore[arg-type]
 
     app.include_router(auth_router, prefix="/chat", tags=["Auth"])
     app.include_router(api_router, prefix="/chat", tags=["API"])
-
-    @app.middleware("http")
-    async def require_chat_session(request: Request, call_next):
-        path = request.url.path
-        if not path.startswith("/chat") or path in _PUBLIC_CHAT_PATHS:
-            return await call_next(request)
-
-        if request.session.get("user"):
-            return await call_next(request)
-
-        accept = request.headers.get("accept", "").lower()
-        if request.method == "GET" and "text/html" in accept:
-            return RedirectResponse("/chat/login", status_code=303)
-
-        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
     @app.get("/chat", include_in_schema=False)
     async def chat_entry():
