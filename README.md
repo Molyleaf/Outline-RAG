@@ -2,14 +2,6 @@
 
 一个基于 LightRAG 官方 WebUI 的 Outline 知识库问答服务。
 
-当前实现已经收敛到 `FastAPI + LightRAG + OIDC + Outline Sync`：
-
-- `/chat` 是统一入口，已登录后跳转到 `/chat/webui/`
-- `/chat/webui/*` 提供 LightRAG 官方 WebUI
-- `/chat/login` / `/chat/logout` / `/chat/oidc/callback` 保留 GitLab OIDC 登录流程
-- `/chat/update/all` / `/chat/update/webhook` 负责 Outline 刷新
-- Outline 同步状态直接写入 LightRAG 文档元数据
-
 ## 当前架构
 
 - WebUI: LightRAG 官方 WebUI，运行时以 `/chat` 前缀提供
@@ -42,7 +34,7 @@
 
 ## 配置
 
-所有配置统一位于 [`config/config.toml`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/config/config.toml)。
+所有配置统一位于 config/config.toml
 
 常用环境变量：
 
@@ -79,57 +71,11 @@ REDIS_URL=redis://:password@host:6379/0
 
 ## Docker
 
-```yaml
-services:
-  postgres:
-    image: pgvector/pgvector:pg17
-    restart: always
-    environment:
-      POSTGRES_DB: outline_rag
-      POSTGRES_USER: outline
-      POSTGRES_PASSWORD: replace-me
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+参考 docker-compose.example.yml
 
-  neo4j:
-    image: neo4j:5
-    restart: always
-    environment:
-      NEO4J_AUTH: neo4j/replace-me
-    volumes:
-      - ./data/neo4j:/data
-
-  outline-lightrag:
-    build: .
-    restart: always
-    depends_on:
-      - postgres
-      - neo4j
-    environment:
-      PORT: 8080
-      SECRET_KEY: ${SECRET_KEY}
-      DATABASE_URL: postgresql+asyncpg://outline:replace-me@postgres:5432/outline_rag
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USERNAME: neo4j
-      NEO4J_PASSWORD: replace-me
-      NEO4J_DATABASE: neo4j
-      OUTLINE_API_URL: https://outline.example.com
-      OUTLINE_DISPLAY_URL: https://outline.example.com
-      OUTLINE_API_TOKEN: ${OUTLINE_API_TOKEN}
-      OUTLINE_WEBHOOK_SECRET: ${OUTLINE_WEBHOOK_SECRET}
-      GITLAB_URL: https://gitlab.example.com
-      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID}
-      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET}
-      OIDC_REDIRECT_URI: https://your-domain.example.com/chat/oidc/callback
-      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
-      REDIS_URL: ${REDIS_URL:-}
-      UVICORN_WORKERS: 1
-    volumes:
-      - ./data/lightrag:/app/data/lightrag
-      - ./data/lightrag_inputs:/app/data/lightrag_inputs
-    ports:
-      - "127.0.0.1:8033:8080"
-```
+- Compose 示例只使用预构建镜像，不包含 `build`。
+- 使用前先替换 `outline-lightrag.image` 为你自己的镜像地址。
+- 再按实际环境修改密码、域名和各类密钥。
 
 ## 本地开发
 
