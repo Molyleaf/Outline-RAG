@@ -1,44 +1,51 @@
 # Outline LightRAG
 
-一个基于 **LightRAG 官方 WebUI** 的 Outline 知识库问答服务。
+一个基于 LightRAG 官方 WebUI 的 Outline 知识库问答服务。
 
-当前版本已经从 LangChain 全量迁移到 `lightrag-hku[api]`，运行时聊天界面挂载在 **`/chat`**，并保留原有 **OIDC** 登录流程与 `/chat/api/ask` 兼容接口。
+当前实现已经收敛到 `FastAPI + LightRAG + OIDC + Outline Sync`：
+
+- `/chat` 是统一入口，已登录后跳转到 `/chat/webui/`
+- `/chat/webui/*` 提供 LightRAG 官方 WebUI
+- `/chat/login` / `/chat/logout` / `/chat/oidc/callback` 保留 GitLab OIDC 登录流程
+- `/chat/update/all` / `/chat/update/webhook` 负责 Outline 刷新
+- 已移除 `/chat/api/ask`
+- 已移除 `outline_sync_manifest`，Outline 同步状态直接写入 LightRAG 文档元数据
 
 ## 当前架构
 
-- Web UI: LightRAG 官方 WebUI，访问路径为 `/chat`
-- RAG 引擎: LightRAG
-- 文档同步: 从 Outline API 拉取文档并写入 LightRAG
-- 鉴权: GitLab OIDC，会话 Cookie 保护 `/chat`
+- WebUI: LightRAG 官方 WebUI，运行时以 `/chat` 前缀提供
+- RAG 引擎: LightRAG 单实例
+- 文档同步: Outline API -> LightRAG
+- 鉴权: GitLab OIDC 会话保护 `/chat/*`
 - 存储:
   - KV / 向量 / 文档状态: LightRAG 官方 `PGKVStorage + PGVectorStorage + PGDocStatusStorage`
   - 图存储: LightRAG 官方 `Neo4JStorage`
-  - 应用侧附加表: `users`、`outline_sync_manifest`
-  - 数据库驱动: `asyncpg`
+  - 应用侧表: `users`
 
 ## 关键路径
 
-- `/chat`: LightRAG WebUI
-- `/chat/login`: OIDC 登录入口
-- `/chat/logout`: OIDC 登出
-- `/chat/oidc/callback`: OIDC 回调
-- `/chat/update/all`: 手动触发 Outline 全量同步
-- `/chat/api/refresh/status`: 查看同步状态
-- `/chat/update/webhook`: Outline Webhook 入口
-- `/chat/api/ask`: 旧流式聊天接口兼容层
-- `/healthz`: 容器健康检查
+- `/chat`
+- `/chat/webui/`
+- `/chat/login`
+- `/chat/logout`
+- `/chat/oidc/callback`
+- `/chat/api/me`
+- `/chat/api/refresh/status`
+- `/chat/update/all`
+- `/chat/update/webhook`
+- `/chat/health`
 
 ## 运行前提
 
 - PostgreSQL 已安装 `pgvector` 扩展
 - Neo4j 可通过 Bolt 协议访问
-- 已准备好 Outline API Token 与 GitLab OIDC 配置
+- 已配置 Outline API Token 与 GitLab OIDC
 
 ## 配置
 
-所有配置都放在 `config/config.toml`，文件内已经带中文注释。
+所有配置统一位于 [`config/config.toml`](/D:/UserFiles/Documents/PyCharm/outline-rag-v2/config/config.toml)。
 
-最常用的环境变量：
+常用环境变量：
 
 ```env
 SECRET_KEY=replace-me
@@ -61,18 +68,17 @@ OIDC_REDIRECT_URI=https://your-domain.example.com/chat/oidc/callback
 
 SILICONFLOW_API_KEY=replace-me
 
-# 可选
+# optional
 REDIS_URL=redis://:password@host:6379/0
 ```
 
 说明：
 
-- `DATABASE_URL` 现在是必填项，必须指向启用 `pgvector` 的 Postgres。
-- `NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD` 也是必填项。
-- `working_dir` 与 `input_dir` 仍然保留，但主要用于 LightRAG 运行时缓存、上传和中间产物，不再是主数据源。
-- 如果需要调整 PGVector 索引类型，可直接修改 `config/config.toml` 里的 `postgres_vector_index_type`、`postgres_hnsw_m`、`postgres_hnsw_ef`。
+- `DATABASE_URL`、`NEO4J_*` 为必填。
+- `working_dir` 与 `input_dir` 仍然保留给 LightRAG 运行时和文档接口使用。
+- 官方 WebUI 会在启动时复制并补丁到 `data/lightrag_webui/`，不需要额外前端构建步骤。
 
-## Docker 示例
+## Docker
 
 ```yaml
 services:
@@ -126,35 +132,6 @@ services:
       - "127.0.0.1:8033:8080"
 ```
 
-## 反向代理
-
-Nginx 至少需要把 `/chat` 全量转发给本服务：
-
-```nginx
-upstream outline_lightrag {
-    server 127.0.0.1:8033;
-    keepalive 32;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name your-domain.example.com;
-
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-
-    location ^~ /chat {
-        proxy_pass http://outline_lightrag;
-        proxy_buffering off;
-    }
-}
-```
-
 ## 本地开发
 
 安装依赖：
@@ -170,16 +147,16 @@ cd app
 uvicorn main:app --reload --port 8080
 ```
 
-构建占位静态资源：
-
-```powershell
-flask --app app/app.py assets build
-```
-
 ## 验证命令
 
 ```powershell
 python -m compileall app
-flask --app app/app.py assets build
 python -m py_compile app/main.py app/database.py app/rag.py app/blueprints/api.py app/blueprints/auth.py app/lightrag_runtime.py app/siliconflow_services.py app/openai_services.py
 ```
+
+如环境可用，建议再做一次路由冒烟：
+
+- `/chat`
+- `/chat/webui/`
+- `/chat/login`
+- `/chat/api/me`

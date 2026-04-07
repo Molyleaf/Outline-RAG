@@ -1,86 +1,77 @@
-"""LightRAG 运行时集成。
-
-此模块复用官方 FastAPI app，并在外层增加：
-1. `/chat` 子路径适配
-2. OIDC 会话保护
-3. WebUI / Swagger 静态响应重写
-4. 提取官方 app 内部的 `rag` 与 `doc_manager` 供同步任务复用
-"""
+"""LightRAG runtime assembly for the OIDC-protected `/chat` mount."""
 
 from __future__ import annotations
 
-import argparse
 import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from starlette.datastructures import MutableHeaders
+from fastapi.staticfiles import StaticFiles
 
 import config
 from database import parse_database_url
 from openai_services import build_openai_binding
 from siliconflow_services import build_siliconflow_binding
 
+from lightrag import LightRAG, __version__ as core_version
+from lightrag.api import __api_version__ as api_version
+from lightrag.api.auth import auth_handler
+from lightrag.api.config import global_args
+from lightrag.api.routers.document_routes import DocumentManager, create_document_routes
+from lightrag.api.routers.graph_routes import create_graph_routes
+from lightrag.api.routers.ollama_api import OllamaAPI
+from lightrag.api.routers.query_routes import create_query_routes
+from lightrag.llm.openai import openai_complete_if_cache, openai_embed
+from lightrag.utils import EmbeddingFunc
+
 logger = logging.getLogger(__name__)
 
 _CHAT_PREFIX = "/chat"
-_runtime: "LightRAGRuntime | None" = None
+_RUNTIME: "LightRAGRuntime | None" = None
+_WEBUI_PATCH_STAMP = "chat-prefix-v2"
 
 
-def _header_value(scope: dict[str, Any], key: str) -> str:
-    wanted = key.lower().encode("latin-1")
-    for header_key, header_value in scope.get("headers", []):
-        if header_key.lower() == wanted:
-            return header_value.decode("latin-1")
-    return ""
+class WebUIStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: dict[str, Any]):
+        response = await super().get_response(path, scope)
+
+        is_html = path.endswith(".html") or response.media_type == "text/html"
+        if is_html:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        elif "/assets/" in path:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
+        if path.endswith(".js"):
+            response.headers["Content-Type"] = "application/javascript"
+        elif path.endswith(".css"):
+            response.headers["Content-Type"] = "text/css"
+
+        return response
 
 
-def _accepts_html(scope: dict[str, Any]) -> bool:
-    accept = _header_value(scope, "accept").lower()
-    return "text/html" in accept or "*/*" in accept or not accept
+@dataclass
+class LightRAGRuntime:
+    rag: LightRAG
+    doc_manager: DocumentManager
+    chat_app: FastAPI
+    webui_dir: Path
 
-
-def _prefix_location(location: str) -> str:
-    if not location.startswith("/") or location.startswith(f"{_CHAT_PREFIX}/"):
-        return location
-    return f"{_CHAT_PREFIX}{location}"
-
-
-def _rewrite_text_body(body: bytes) -> bytes:
-    try:
-        text = body.decode("utf-8")
-    except UnicodeDecodeError:
-        return body
-
-    replacements = (
-        ('href="favicon.png"', 'href="/chat/webui/favicon.png"'),
-        ("/webui/", "/chat/webui/"),
-        ('bh=""', 'bh="/chat"'),
-        ("url: '/openapi.json'", "url: '/chat/openapi.json'"),
-        (
-            "oauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect'",
-            "oauth2RedirectUrl: window.location.origin + '/chat/docs/oauth2-redirect'",
-        ),
-        ('href="/static/', 'href="/chat/static/'),
-        ('src="/static/', 'src="/chat/static/'),
-        ('"/static/', '"/chat/static/'),
-        ("'/static/", "'/chat/static/"),
-    )
-    for source, target in replacements:
-        text = text.replace(source, target)
-    return text.encode("utf-8")
-
-
-def _should_buffer_response(content_type: str) -> bool:
-    lowered = (content_type or "").lower()
-    return (
-        "text/html" in lowered
-        or "text/css" in lowered
-        or "javascript" in lowered
-    )
+    @asynccontextmanager
+    async def lifespan(self):
+        await self.rag.initialize_storages()
+        try:
+            await self.rag.check_and_migrate_data()
+            yield
+        finally:
+            await self.rag.finalize_storages()
 
 
 def _build_provider_binding(
@@ -102,40 +93,89 @@ def _build_provider_binding(
             base_url=base_url,
             model=model,
         )
-    raise ValueError(f"不支持的提供商: {provider}")
+    raise ValueError(f"不支持的 OpenAI 兼容提供商: {provider}")
 
 
 def _apply_storage_environment() -> None:
     postgres = parse_database_url()
-    workspace = config.LIGHTRAG_WORKSPACE or "default"
 
     if not config.NEO4J_URI or not config.NEO4J_USERNAME or not config.NEO4J_PASSWORD:
-        raise RuntimeError("使用 Neo4JStorage 时必须配置 neo4j.uri / neo4j.username / neo4j.password。")
+        raise RuntimeError(
+            "使用 Neo4JStorage 时必须配置 neo4j.uri / neo4j.username / neo4j.password。"
+        )
 
-    os.environ["POSTGRES_HOST"] = postgres["host"]
-    os.environ["POSTGRES_PORT"] = postgres["port"]
-    os.environ["POSTGRES_USER"] = postgres["user"]
-    os.environ["POSTGRES_PASSWORD"] = postgres["password"]
-    os.environ["POSTGRES_DATABASE"] = postgres["database"]
-    os.environ["POSTGRES_WORKSPACE"] = workspace
-    os.environ["POSTGRES_MAX_CONNECTIONS"] = str(config.DATABASE_MAX_CONNECTIONS)
-    os.environ["POSTGRES_ENABLE_VECTOR"] = "true"
-    os.environ["POSTGRES_VECTOR_INDEX_TYPE"] = config.LIGHTRAG_POSTGRES_VECTOR_INDEX_TYPE
-    os.environ["POSTGRES_HNSW_M"] = str(config.LIGHTRAG_POSTGRES_HNSW_M)
-    os.environ["POSTGRES_HNSW_EF"] = str(config.LIGHTRAG_POSTGRES_HNSW_EF)
-
+    storage_env = {
+        "POSTGRES_HOST": postgres["host"],
+        "POSTGRES_PORT": postgres["port"],
+        "POSTGRES_USER": postgres["user"],
+        "POSTGRES_PASSWORD": postgres["password"],
+        "POSTGRES_DATABASE": postgres["database"],
+        "POSTGRES_WORKSPACE": config.LIGHTRAG_WORKSPACE,
+        "POSTGRES_MAX_CONNECTIONS": str(config.DATABASE_MAX_CONNECTIONS),
+        "POSTGRES_ENABLE_VECTOR": "true",
+        "POSTGRES_VECTOR_INDEX_TYPE": config.LIGHTRAG_POSTGRES_VECTOR_INDEX_TYPE,
+        "POSTGRES_HNSW_M": str(config.LIGHTRAG_POSTGRES_HNSW_M),
+        "POSTGRES_HNSW_EF": str(config.LIGHTRAG_POSTGRES_HNSW_EF),
+        "NEO4J_URI": config.NEO4J_URI,
+        "NEO4J_USERNAME": config.NEO4J_USERNAME,
+        "NEO4J_PASSWORD": config.NEO4J_PASSWORD,
+        "NEO4J_DATABASE": config.NEO4J_DATABASE,
+        "NEO4J_WORKSPACE": config.LIGHTRAG_WORKSPACE,
+    }
     ssl_mode = config.DATABASE_SSL_MODE or postgres.get("sslmode", "")
     if ssl_mode:
-        os.environ["POSTGRES_SSL_MODE"] = ssl_mode
+        storage_env["POSTGRES_SSL_MODE"] = ssl_mode
 
-    os.environ["NEO4J_URI"] = config.NEO4J_URI
-    os.environ["NEO4J_USERNAME"] = config.NEO4J_USERNAME
-    os.environ["NEO4J_PASSWORD"] = config.NEO4J_PASSWORD
-    os.environ["NEO4J_DATABASE"] = config.NEO4J_DATABASE
-    os.environ["NEO4J_WORKSPACE"] = workspace
+    for key, value in storage_env.items():
+        if value:
+            os.environ[key] = value
+        elif key in os.environ:
+            del os.environ[key]
 
 
-def _build_lightrag_args() -> argparse.Namespace:
+def _build_llm_kwargs(binding: dict[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "base_url": binding["host"],
+        "api_key": binding["api_key"],
+        "temperature": config.LLM_TEMPERATURE,
+        "top_p": config.LLM_TOP_P,
+        "reasoning_effort": config.LLM_REASONING_EFFORT,
+    }
+    if config.LLM_MAX_COMPLETION_TOKENS is not None:
+        kwargs["max_completion_tokens"] = config.LLM_MAX_COMPLETION_TOKENS
+    if isinstance(config.LLM_EXTRA_BODY, dict) and config.LLM_EXTRA_BODY:
+        kwargs["extra_body"] = config.LLM_EXTRA_BODY
+    return kwargs
+
+
+def _build_embedding_func(binding: dict[str, Any]) -> EmbeddingFunc:
+    provider_max_token_size = (
+        openai_embed.max_token_size if isinstance(openai_embed, EmbeddingFunc) else None
+    )
+    actual_func = openai_embed.func if isinstance(openai_embed, EmbeddingFunc) else openai_embed
+
+    async def embedding_func(texts: list[str], embedding_dim: int | None = None):
+        kwargs: dict[str, Any] = {
+            "texts": texts,
+            "base_url": binding["host"],
+            "api_key": binding["api_key"],
+        }
+        if binding["model"]:
+            kwargs["model"] = binding["model"]
+        if embedding_dim is not None:
+            kwargs["embedding_dim"] = embedding_dim
+        return await actual_func(**kwargs)
+
+    return EmbeddingFunc(
+        embedding_dim=config.EMBEDDING_DIM,
+        func=embedding_func,
+        max_token_size=provider_max_token_size,
+        send_dimensions=config.EMBEDDING_SEND_DIM,
+        model_name=binding["model"] or None,
+    )
+
+
+def _build_rag() -> LightRAG:
     llm_binding = _build_provider_binding(
         provider=config.LLM_PROVIDER,
         api_key=config.LLM_API_KEY,
@@ -149,243 +189,215 @@ def _build_lightrag_args() -> argparse.Namespace:
         model=config.EMBEDDING_MODEL,
     )
 
-    return argparse.Namespace(
-        host="0.0.0.0",
-        port=config.PORT,
+    return LightRAG(
         working_dir=config.LIGHTRAG_WORKING_DIR,
-        input_dir=config.LIGHTRAG_INPUT_DIR,
-        timeout=60,
-        max_async=config.LIGHTRAG_MAX_ASYNC,
+        workspace=config.LIGHTRAG_WORKSPACE,
+        llm_model_func=openai_complete_if_cache,
+        llm_model_name=llm_binding["model"],
+        llm_model_max_async=config.LIGHTRAG_MAX_ASYNC,
+        llm_model_kwargs=_build_llm_kwargs(llm_binding),
+        embedding_func=_build_embedding_func(embedding_binding),
+        default_llm_timeout=180,
+        default_embedding_timeout=30,
+        kv_storage=config.LIGHTRAG_KV_STORAGE,
+        graph_storage=config.LIGHTRAG_GRAPH_STORAGE,
+        vector_storage=config.LIGHTRAG_VECTOR_STORAGE,
+        doc_status_storage=config.LIGHTRAG_DOC_STATUS_STORAGE,
+        vector_db_storage_cls_kwargs={
+            "cosine_better_than_threshold": config.LIGHTRAG_COSINE_THRESHOLD
+        },
+        enable_llm_cache=False,
+        enable_llm_cache_for_entity_extract=False,
+        max_parallel_insert=config.LIGHTRAG_MAX_PARALLEL_INSERT,
+        max_graph_nodes=config.LIGHTRAG_MAX_GRAPH_NODES,
         summary_max_tokens=config.LIGHTRAG_SUMMARY_MAX_TOKENS,
         summary_context_size=config.LIGHTRAG_SUMMARY_CONTEXT_SIZE,
         summary_length_recommended=config.LIGHTRAG_SUMMARY_LENGTH_RECOMMENDED,
-        log_level=config.LOG_LEVEL,
-        verbose=False,
-        key=None,
-        ssl=False,
-        ssl_certfile=None,
-        ssl_keyfile=None,
-        simulated_model_name="lightrag",
-        simulated_model_tag="latest",
-        workspace=config.LIGHTRAG_WORKSPACE,
-        workers=1,
-        llm_binding=llm_binding["binding"],
-        embedding_binding=embedding_binding["binding"],
-        rerank_binding="null",
-        docling=False,
-        kv_storage=config.LIGHTRAG_KV_STORAGE,
-        doc_status_storage=config.LIGHTRAG_DOC_STATUS_STORAGE,
-        graph_storage=config.LIGHTRAG_GRAPH_STORAGE,
-        vector_storage=config.LIGHTRAG_VECTOR_STORAGE,
-        max_parallel_insert=config.LIGHTRAG_MAX_PARALLEL_INSERT,
-        max_graph_nodes=config.LIGHTRAG_MAX_GRAPH_NODES,
-        ollama_num_ctx=32768,
-        llm_binding_host=llm_binding["host"],
-        embedding_binding_host=embedding_binding["host"],
-        llm_binding_api_key=llm_binding["api_key"],
-        embedding_binding_api_key=embedding_binding["api_key"],
-        llm_model=llm_binding["model"],
-        embedding_model=embedding_binding["model"],
-        embedding_dim=config.EMBEDDING_DIM,
-        embedding_send_dim=config.EMBEDDING_SEND_DIM,
-        chunk_size=config.LIGHTRAG_CHUNK_SIZE,
-        chunk_overlap_size=config.LIGHTRAG_CHUNK_OVERLAP_SIZE,
-        enable_llm_cache_for_extract=False,
-        enable_llm_cache=False,
-        document_loading_engine="DEFAULT",
-        pdf_decrypt_password=None,
-        cors_origins="*",
-        summary_language=config.LIGHTRAG_SUMMARY_LANGUAGE,
-        entity_types=config.LIGHTRAG_ENTITY_TYPES,
-        whitelist_paths="/health,/api/*",
-        auth_accounts="",
-        token_secret=config.LIGHTRAG_TOKEN_SECRET,
-        token_expire_hours=config.LIGHTRAG_TOKEN_EXPIRE_HOURS,
-        guest_token_expire_hours=config.LIGHTRAG_GUEST_TOKEN_EXPIRE_HOURS,
-        jwt_algorithm=config.LIGHTRAG_JWT_ALGORITHM,
-        token_auto_renew=True,
-        token_renew_threshold=0.5,
-        rerank_model=None,
-        rerank_binding_host=None,
-        rerank_binding_api_key=None,
-        min_rerank_score=0.0,
-        history_turns=config.LIGHTRAG_HISTORY_TURNS,
-        top_k=config.LIGHTRAG_TOP_K,
-        chunk_top_k=config.LIGHTRAG_CHUNK_TOP_K,
-        max_entity_tokens=config.LIGHTRAG_MAX_ENTITY_TOKENS,
-        max_relation_tokens=config.LIGHTRAG_MAX_RELATION_TOKENS,
-        max_total_tokens=config.LIGHTRAG_MAX_TOTAL_TOKENS,
-        cosine_threshold=config.LIGHTRAG_COSINE_THRESHOLD,
-        related_chunk_number=config.LIGHTRAG_RELATED_CHUNK_NUMBER,
-        force_llm_summary_on_merge=3,
-        embedding_func_max_async=16,
-        embedding_batch_num=32,
-        embedding_token_limit=None,
-        max_upload_size=104857600,
-        openai_llm_frequency_penalty=0.0,
-        openai_llm_max_completion_tokens=config.LLM_MAX_COMPLETION_TOKENS,
-        openai_llm_presence_penalty=0.0,
-        openai_llm_reasoning_effort=config.LLM_REASONING_EFFORT,
-        openai_llm_safety_identifier="",
-        openai_llm_service_tier="",
-        openai_llm_stop=[],
-        openai_llm_temperature=config.LLM_TEMPERATURE,
-        openai_llm_top_p=config.LLM_TOP_P,
-        openai_llm_max_tokens=None,
-        openai_llm_extra_body=config.LLM_EXTRA_BODY,
+        chunk_token_size=config.LIGHTRAG_CHUNK_SIZE,
+        chunk_overlap_token_size=config.LIGHTRAG_CHUNK_OVERLAP_SIZE,
+        addon_params={
+            "language": config.LIGHTRAG_SUMMARY_LANGUAGE,
+            "entity_types": config.LIGHTRAG_ENTITY_TYPES,
+        },
+        auto_manage_storages_states=False,
     )
 
 
-def _extract_closure_value(app: Any, variable_name: str) -> Any:
-    for route in getattr(app, "routes", []):
-        endpoint = getattr(route, "endpoint", None)
-        closure = getattr(endpoint, "__closure__", None)
-        if not endpoint or not closure:
+def _replace_required(text: str, old: str, new: str, *, context: str) -> str:
+    if old not in text:
+        raise RuntimeError(f"无法在 {context} 中找到需要替换的片段: {old}")
+    return text.replace(old, new)
+
+
+def _prepare_patched_webui() -> Path:
+    from lightrag.api import lightrag_server
+
+    source_dir = Path(lightrag_server.__file__).resolve().parent / "webui"
+    target_dir = Path(config.LIGHTRAG_WORKING_DIR).resolve().parent / "lightrag_webui"
+    stamp_file = target_dir / ".patch-stamp"
+    stamp_value = f"{core_version}|{_WEBUI_PATCH_STAMP}"
+
+    if source_dir.exists() and target_dir.exists() and stamp_file.exists():
+        if stamp_file.read_text(encoding="utf-8").strip() == stamp_value:
+            return target_dir
+
+    if not source_dir.exists():
+        raise FileNotFoundError(f"LightRAG WebUI 目录不存在: {source_dir}")
+
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    shutil.copytree(source_dir, target_dir)
+
+    entry_js_patched = False
+    for path in target_dir.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".html", ".js", ".css"}:
             continue
-        for name, cell in zip(endpoint.__code__.co_freevars, closure):
-            if name == variable_name:
-                return cell.cell_contents
-    raise RuntimeError(f"无法从 LightRAG app 中提取 {variable_name}")
-
-
-class ProtectedLightRAGApp:
-    """给 LightRAG 官方 app 增加会话保护和响应重写。"""
-
-    def __init__(self, inner_app: Any):
-        self.inner_app = inner_app
-
-    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope["type"] != "http":
-            await self.inner_app(scope, receive, send)
-            return
-
-        session = scope.get("session") or {}
-        if "user" not in session:
-            response = (
-                RedirectResponse(f"{_CHAT_PREFIX}/login", status_code=303)
-                if scope.get("method") == "GET" and _accepts_html(scope)
-                else JSONResponse(
-                    {"detail": "Not authenticated"},
-                    status_code=401,
-                )
+        text = path.read_text(encoding="utf-8")
+        if path.suffix.lower() == ".js" and 'Mj="/webui/"' in text:
+            text = _replace_required(
+                text,
+                'bh=""',
+                f'bh="{_CHAT_PREFIX}"',
+                context=str(path),
             )
-            await response(scope, receive, send)
-            return
+            entry_js_patched = True
+        text = text.replace("/webui/", f"{_CHAT_PREFIX}/webui/")
+        path.write_text(text, encoding="utf-8")
 
-        captured_start: dict[str, Any] | None = None
-        buffered_body: list[bytes] = []
-        should_buffer = False
+    if not entry_js_patched:
+        raise RuntimeError("无法在 LightRAG WebUI 入口文件中找到 basename 常量")
 
-        async def send_wrapper(message: dict[str, Any]) -> None:
-            nonlocal captured_start, should_buffer
-
-            if message["type"] == "http.response.start":
-                headers = MutableHeaders(raw=message["headers"])
-                location = headers.get("location")
-                if location:
-                    headers["location"] = _prefix_location(location)
-
-                content_type = headers.get("content-type", "")
-                should_buffer = _should_buffer_response(content_type)
-                if should_buffer:
-                    captured_start = {
-                        "type": "http.response.start",
-                        "status": message["status"],
-                        "headers": list(headers.raw),
-                    }
-                    return
-
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": message["status"],
-                        "headers": list(headers.raw),
-                    }
-                )
-                return
-
-            if message["type"] == "http.response.body" and should_buffer:
-                buffered_body.append(message.get("body", b""))
-                if message.get("more_body", False):
-                    return
-
-                assert captured_start is not None
-                patched_body = _rewrite_text_body(b"".join(buffered_body))
-                headers = MutableHeaders(raw=captured_start["headers"])
-                headers["content-length"] = str(len(patched_body))
-                if "etag" in headers:
-                    del headers["etag"]
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": captured_start["status"],
-                        "headers": list(headers.raw),
-                    }
-                )
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": patched_body,
-                        "more_body": False,
-                    }
-                )
-                return
-
-            await send(message)
-
-        await self.inner_app(scope, receive, send_wrapper)
+    stamp_file.write_text(stamp_value, encoding="utf-8")
+    return target_dir
 
 
-@dataclass
-class LightRAGRuntime:
-    args: argparse.Namespace
-    app: Any
-    rag: Any
-    doc_manager: Any
-    protected_app: ProtectedLightRAGApp
-
-    @asynccontextmanager
-    async def lifespan(self):
-        async with self.app.router.lifespan_context(self.app):
-            yield
+def _mount_prefix(request: Request) -> str:
+    return request.scope.get("root_path", "") or _CHAT_PREFIX
 
 
-def get_runtime() -> LightRAGRuntime:
-    global _runtime
+def _configure_guest_auth() -> None:
+    auth_handler.secret = config.LIGHTRAG_TOKEN_SECRET
+    auth_handler.algorithm = config.LIGHTRAG_JWT_ALGORITHM
+    auth_handler.expire_hours = config.LIGHTRAG_TOKEN_EXPIRE_HOURS
+    auth_handler.guest_expire_hours = config.LIGHTRAG_GUEST_TOKEN_EXPIRE_HOURS
+    auth_handler.accounts = {}
 
-    if _runtime is not None:
-        return _runtime
+    global_args.token_secret = config.LIGHTRAG_TOKEN_SECRET
+    global_args.jwt_algorithm = config.LIGHTRAG_JWT_ALGORITHM
+    global_args.token_expire_hours = config.LIGHTRAG_TOKEN_EXPIRE_HOURS
+    global_args.guest_token_expire_hours = config.LIGHTRAG_GUEST_TOKEN_EXPIRE_HOURS
+    global_args.token_auto_renew = True
+    global_args.token_renew_threshold = 0.5
 
-    os.environ["WEBUI_TITLE"] = config.LIGHTRAG_WEBUI_TITLE
-    os.environ["WEBUI_DESCRIPTION"] = config.LIGHTRAG_WEBUI_DESCRIPTION
-    _apply_storage_environment()
 
-    args = _build_lightrag_args()
+def _build_chat_app(rag: LightRAG, doc_manager: DocumentManager, webui_dir: Path) -> FastAPI:
+    app = FastAPI(
+        title=f"{config.APP_NAME} Chat",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
-    from lightrag.api.config import initialize_config
+    @app.get("/", include_in_schema=False)
+    async def chat_root(request: Request):
+        return RedirectResponse(f"{_mount_prefix(request)}/webui/", status_code=307)
 
-    initialize_config(args, force=True)
+    @app.get("/webui", include_in_schema=False)
+    async def chat_webui_root(request: Request):
+        return RedirectResponse(f"{_mount_prefix(request)}/webui/", status_code=307)
 
-    from lightrag.api.lightrag_server import get_application
+    @app.get("/webui/login", include_in_schema=False)
+    @app.get("/webui/login/", include_in_schema=False)
+    async def chat_webui_login(request: Request):
+        return RedirectResponse(f"{_mount_prefix(request)}/login", status_code=307)
 
-    app = get_application(args)
-    rag = _extract_closure_value(app, "rag")
-    doc_manager = _extract_closure_value(app, "doc_manager")
+    @app.get("/auth-status")
+    async def auth_status():
+        guest_token = auth_handler.create_token(
+            username="guest",
+            role="guest",
+            metadata={"auth_mode": "oidc"},
+        )
+        return JSONResponse(
+            {
+                "auth_configured": False,
+                "access_token": guest_token,
+                "token_type": "bearer",
+                "auth_mode": "oidc",
+                "message": "OIDC session is active.",
+                "core_version": core_version,
+                "api_version": api_version,
+                "webui_title": config.LIGHTRAG_WEBUI_TITLE,
+                "webui_description": config.LIGHTRAG_WEBUI_DESCRIPTION,
+            }
+        )
+
+    @app.get("/health")
+    async def health():
+        return JSONResponse(
+            {
+                "status": "healthy",
+                "webui_available": True,
+                "working_directory": config.LIGHTRAG_WORKING_DIR,
+                "input_directory": config.LIGHTRAG_INPUT_DIR,
+                "configuration": {
+                    "llm_binding": "openai",
+                    "llm_model": config.LLM_MODEL,
+                    "embedding_binding": "openai",
+                    "embedding_model": config.EMBEDDING_MODEL,
+                    "workspace": config.LIGHTRAG_WORKSPACE,
+                },
+                "auth_mode": "oidc",
+                "pipeline_busy": False,
+                "core_version": core_version,
+                "api_version": api_version,
+            }
+        )
+
+    app.include_router(create_document_routes(rag, doc_manager, api_key=None))
+    app.include_router(create_query_routes(rag, api_key=None, top_k=config.LIGHTRAG_TOP_K))
+    app.include_router(create_graph_routes(rag, api_key=None))
+    app.include_router(OllamaAPI(rag, top_k=config.LIGHTRAG_TOP_K, api_key=None).router, prefix="/api")
+
+    app.mount(
+        "/webui",
+        WebUIStaticFiles(directory=webui_dir, html=True, check_dir=True),
+        name="webui",
+    )
 
     app.state.rag = rag
     app.state.doc_manager = doc_manager
-    app.state.lightrag_args = args
+    app.state.webui_dir = str(webui_dir)
+    return app
 
-    _runtime = LightRAGRuntime(
-        args=args,
-        app=app,
+
+def get_runtime() -> LightRAGRuntime:
+    global _RUNTIME
+
+    if _RUNTIME is not None:
+        return _RUNTIME
+
+    _apply_storage_environment()
+    _configure_guest_auth()
+
+    rag = _build_rag()
+    doc_manager = DocumentManager(
+        config.LIGHTRAG_INPUT_DIR,
+        workspace=config.LIGHTRAG_WORKSPACE,
+    )
+    webui_dir = _prepare_patched_webui()
+    chat_app = _build_chat_app(rag, doc_manager, webui_dir)
+
+    _RUNTIME = LightRAGRuntime(
         rag=rag,
         doc_manager=doc_manager,
-        protected_app=ProtectedLightRAGApp(app),
+        chat_app=chat_app,
+        webui_dir=webui_dir,
     )
     logger.info(
-        "LightRAG 运行时已初始化: working_dir=%s input_dir=%s",
-        args.working_dir,
-        args.input_dir,
+        "LightRAG runtime initialized: working_dir=%s input_dir=%s webui_dir=%s",
+        config.LIGHTRAG_WORKING_DIR,
+        config.LIGHTRAG_INPUT_DIR,
+        webui_dir,
     )
-    return _runtime
+    return _RUNTIME

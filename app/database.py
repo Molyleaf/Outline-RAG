@@ -28,22 +28,7 @@ APP_SCHEMA_SQL = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS outline_sync_manifest (
-      workspace TEXT NOT NULL,
-      outline_id TEXT NOT NULL,
-      doc_id TEXT NOT NULL,
-      file_source TEXT NOT NULL DEFAULT '',
-      title TEXT NOT NULL DEFAULT '',
-      updated_at TEXT NOT NULL DEFAULT '',
-      synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (workspace, outline_id)
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_outline_sync_manifest_workspace_doc_id
-      ON outline_sync_manifest (workspace, doc_id)
-    """,
+    "DROP TABLE IF EXISTS outline_sync_manifest",
 ]
 
 

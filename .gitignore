@@ -4,4 +4,4 @@
 __pycache__/
 app/__pycache__/
 app/blueprints/__pycache__/
-app/static/.webassets-cache/
+data/lightrag_webui/

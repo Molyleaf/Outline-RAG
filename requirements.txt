@@ -1,7 +1,3 @@
-Flask-Assets
-cssmin
-jsmin
-flask
 asyncpg
 pgvector
 neo4j
@@ -14,6 +10,5 @@ httpx_retries
 redis[hiredis]
 python-multipart
 pydantic
-werkzeug
 starlette
 lightrag-hku[api]

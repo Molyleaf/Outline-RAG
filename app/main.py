@@ -24,6 +24,12 @@ logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logger = logging.getLogger("main")
 
 runtime = get_runtime()
+_PUBLIC_CHAT_PATHS = {
+    "/chat/login",
+    "/chat/logout",
+    "/chat/oidc/callback",
+    "/chat/update/webhook",
+}
 
 
 @asynccontextmanager
@@ -77,27 +83,31 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/chat", tags=["Auth"])
-app.include_router(api_router, prefix="/chat", tags=["Compatibility"])
+app.include_router(api_router, prefix="/chat", tags=["API"])
+
+
+@app.middleware("http")
+async def require_chat_session(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/chat") or path in _PUBLIC_CHAT_PATHS:
+        return await call_next(request)
+
+    if request.session.get("user"):
+        return await call_next(request)
+
+    accept = request.headers.get("accept", "").lower()
+    if request.method == "GET" and "text/html" in accept:
+        return RedirectResponse("/chat/login", status_code=303)
+
+    return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
 
 @app.get("/chat", include_in_schema=False)
-async def chat_entry(request: Request):
-    if "user" not in (request.session or {}):
-        return RedirectResponse("/chat/login", status_code=303)
-    return RedirectResponse("/chat/", status_code=303)
+async def chat_entry():
+    return RedirectResponse("/chat/webui/", status_code=303)
 
 
-app.mount("/chat", runtime.protected_app, name="lightrag")
-
-
-@app.get("/", include_in_schema=False)
-async def root():
-    return RedirectResponse("/chat", status_code=303)
-
-
-@app.get("/healthz", tags=["Health"])
-async def healthz():
-    return {"status": "ok"}
+app.mount("/chat", runtime.chat_app, name="lightrag")
 
 
 @app.exception_handler(Exception)

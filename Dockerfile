@@ -5,7 +5,6 @@ WORKDIR /app
 ARG DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    FLASK_APP="app:app" \
     PYTHONPATH="/app"
 
 USER root
@@ -26,7 +25,6 @@ RUN pip config set global.index-url https://mirrors.zju.edu.cn/pypi/web/simple/ 
     && pip install --no-cache-dir --user -r requirements.txt
 
 COPY --chown=1001:1001 app/. /app/
-RUN flask assets build
 
 
 FROM python:3.13-slim-trixie
@@ -35,8 +33,6 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    FLASK_DEBUG=0 \
-    ASSETS_DEBUG=0 \
     PATH="/home/outline/.local/bin:${PATH}"
 
 RUN groupadd -g 1001 outline && useradd -m -u 1001 -g 1001 outline
