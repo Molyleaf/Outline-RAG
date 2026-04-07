@@ -25,7 +25,7 @@ RUN pip config set global.index-url https://mirrors.zju.edu.cn/pypi/web/simple/ 
     && pip install --no-cache-dir --user -r requirements.txt
 
 COPY --chown=1001:1001 config /app/config
-COPY --chown=1001:1001 app/. /app/
+COPY --chown=1001:1001 app /app/app
 
 
 FROM python:3.13-slim-trixie
@@ -42,11 +42,11 @@ COPY --from=builder /home/outline/.local /home/outline/.local
 COPY --from=builder --chown=1001:1001 /app /app/
 
 RUN mkdir -p /app/data/lightrag /app/data/lightrag_inputs \
-    && chmod +x /app/entrypoint.sh \
+    && chmod +x /app/app/entrypoint.sh \
     && chown -R 1001:1001 /app
 
 USER 1001:1001
 
 EXPOSE 8080
 
-CMD ["/app/entrypoint.sh"]
+CMD ["/app/app/entrypoint.sh"]

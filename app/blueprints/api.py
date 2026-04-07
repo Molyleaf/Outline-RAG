@@ -7,10 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 
-import config
-from .. import rag
-from .auth import require_authenticated_user
+from .. import config, rag
 from ..outline_client import verify_outline_signature
+from .auth import require_authenticated_user
 
 api_router = APIRouter()
 

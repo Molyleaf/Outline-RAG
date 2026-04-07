@@ -14,10 +14,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-import config
-from database import parse_database_url
-from openai_services import build_openai_binding
-from siliconflow_services import build_siliconflow_binding
+from . import config
+from .database import parse_database_url
+from .openai_services import build_openai_binding
+from .siliconflow_services import build_siliconflow_binding
 
 if config.LIGHTRAG_TOKEN_SECRET:
     os.environ.setdefault("TOKEN_SECRET", config.LIGHTRAG_TOKEN_SECRET)

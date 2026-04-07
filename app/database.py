@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator
 import asyncpg
 import redis.asyncio as redis
 
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

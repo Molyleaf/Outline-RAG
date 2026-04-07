@@ -15,4 +15,4 @@ fi
 UVICORN_PORT="${PORT:-8080}"
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
-exec uvicorn --host "0.0.0.0" --port "${UVICORN_PORT}" --workers "${UVICORN_WORKERS}" "main:app"
+exec uvicorn --host "0.0.0.0" --port "${UVICORN_PORT}" --workers "${UVICORN_WORKERS}" "app.main:app"

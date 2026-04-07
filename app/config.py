@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover
+else:  # pragma: no cover
     import tomli as tomllib
 
 
-_ENV_PLACEHOLDER_RE = re.compile(r"^\$\{([A-Z0-9_]+)(?::([^}]*))?\}$")
+_ENV_PLACEHOLDER_RE = re.compile(r"^\$\{([A-Z0-9_]+)(?::([^}]*))?}$")
 _APP_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _APP_DIR.parent
 

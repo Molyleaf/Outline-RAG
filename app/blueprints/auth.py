@@ -18,7 +18,7 @@ from httpx_retries import Retry, RetryTransport
 from jose import jwt
 from jose.exceptions import JOSEError
 
-import config
+from .. import config
 from ..database import execute, redis_client
 
 auth_router = APIRouter()

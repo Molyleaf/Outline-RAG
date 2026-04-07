@@ -12,3 +12,4 @@ python-multipart
 pydantic
 starlette
 lightrag-hku[api]
+tomli

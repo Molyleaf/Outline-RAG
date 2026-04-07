@@ -5,9 +5,9 @@ import logging
 
 import httpx
 from httpx import Response
-from httpx_retries import RetryTransport, Retry
+from httpx_retries import Retry, RetryTransport
 
-import config
+from . import config
 
 logger = logging.getLogger(__name__)
 

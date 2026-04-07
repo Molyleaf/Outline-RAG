@@ -9,10 +9,10 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import config
+from . import config
+from .lightrag_runtime import get_runtime
+from .outline_client import outline_export_doc, outline_list_docs
 from lightrag.base import DocStatus
-from lightrag_runtime import get_runtime
-from outline_client import outline_export_doc, outline_list_docs
 
 logger = logging.getLogger(__name__)
 

@@ -142,8 +142,7 @@ pip install -r requirements.txt
 运行服务：
 
 ```powershell
-cd app
-uvicorn main:app --reload --port 8080
+uvicorn app.main:app --reload --port 8080
 ```
 
 ## 验证命令
