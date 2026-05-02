@@ -12,6 +12,8 @@ Outline-RAG is an application based on **Retrieval-Augmented Generation (RAG)** 
 
 ### Docker Hub: https://hub.docker.com/r/molyleaf/outline-rag
 
+USE tag 9.0.2 ！！！
+
 ### GitHub: https://github.com/molyleaf/outline-rag
 
 ## 📦 Docker compose
