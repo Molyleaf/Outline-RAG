@@ -1,5 +1,14 @@
 # Outline-RAG (v9.0.2)
 
+<p align="center">
+  <a href="README.md">English</a> | <b>简体中文</b>
+</p>
+
+<p align="center">
+  <a href="https://hub.docker.com/r/molyleaf/outline-rag">🐳 Docker Hub</a> | 
+  <a href="https://github.com/molyleaf/outline-rag">🐱 GitHub</a>
+</p>
+
 [![Docker Pulls](https://img.shields.io/docker/pulls/molyleaf/outline-rag?style=flat-square)](https://hub.docker.com/r/molyleaf/outline-rag)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.123+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangChain](https://img.shields.io/badge/LangChain-v1%20classic-green?style=flat-square)](https://github.com/langchain-ai/langchain)
